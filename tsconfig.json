@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src", "tests"]
+}
