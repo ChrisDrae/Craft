@@ -7,8 +7,9 @@ import { BLOCKS, HOTBAR } from "../blocks.js";
  *
  * 1. The first.
  * 2. The player's hotbar (block names).
+ * 3. Chunks keep their biomes.
  */
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 
 export interface Position {
   x: number;
@@ -71,6 +72,8 @@ export interface ChunkRecord {
   palette: string[];
   /** The blocks, compressed (see encodeBlocks). */
   blocks: Uint8Array;
+  /** The biome of every column (encodeBiomes); empty for plains throughout. */
+  biomes: string;
   ticks: SavedTick[];
 }
 
@@ -85,10 +88,11 @@ type Migration<T> = (record: T) => T;
 const next = (r: { format: number }): { format: number } => ({ ...r, format: r.format + 1 });
 /** Migrations from each older format to the next, per kind of record (index 0 upgrades format 1). */
 const MIGRATIONS: Record<"world" | "player" | "chunk", Migration<{ format: number }>[]> = {
-  world: [next],
+  world: [next, next],
   // Players from before the hotbar could change get the hotbar it had
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) })],
-  chunk: [next],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next],
+  // Chunks from before biomes were all made like plains
+  chunk: [next, (r) => ({ ...next(r), biomes: "" })],
 };
 
 /** Brings a record read from storage or a file up to FORMAT_VERSION. */

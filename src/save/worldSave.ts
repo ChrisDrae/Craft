@@ -1,7 +1,6 @@
 import { SimObject } from "projector";
 import type { Chunk } from "../chunk.js";
 import type { ChunkSupply, SkipChunk } from "../chunkSupply.js";
-import { GENERATOR_VERSION } from "../generator.js";
 import type { ScheduledTick, WorldTicks } from "../ticks.js";
 import { VoxelWorld } from "../world.js";
 import { chunkRecord, readChunkRecord, snapshotChunk, type ChunkSnapshot } from "./codec.js";
@@ -145,12 +144,12 @@ export class WorldSave extends SimObject implements ChunkSupply {
     const loaded: Chunk[] = [];
     for (const chunk of this.world.chunks.values()) {
       if (!chunk.unsaved) continue;
-      snaps.push(snapshotChunk(chunk, GENERATOR_VERSION, this.ticks.inChunk(chunk.cx, chunk.cz)));
+      snaps.push(snapshotChunk(chunk, this.ticks.inChunk(chunk.cx, chunk.cz)));
       chunk.unsaved = false;
       loaded.push(chunk);
     }
     const leaving = [...this.unloaded];
-    for (const [, { chunk, ticks }] of leaving) snaps.push(snapshotChunk(chunk, GENERATOR_VERSION, ticks));
+    for (const [, { chunk, ticks }] of leaving) snaps.push(snapshotChunk(chunk, ticks));
     const player: PlayerRecord = { format: FORMAT_VERSION, world: this.meta.id, ...this.player() };
     try {
       const chunks = await Promise.all(snaps.map((s) => chunkRecord(this.meta.id, s)));

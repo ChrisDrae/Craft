@@ -112,6 +112,7 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | 2 | Light, day and night, sky | L | 0; Projector R12–R14 |
 | 3 | Block shapes, more blocks, fluids | L | 0, 2 |
 | 4 | Terrain 2.0: biomes, caves, structures | L | 3 |
+| M | Multiplayer: friends join a host's session | L | 4; proposed next |
 | 5 | Items, inventory, crafting, tools | L | 3 |
 | 6 | Survival and game modes | M | 5 |
 | 7 | Mobs and combat | L | 6 |
@@ -313,6 +314,35 @@ migrating from today's format.
 
 ### Phase 4: Terrain 2.0 (L)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- 18 biomes: the 15 planned and dark forest, frozen river and frozen ocean. Climate is sampled at density
+  points 4 blocks apart (as Minecraft's biomes are) and each column takes a nearby point's biome with a
+  little jitter, so borders aren't square. Chunks store a biome per column (save format 3); chunks from
+  before are plains, as they were made.
+- Biome colors blend over 6 x 6 columns around each corner. Grass, leaves, ferns, sugar cane and water are
+  stored gray (Minecraft's own are) and colored per corner by the mesh; birch and spruce leaves and lily
+  pads have fixed colors. Grass block sides get Minecraft's tinted overlay as a second quad, drawn over the
+  first (WebGL's depth test lets the second through). Snow on grass shows on its sides (`snowy`).
+- Shape: Minecraft's density on 4 x 8 x 4 points, interpolated, from splines of the climate: coasts, hills,
+  rivers in valleys, mountains with cliffs and overhangs up to about y 235, swamps at the water line.
+- Caves: noise caves only (caverns and tunnels, some opening to the surface) and noise ravines instead of
+  carvers, so they meet across chunk borders by construction; lava below y 10. **No aquifers:** caves are
+  dry, and are kept from touching the sea and rivers so these don't drain into them.
+- Ores by depth as measured over 24 land chunks: coal (median y 59), copper (48), iron (35), gold (17),
+  redstone and lapis low, diamonds below 16 at about 4 per chunk, emeralds single in mountains. No
+  deepslate.
+- Trees: oak, big oak, swamp oak, birch, spruce, jungle (and 2 x 2 giant ones), acacia, dark oak (2 x 2).
+  Plants: grass, tall grass, ferns, large ferns, eight flowers, dead bushes, cacti, sugar cane by water,
+  lily pads on swamps, pumpkins. Snow on cold ground and on peaks above y 150, ice on cold water. No vines
+  or cocoa yet.
+- Structures: dungeons (with a spawner; the chest comes with Phase 5's inventories), desert wells, ruins of
+  old stone. Trees don't grow through them.
+- 121 blocks: five more woods (log, leaves, planks), sandstone, five ores, mossy and cracked stone,
+  spawner, the plants above. Tall grass and large ferns are two-high like doors.
+- Measured in Chrome: generating takes 1.5 ms per chunk in the worker, which kept every chunk in view
+  loaded flying at 44 blocks/s; meshing 0.96 ms per chunk (0.47 before: tints, overlays, cave faces);
+  frames at most 8.7 ms flying; Canvas 2D 60 fps at 7.9 ms (more plants to draw).
+
 - **Climate and biomes** (`src/gen/`): noise for temperature, humidity, continentalness and erosion picks a
   biome per column: ocean, deep ocean, beach, river, plains, forest, birch forest, taiga, snowy plains,
   desert, savanna, jungle, swamp, stony mountains, snowy peaks. Each brings surface rules, vegetation and tint
@@ -329,6 +359,31 @@ migrating from today's format.
   rare and deep; the worker keeps up with flying at sprint speed.
 - **Tests:** determinism per seed, every biome appearing within a fixed area, ore depth histograms, structures
   across chunk borders.
+
+### Phase M: Multiplayer (L)
+
+Asked for after Phase 4 was planned: friends play in one world, hosted by one of them, with nothing to run
+but the game. Proposed to come right after Phase 4, so items, mobs and survival are built for it from the
+start rather than fitted to it later.
+
+- **The host's browser is the server.** The host plays as usual; generation, ticks, fluids, block updates
+  and saves run there, as now. "Open to friends" gives an invite link (`<domain>/?join=<code>`).
+- **Clients** show the host's world: they receive chunks in the packed form saves use (biomes and all),
+  block changes as they happen, other players and the time, and send their position and actions (break,
+  place, use). The host checks actions against reach and rules before applying them. Movement is predicted
+  locally and corrected by the host.
+- **Transport:** WebRTC data channels, browser to browser. Introductions (signaling) go through a small
+  function next to the static game (Vercel), a few kilobytes per join; STUN finds the way through home
+  routers, and a TURN relay (Cloudflare's free tier) is used where that fails. Game traffic never touches
+  the deployment. A copy-and-paste invite works without any server.
+- **Saves:** player records per player id in the host's world (format change); the world lives in the
+  host's browser, and the session ends when the host closes it.
+- **Textures:** a deployed game can't serve Minecraft's textures; each player may import their own into
+  their browser instead of `npm run textures`.
+- **Done when:** two browsers on different networks build in the same world, see each other move, and the
+  joining player's things are where they left them when they come back.
+- **Tests:** a host and clients in one test over an in-memory transport: chunk sync, edits both ways,
+  rejected actions, a client reconnecting.
 
 ### Phase 5: Items, inventory, crafting, tools (L)
 
@@ -480,10 +535,11 @@ Settled on 2026-10-22, all as recommended:
 2. **The Canvas 2D renderer** stays as a fallback that gets new blocks, and light as face shading, but not
    smooth lighting, the sky or particles.
 3. **Saves store every generated chunk,** so worlds stay intact when the generator changes.
-4. **Multiplayer** is out of scope; Phase 0 keeps the simulation free of DOM and rendering code, so it stays
-   possible.
+4. **Multiplayer** by sharing a host's session (changed on 2026-10-22; first out of scope): the host's
+   browser runs the world and friends join over WebRTC, introduced by a small function next to the
+   deployed game (Phase M). Phase 0 kept the simulation free of DOM and rendering code for this.
 5. **Assets:** sounds and entity, item and GUI textures are imported from the player's installation like the
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 3 are done; next is Phase 4, terrain 2.0: biomes, caves and structures.
+Phases 0 to 4 are done; next is Phase M, multiplayer, if it is to come before Phase 5.

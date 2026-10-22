@@ -4,7 +4,7 @@ import { readWorldFile, writeWorldFile } from "../src/save/worldFile.js";
 import { freshStore, newMeta } from "./saveHelpers.js";
 
 function chunk(world: string, cx: number, cz: number, fill: number): ChunkRecord {
-  return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), ticks: [] };
+  return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), biomes: "plains 256", ticks: [] };
 }
 
 const player = (world: string) => ({

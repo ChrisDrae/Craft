@@ -1,3 +1,4 @@
+import { decodeBiomes, encodeBiomes } from "../biomes.js";
 import { BLOCKS, OPAQUE, STATE_COUNT, blockByName, stateByName, stateName } from "../blocks.js";
 import { Chunk, SECTIONS, SECTION_VOLUME } from "../chunk.js";
 import type { ScheduledTick } from "../ticks.js";
@@ -105,11 +106,12 @@ export interface ChunkSnapshot {
   palette: string[];
   raw: Uint8Array | null;
   compressed: Uint8Array | null;
+  biomes: string;
   ticks: ScheduledTick[];
 }
 
-export function snapshotChunk(chunk: Chunk, generator: number, ticks: readonly ScheduledTick[]): ChunkSnapshot {
-  const base = { cx: chunk.cx, cz: chunk.cz, generator, ticks: [...ticks] };
+export function snapshotChunk(chunk: Chunk, ticks: readonly ScheduledTick[]): ChunkSnapshot {
+  const base = { cx: chunk.cx, cz: chunk.cz, generator: chunk.generator, biomes: encodeBiomes(chunk.biomes), ticks: [...ticks] };
   if (chunk.packed) return { ...base, palette: chunk.packed.palette, raw: null, compressed: chunk.packed.blocks };
   const { palette, raw } = encodeBlocks(chunk);
   return { ...base, palette, raw, compressed: null };
@@ -124,6 +126,7 @@ export async function chunkRecord(world: string, snap: ChunkSnapshot): Promise<C
     generator: snap.generator,
     palette: snap.palette,
     blocks: snap.compressed ?? (await compress(snap.raw!)),
+    biomes: snap.biomes,
     ticks: snap.ticks.map((t) => ({ x: t.x, y: t.y, z: t.z, block: BLOCKS[t.block].name, due: t.due })),
   };
 }
@@ -136,6 +139,8 @@ export async function readChunkRecord(record: ChunkRecord): Promise<{ chunk: Chu
   const r = upgrade("chunk", record);
   const { chunk, unknown } = decodeBlocks(r.cx, r.cz, r.palette, await decompress(r.blocks));
   if (unknown > 0) console.warn(`Craft: chunk ${r.cx}, ${r.cz} had ${unknown} blocks this version doesn't know; they are air now.`);
+  decodeBiomes(r.biomes, chunk.biomes);
+  chunk.generator = r.generator;
   lightChunk(chunk);
   chunk.unsaved = false;
   const ticks: ScheduledTick[] = [];

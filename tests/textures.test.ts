@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TILE } from "../src/atlas.js";
 import { BLOCKS, Block } from "../src/blocks.js";
-import { TILES, minecraftTiles, overlay, proceduralTiles, tint } from "../src/textures.js";
+import { TILES, iconPixels, minecraftTiles, overlay, proceduralTiles, tint } from "../src/textures.js";
 
 /** A tile of one color. */
 function solid(r: number, g: number, b: number, a: number = 255): Uint8ClampedArray<ArrayBuffer> {
@@ -48,7 +48,7 @@ describe("Minecraft textures", () => {
     expect(Array.from(out.subarray(8, 12))).toEqual([0, 0, 0, 255]);
   });
 
-  it("tints grass, leaves and water like plains, puts the fringe on grass sides and makes water opaque", () => {
+  it("keeps Minecraft's gray grass, leaves and water for the mesh to color by biome, and makes water opaque", () => {
     const gray = solid(255, 255, 255);
     const files = new Map([
       ["grass_block_top", gray],
@@ -59,11 +59,16 @@ describe("Minecraft textures", () => {
       ["stone", solid(90, 90, 90)],
     ]);
     const tiles = minecraftTiles(files);
-    expect(first(tiles.get("grass_block_top")!)).toEqual([0x91, 0xbd, 0x59, 255]);
-    expect(first(tiles.get("oak_leaves")!)).toEqual([0x77, 0xab, 0x2f, 0]);
-    expect(first(tiles.get("water_still")!)).toEqual([0x3f, 0x76, 0xe4, 255]);
-    expect(first(tiles.get("grass_block_side")!)).toEqual([0x91, 0xbd, 0x59, 255]);
+    expect(first(tiles.get("grass_block_top")!)).toEqual([255, 255, 255, 255]);
+    expect(first(tiles.get("oak_leaves")!)).toEqual([255, 255, 255, 0]);
+    expect(first(tiles.get("water_still")!)).toEqual([255, 255, 255, 255]);
+    expect(first(tiles.get("grass_block_side")!)).toEqual([10, 20, 30, 255]);
+    expect(first(tiles.get("grass_block_side_overlay")!)).toEqual([255, 255, 255, 255]);
     expect(first(tiles.get("stone")!)).toEqual([90, 90, 90, 255]);
+    // Icons show them as they look in plains, the grass laid over a grass block's side
+    expect(first(iconPixels(tiles, Block.Grass)!)).toEqual([0x91, 0xbd, 0x59, 255]);
+    expect(first(iconPixels(tiles, Block.Leaves)!)).toEqual([0x77, 0xab, 0x2f, 0]);
+    expect(first(iconPixels(tiles, Block.Stone)!)).toEqual([90, 90, 90, 255]);
     // Only what was there; the files themselves are left alone
     expect(tiles.has("dirt")).toBe(false);
     expect(first(gray)).toEqual([255, 255, 255, 255]);

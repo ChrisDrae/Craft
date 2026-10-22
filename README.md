@@ -1,10 +1,11 @@
 # Craft
 
 A Minecraft-style voxel world in the browser, built on [Projector](https://github.com/ChrisDrae/Projector):
-seeded terrain with oceans, beaches, cliffs, ores and trees; walking, swimming and climbing out of water;
-building with 82 blocks, slabs, stairs, fences, walls, panes, doors and plants among them; water and lava
-that flow, fall and harden where they meet; light levels with smooth lighting, torches and glowstone; a
-20-minute day with the sun, the moon in its phases, stars and clouds.
+seeded terrain with 18 biomes, from deserts and jungles to snowy peaks, mountains with cliffs and
+overhangs, rivers, caves and ravines, ores by depth, dungeons, desert wells and ruins; walking, swimming
+and climbing; building with 121 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
+water and lava that flow, fall and harden where they meet; light levels with smooth lighting, torches and
+glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds.
 
 ```sh
 npm install

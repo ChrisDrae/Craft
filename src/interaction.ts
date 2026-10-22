@@ -1,12 +1,12 @@
 import { SimObject, type Vec3 } from "projector";
-import { BLOCKS, Block, Dir, FLUID, HOTBAR, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
+import { BLOCKS, Block, FLUID, HOTBAR, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
 import { placementState } from "./placement.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT, type Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
-import { SELECTION, STURDY } from "./shapes.js";
+import { SELECTION } from "./shapes.js";
 import type { Terrain } from "./terrain.js";
-import { supported } from "./updates.js";
+import { standsOn, supported } from "./updates.js";
 import type { VoxelWorld } from "./world.js";
 
 /** How far away blocks can be broken or placed, in blocks. */
@@ -148,16 +148,16 @@ export class BlockInteraction extends SimObject {
     const y = inPlace ? t.y : t.y + t.ny;
     const z = inPlace ? t.z : t.z + t.nz;
     if (!makesRoom(w.get(x, y, z))) return false;
-    const door = SHAPE[state] === "door";
-    if (door) {
-      // Two blocks high, on a solid floor
-      if (!makesRoom(w.get(x, y + 1, z)) || STURDY[w.get(x, y - 1, z) * 6 + Dir.Up] !== 1) return false;
+    // Doors and tall plants are two blocks high, on ground that holds them
+    const twoHigh = SHAPE[state] === "door" || SHAPE[state] === "tall";
+    if (twoHigh) {
+      if (!makesRoom(w.get(x, y + 1, z)) || !standsOn(w, x, y, z, state)) return false;
     } else if (!supported(w, x, y, z, state)) {
       return false;
     }
-    if (SOLID[state] && (this.standsIn(x, y, z) || (door && this.standsIn(x, y + 1, z)))) return false;
+    if (SOLID[state] && (this.standsIn(x, y, z) || (twoHigh && this.standsIn(x, y + 1, z)))) return false;
     if (!w.set(x, y, z, state)) return false;
-    if (door) w.set(x, y + 1, z, withProperties(state, { half: "upper" }));
+    if (twoHigh) w.set(x, y + 1, z, withProperties(state, { half: "upper" }));
     return true;
   }
 

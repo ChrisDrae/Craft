@@ -22,6 +22,8 @@ export interface GeneratedChunk {
   light: (Uint8Array | null)[];
   lightFill: number[];
   packed: PackedBlocks | null;
+  biomes: Uint8Array;
+  generator: number;
 }
 
 /** A lit chunk taken apart for posting. */
@@ -36,6 +38,8 @@ export function takeApart(chunk: Chunk, packed: PackedBlocks | null): GeneratedC
     light: s.map((x) => x.light),
     lightFill: s.map((x) => x.lightFill),
     packed,
+    biomes: chunk.biomes,
+    generator: chunk.generator,
   };
 }
 
@@ -44,6 +48,7 @@ export function transferables(data: GeneratedChunk): ArrayBuffer[] {
   const out: ArrayBuffer[] = [];
   for (const a of [...data.sections, ...data.light]) if (a) out.push(a.buffer as ArrayBuffer);
   if (data.packed) out.push(data.packed.blocks.buffer as ArrayBuffer);
+  out.push(data.biomes.buffer as ArrayBuffer);
   return out;
 }
 
@@ -75,5 +80,7 @@ export function assembleChunk(data: GeneratedChunk): Chunk {
     s.lightFill = data.lightFill[i];
   });
   chunk.packed = data.packed;
+  chunk.biomes = data.biomes;
+  chunk.generator = data.generator;
   return chunk;
 }

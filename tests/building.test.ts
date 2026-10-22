@@ -220,6 +220,41 @@ describe("what holds blocks up", () => {
     expect(player.position.y).toBe(10);
   });
 
+  it("tall grass stands two high and goes whole; sugar cane wants water beside it; lily pads float on still water", () => {
+    const { world, name, place } = site();
+    world.set(0, 9, 0, Block.Grass);
+    expect(place(Block.TallGrass, 0, 9, 0)).toBe(true);
+    expect(name(0, 11, 0)).toBe("tall_grass[half=upper]");
+    world.set(0, 10, 0, Block.Air);
+    expect(world.get(0, 11, 0)).toBe(Block.Air);
+    // Sugar cane only on ground next to water, then on itself
+    world.set(3, 9, 3, Block.Sand);
+    expect(place(Block.SugarCane, 3, 9, 3)).toBe(false);
+    world.set(4, 9, 3, Block.Water);
+    expect(place(Block.SugarCane, 3, 9, 3)).toBe(true);
+    expect(place(Block.SugarCane, 3, 10, 3)).toBe(true);
+    world.set(3, 9, 3, Block.Air);
+    expect(world.get(3, 10, 3)).toBe(Block.Air);
+    expect(world.get(3, 11, 3)).toBe(Block.Air);
+    // A lily pad goes when its water does; dead bushes grow on sand
+    world.set(6, 9, 6, Block.Water);
+    world.set(6, 10, 6, Block.LilyPad);
+    world.set(6, 9, 6, Block.Stone);
+    expect(world.get(6, 10, 6)).toBe(Block.Air);
+    world.set(8, 9, 8, Block.Sand);
+    expect(place(Block.DeadBush, 8, 9, 8)).toBe(true);
+    expect(place(Block.Dandelion, 8, 9, 9)).toBe(false);
+  });
+
+  it("grass shows snow on its sides while snow lies on it", () => {
+    const { world, name, place } = site();
+    world.set(0, 9, 0, Block.Grass);
+    place(Block.Snow, 0, 9, 0);
+    expect(name(0, 9, 0)).toBe("grass_block[snowy=true]");
+    world.set(0, 10, 0, Block.Air);
+    expect(name(0, 9, 0)).toBe("grass_block[snowy=false]");
+  });
+
   it("solid blocks aren't placed where the player stands, torches and plants are", () => {
     const { world, place, player } = site();
     const [x, z] = [Math.floor(player.position.x), Math.floor(player.position.z)];

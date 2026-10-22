@@ -72,6 +72,10 @@ export class Chunk {
    * saving then needn't encode them on the main thread.
    */
   packed: PackedBlocks | null = null;
+  /** The biome (Biome id) of every column, at z * 16 + x. */
+  biomes: Uint8Array = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+  /** The version of the terrain generator that made it (GENERATOR_VERSION; 0 before it was known). */
+  generator: number = 0;
 
   constructor(
     readonly cx: number,

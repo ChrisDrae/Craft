@@ -1,5 +1,5 @@
 import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
-import { canFallInto, delayOf } from "./fluids.js";
+import { canFallInto, delayOf, isSource } from "./fluids.js";
 import { STURDY, SUPPORT } from "./shapes.js";
 import type { WorldTicks } from "./ticks.js";
 import type { VoxelWorld } from "./world.js";
@@ -16,10 +16,34 @@ function sturdy(state: number, d: number): boolean {
   return STURDY[state * 6 + d] === 1;
 }
 
+const isSoil = (block: number): boolean => block === Block.Grass || block === Block.Dirt;
+
+/**
+ * Whether a block can stand on the block below it, for plants and the lower halves of doors and tall
+ * plants: flowers and grass on grass or dirt, dead bushes on sand too, sugar cane on sugar cane or on
+ * ground by water, doors on a solid floor.
+ */
+export function standsOn(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
+  const below = world.get(x, y - 1, z);
+  const b = STATE_BLOCK[below];
+  switch (STATE_BLOCK[state]) {
+    case Block.DeadBush:
+      return isSoil(b) || b === Block.Sand;
+    case Block.SugarCane: {
+      if (b === Block.SugarCane) return true;
+      if (!isSoil(b) && b !== Block.Sand) return false;
+      for (const d of [0, 1, 4, 5]) if (FLUID[world.get(x + DIR_X[d], y - 1, z + DIR_Z[d])] === 1) return true;
+      return false;
+    }
+  }
+  return SHAPE[state] === "door" ? sturdy(below, Dir.Up) : isSoil(b);
+}
+
 /**
  * Whether the block at (x, y, z) in `state` is held up by what it rests or hangs on (see SUPPORT):
- * plants by grass or dirt, cactus by sand or cactus, a door's lower half by a solid floor and its upper
- * half, the upper half by the lower one, everything else by a solid face.
+ * plants by the ground they grow on (standsOn), cactus by sand or cactus, lily pads by still water, the
+ * lower half of a door or tall plant by its ground and its upper half, the upper half by the lower one,
+ * everything else by a solid face.
  */
 export function supported(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
   const d = SUPPORT[state];
@@ -28,16 +52,19 @@ export function supported(world: VoxelWorld, x: number, y: number, z: number, st
   const nb = STATE_BLOCK[n];
   switch (SHAPE[state]) {
     case "cross":
-      return nb === Block.Grass || nb === Block.Dirt;
+      return standsOn(world, x, y, z, state);
     case "cactus":
       return nb === Block.Sand || nb === Block.Cactus;
     case "carpet":
       return n !== Block.Air && FLUID[n] === 0;
-    case "door": {
-      const door = STATE_BLOCK[state];
-      if (propertyOf(state, "half") === "upper") return nb === door && propertyOf(n, "half") === "lower";
+    case "lilypad":
+      return (FLUID[n] === 1 && isSource(n)) || nb === Block.Ice;
+    case "door":
+    case "tall": {
+      const own = STATE_BLOCK[state];
+      if (propertyOf(state, "half") === "upper") return nb === own && propertyOf(n, "half") === "lower";
       const above = world.get(x, y + 1, z);
-      return sturdy(n, Dir.Up) && STATE_BLOCK[above] === door && propertyOf(above, "half") === "upper";
+      return standsOn(world, x, y, z, state) && STATE_BLOCK[above] === own && propertyOf(above, "half") === "upper";
     }
     default:
       return sturdy(n, d ^ 1);
@@ -151,6 +178,9 @@ export class BlockUpdates {
       next = withProperties(state, values);
     } else if (shape === "stairs") {
       next = withProperties(state, { shape: stairShape(w, x, y, z, state) });
+    } else if (block === Block.Grass) {
+      const above = STATE_BLOCK[w.get(x, y + 1, z)];
+      next = withProperties(state, { snowy: String(above === Block.Snow || above === Block.SnowBlock) });
     }
     if (next !== state) w.set(x, y, z, next);
   }

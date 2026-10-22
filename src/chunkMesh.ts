@@ -1,5 +1,6 @@
 import { Mesh } from "projector";
-import { FACE_TILE, FACE_TURN, FLUID, OPAQUE, TRANSLUCENT } from "./blocks.js";
+import { BIOMES, Biome, tintColor } from "./biomes.js";
+import { FACE_OVERLAY, FACE_TILE, FACE_TINT, FACE_TURN, FLUID, OPAQUE, TRANSLUCENT, Tint } from "./blocks.js";
 import { CHUNK_SIZE, FACE_CORNERS as CORNERS, MODEL_FACE, SECTIONS, WORLD_HEIGHT, type Chunk } from "./chunk.js";
 import { ownHeight } from "./fluids.js";
 import { chunkLight } from "./light.js";
@@ -90,6 +91,84 @@ function gather(world: ChunkSource, chunk: Chunk, y0: number, y1: number): void 
 
 const at = (x: number, y: number, z: number): number => ((y - gatheredFrom) * PAD + z + 1) * PAD + x + 1;
 
+/** Columns each way that biome colors are averaged over at a corner, as Minecraft's biome blend. */
+const BLEND = 3;
+const BIOME_PAD = CHUNK_SIZE + 2 * BLEND;
+const CORNERS_ACROSS = CHUNK_SIZE + 1;
+/** Biome tints (grass, foliage, water) at every corner of the chunk's columns: RGB 0-1 at ((kind * 17 + z) * 17 + x) * 3. */
+const cornerTints = new Float32Array(3 * CORNERS_ACROSS * CORNERS_ACROSS * 3);
+const BLENDED = [Tint.Grass, Tint.Foliage, Tint.Water];
+const biomesAround = new Uint8Array(BIOME_PAD * BIOME_PAD);
+const sums = new Float64Array((BIOME_PAD + 1) * (BIOME_PAD + 1) * 3);
+
+/**
+ * Works out the biome colors at the corners of the chunk's columns: the average over the BLEND * 2
+ * columns each way around the corner, from the chunks next door too (or the chunk's own edge where they
+ * aren't loaded), so colors change smoothly across biome borders.
+ */
+function blendTints(world: ChunkSource, chunk: Chunk): void {
+  for (let z = 0; z < BIOME_PAD; z++) {
+    for (let x = 0; x < BIOME_PAD; x++) {
+      const wx = x - BLEND;
+      const wz = z - BLEND;
+      const ox = wx < 0 ? -1 : wx >= CHUNK_SIZE ? 1 : 0;
+      const oz = wz < 0 ? -1 : wz >= CHUNK_SIZE ? 1 : 0;
+      const c = ox === 0 && oz === 0 ? chunk : world.chunk(chunk.cx + ox, chunk.cz + oz);
+      const lx = c ? (wx + CHUNK_SIZE) & 15 : Math.min(CHUNK_SIZE - 1, Math.max(0, wx));
+      const lz = c ? (wz + CHUNK_SIZE) & 15 : Math.min(CHUNK_SIZE - 1, Math.max(0, wz));
+      biomesAround[z * BIOME_PAD + x] = (c ?? chunk).biomes[lz * CHUNK_SIZE + lx];
+    }
+  }
+  const n = BIOME_PAD + 1;
+  BLENDED.forEach((tint, kind) => {
+    // Sums over rectangles, then the average around each corner
+    sums.fill(0);
+    for (let z = 0; z < BIOME_PAD; z++) {
+      for (let x = 0; x < BIOME_PAD; x++) {
+        const color = tintColor(tint, BIOMES[biomesAround[z * BIOME_PAD + x]] ? biomesAround[z * BIOME_PAD + x] : Biome.Plains);
+        for (let c = 0; c < 3; c++) sums[((z + 1) * n + x + 1) * 3 + c] = color[c] + sums[(z * n + x + 1) * 3 + c] + sums[((z + 1) * n + x) * 3 + c] - sums[(z * n + x) * 3 + c];
+      }
+    }
+    const area = (2 * BLEND) * (2 * BLEND) * 255;
+    for (let z = 0; z < CORNERS_ACROSS; z++) {
+      for (let x = 0; x < CORNERS_ACROSS; x++) {
+        // Corner (x, z) has columns x - BLEND .. x + BLEND - 1 around it: x .. x + 2 * BLEND - 1 here
+        const o = ((kind * CORNERS_ACROSS + z) * CORNERS_ACROSS + x) * 3;
+        for (let c = 0; c < 3; c++) {
+          const s = sums[((z + 2 * BLEND) * n + x + 2 * BLEND) * 3 + c] - sums[(z * n + x + 2 * BLEND) * 3 + c] - sums[((z + 2 * BLEND) * n + x) * 3 + c] + sums[(z * n + x) * 3 + c];
+          cornerTints[o + c] = s / area;
+        }
+      }
+    }
+  });
+}
+
+/** The tint color at each corner of a quad of block (x, z) with tint `tint`, into tintR/G/B. */
+function quadTints(tint: number, x: number, z: number): void {
+  if (tint === Tint.None) {
+    tintR.fill(1);
+    tintG.fill(1);
+    tintB.fill(1);
+    return;
+  }
+  const kind = BLENDED.indexOf(tint as 1 | 2 | 3);
+  if (kind < 0) {
+    const color = tintColor(tint, Biome.Plains);
+    tintR.fill(color[0] / 255);
+    tintG.fill(color[1] / 255);
+    tintB.fill(color[2] / 255);
+    return;
+  }
+  for (let k = 0; k < 4; k++) {
+    const cx = x + Math.round(corners[k * 3]);
+    const cz = z + Math.round(corners[k * 3 + 2]);
+    const o = ((kind * CORNERS_ACROSS + cz) * CORNERS_ACROSS + cx) * 3;
+    tintR[k] = cornerTints[o];
+    tintG[k] = cornerTints[o + 1];
+    tintB[k] = cornerTints[o + 2];
+  }
+}
+
 /**
  * The height of a fluid's surface at a corner of its cell (cx, cz the corner, y the cell's height), as
  * Minecraft averages it over the four cells around the corner: full where any of them has the fluid
@@ -123,12 +202,14 @@ function cornerHeight(cx: number, y: number, cz: number, fluid: number): number 
  * Builds the meshes of a chunk from its sections' face lists (which must be up to date). Every quad has
  * four corners of its own, carrying:
  * - its texture's coordinates in the atlas (`tiles`);
- * - a color: the face direction's shade times the corner's ambient occlusion;
+ * - a color: the face direction's shade times the corner's ambient occlusion, times the biome's grass,
+ *   foliage or water color for blocks colored by it (blended between biomes, see blendTints);
  * - second texture coordinates with the light at the corner (block light along u, sky light along v, in
  *   sixteenths), for the light map: the average of the blocks in front of the face around the corner.
  * Fluids slope from corner to corner (cornerHeight). Model quads take the light of the block they face
  * (their own block's if that one is opaque, or for plants), without occlusion, and are left out where the
- * neighbor covers the side they lie on.
+ * neighbor covers the side they lie on. Grass blocks get a second quad on their sides, the grass over the
+ * dirt, tinted (FACE_OVERLAY).
  */
 export function buildChunkMeshes(world: ChunkSource, chunk: Chunk, tiles: TileUVs): ChunkMeshes {
   let translucent = 0;
@@ -144,13 +225,15 @@ export function buildChunkMeshes(world: ChunkSource, chunk: Chunk, tiles: TileUV
     for (let i = 0; i < section.faceCount; i++) {
       const f = faces[i];
       const state = f >>> 16;
-      const quads = ((f >> 12) & 7) === MODEL_FACE ? MODELS[state]!.length : 1;
+      const d = (f >> 12) & 7;
+      const quads = d === MODEL_FACE ? MODELS[state]!.length : FACE_OVERLAY[state * 6 + d] >= 0 ? 2 : 1;
       total += quads;
       if (TRANSLUCENT[state]) translucent += quads;
     }
   }
   if (total === 0) return { solid: null, water: null };
   gather(world, chunk, Math.max(0, lo - 1), Math.min(WORLD_HEIGHT - 1, hi + 1));
+  blendTints(world, chunk);
   return {
     solid: build(chunk, tiles, false, total - translucent),
     water: build(chunk, tiles, true, translucent),
@@ -163,6 +246,9 @@ const cornerV = new Float64Array(4);
 const lightU = new Float32Array(4);
 const lightV = new Float32Array(4);
 const occlusion = new Int32Array(4);
+const tintR = new Float32Array(4).fill(1);
+const tintG = new Float32Array(4).fill(1);
+const tintB = new Float32Array(4).fill(1);
 
 /** A mesh being filled with quads, at most `capacity` of them. */
 class QuadBuilder {
@@ -184,7 +270,8 @@ class QuadBuilder {
   /**
    * Adds a quad: block position (x, y, z), corners relative to it (`corners`), texture coordinates within
    * the tile (`cornerU`, `cornerV`), the tile rectangle starting at r in `tiles`, brightness `shade` with
-   * the corners' occlusion and light (lightU, lightV), starting at corner `first` (to pick the diagonal).
+   * the corners' occlusion, tint (tintR/G/B) and light (lightU, lightV), starting at corner `first` (to
+   * pick the diagonal).
    */
   add(x: number, y: number, z: number, tiles: TileUVs, r: number, shade: number, first: number): void {
     const n = this.count++;
@@ -201,9 +288,9 @@ class QuadBuilder {
       this.texcoords[o * 2] = u0 + cornerU[k] * du;
       this.texcoords[o * 2 + 1] = v0 + cornerV[k] * dv;
       const b = shade * OCCLUDED[occlusion[k]];
-      this.colors[o * 4] = b;
-      this.colors[o * 4 + 1] = b;
-      this.colors[o * 4 + 2] = b;
+      this.colors[o * 4] = b * tintR[k];
+      this.colors[o * 4 + 1] = b * tintG[k];
+      this.colors[o * 4 + 2] = b * tintB[k];
       this.colors[o * 4 + 3] = 1;
       this.light[o * 2] = lightU[k];
       this.light[o * 2 + 1] = lightV[k];
@@ -319,7 +406,14 @@ function build(chunk: Chunk, tiles: TileUVs, translucent: boolean, capacity: num
       }
       // Split the quad along the diagonal whose corners are least alike in occlusion, so it shades evenly
       const first = occlusion[0] + occlusion[2] > occlusion[1] + occlusion[3] ? 1 : 0;
+      quadTints(FACE_TINT[state * 6 + d], x, z);
       out.add(x, y, z, tiles, FACE_TILE[state * 6 + d] * 4, SHADE[d], first);
+      // The grass over a grass block's side: the same quad again, drawn after (and so over) the first
+      const overlay = FACE_OVERLAY[state * 6 + d];
+      if (overlay >= 0) {
+        quadTints(Tint.Grass, x, z);
+        out.add(x, y, z, tiles, overlay * 4, SHADE[d], first);
+      }
     }
   }
   return out.mesh();
@@ -346,6 +440,7 @@ function addModel(out: QuadBuilder, x: number, y: number, z: number, state: numb
       cornerU[k] = q.uvs[k * 2];
       cornerV[k] = q.uvs[k * 2 + 1];
     }
+    quadTints(q.tint, x, z);
     out.add(x, y, z, tiles, q.tile * 4, q.dir >= 0 ? SHADE[q.dir] : 1, 0);
   }
 }

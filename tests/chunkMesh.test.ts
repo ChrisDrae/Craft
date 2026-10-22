@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Mesh } from "projector";
-import { Block, DIR_X, DIR_Y, DIR_Z, FACE_TILE, TILE_NAMES, stateOf } from "../src/blocks.js";
+import { BIOMES, Biome } from "../src/biomes.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, FACE_TILE, TILE_NAMES, stateOf, tileIndex } from "../src/blocks.js";
 import { type Chunk, type ChunkGenerator } from "../src/chunk.js";
 import { buildChunkMeshes } from "../src/chunkMesh.js";
 import { VoxelWorld } from "../src/world.js";
@@ -32,7 +33,7 @@ function meshesOf(blocks: Array<[number, number, number, number]>, fancyLeaves =
 
 interface Quad {
   normal: [number, number, number];
-  corners: Array<{ p: [number, number, number]; uv: [number, number] }>;
+  corners: Array<{ p: [number, number, number]; uv: [number, number]; color: [number, number, number] }>;
 }
 
 function quads(mesh: Mesh): Quad[] {
@@ -42,7 +43,9 @@ function quads(mesh: Mesh): Quad[] {
     for (let k = mesh.faceStart[f]; k < mesh.faceStart[f + 1]; k++) {
       const v = mesh.faceIndices[k] * 3;
       const p = mesh.positions;
-      corners.push({ p: [p[v], p[v + 1], p[v + 2]], uv: [mesh.uvs![k * 2], mesh.uvs![k * 2 + 1]] });
+      const c = mesh.colors!;
+      const i = mesh.faceIndices[k] * 4;
+      corners.push({ p: [p[v], p[v + 1], p[v + 2]], uv: [mesh.uvs![k * 2], mesh.uvs![k * 2 + 1]], color: c ? [c[i], c[i + 1], c[i + 2]] : [1, 1, 1] });
     }
     const n = mesh.faceNormals;
     out.push({ normal: [Math.round(n[f * 3]), Math.round(n[f * 3 + 1]), Math.round(n[f * 3 + 2])], corners });
@@ -52,7 +55,46 @@ function quads(mesh: Mesh): Quad[] {
 
 const dirOf = (n: [number, number, number]): number => [0, 1, 2, 3, 4, 5].find((d) => DIR_X[d] === n[0] && DIR_Y[d] === n[1] && DIR_Z[d] === n[2])!;
 
+/** A biome color as 0-1, as meshes carry it. */
+const unit = (rgb: readonly number[]): number[] => rgb.map((v) => v / 255);
+
 describe("chunk meshes", () => {
+  it("colors grass by biome, blended across borders, and lays the tinted grass over its sides", () => {
+    // A row of grass along x, in jungle on the west half of the chunk and desert on the east
+    const world = new VoxelWorld(new BlocksGenerator(Array.from({ length: 16 }, (_, x): [number, number, number, number] => [x, 5, 8, Block.Grass])));
+    const chunk = world.load(0, 0);
+    for (let i = 0; i < 256; i++) chunk.biomes[i] = (i & 15) < 8 ? Biome.Jungle : Biome.Desert;
+    world.buildFaces(chunk);
+    const qs = quads(buildChunkMeshes(world, chunk, testUVs()).solid!);
+    const tops = qs.filter((q) => dirOf(q.normal) === 2);
+    const colorAt = (x: number): number[] => tops.flatMap((q) => q.corners).find((k) => k.p[0] === x)!.color;
+    const jungle = unit(BIOMES[Biome.Jungle].grass);
+    const desert = unit(BIOMES[Biome.Desert].grass);
+    for (let c = 0; c < 3; c++) {
+      expect(colorAt(0)[c]).toBeCloseTo(jungle[c], 4);
+      expect(colorAt(16)[c]).toBeCloseTo(desert[c], 4);
+      // On the border, half and half
+      expect(colorAt(8)[c]).toBeCloseTo((jungle[c] + desert[c]) / 2, 4);
+    }
+    // Each side twice: the dirt side as it is, then the grass over it, tinted (and shaded like the side)
+    const north = qs.filter((q) => dirOf(q.normal) === 5 && q.corners.every((k) => k.p[0] <= 1));
+    expect(north).toHaveLength(2);
+    const tile = (q: Quad): number => Math.round(Math.min(...q.corners.map((k) => k.uv[0])) / 0.001);
+    expect(tile(north[0])).toBe(tileIndex("grass_block_side"));
+    expect(tile(north[1])).toBe(tileIndex("grass_block_side_overlay"));
+    for (const k of north[0].corners) k.color.forEach((v) => expect(v).toBeCloseTo(0.8, 5));
+    for (const k of north[1].corners) k.color.forEach((v, c) => expect(v).toBeCloseTo(0.8 * jungle[c], 4));
+  });
+
+  it("colors birch and spruce leaves the same everywhere", () => {
+    const world = new VoxelWorld(new BlocksGenerator([[2, 5, 2, Block.BirchLeaves]]));
+    const chunk = world.load(0, 0);
+    chunk.biomes.fill(Biome.Swamp);
+    world.buildFaces(chunk);
+    const top = quads(buildChunkMeshes(world, chunk, testUVs()).solid!).find((q) => dirOf(q.normal) === 2)!;
+    for (const k of top.corners) k.color.forEach((v, c) => expect(v).toBeCloseTo([0x80, 0xa7, 0x55][c] / 255, 4));
+  });
+
   it("makes a quad per exposed face, wound so its normal points out of the block", () => {
     const { solid, water } = meshesOf([[3, 5, 7, Block.Stone]]);
     expect(water).toBeNull();
@@ -71,9 +113,9 @@ describe("chunk meshes", () => {
   it("maps each face onto its own tile, laid out like the faces of Projector's Mesh.box", () => {
     const uvs = testUVs();
     const box = quads(Mesh.box(1));
-    for (const q of quads(meshesOf([[0, 0, 0, Block.Grass]]).solid!)) {
+    for (const q of quads(meshesOf([[0, 0, 0, Block.Sandstone]]).solid!)) {
       const d = dirOf(q.normal);
-      const r = FACE_TILE[Block.Grass * 6 + d] * 4;
+      const r = FACE_TILE[Block.Sandstone * 6 + d] * 4;
       const reference = box.find((b) => dirOf(b.normal) === d)!;
       for (const { p, uv } of q.corners) {
         // Back to 0..1 within the tile, and the box corner at the same place (the box is centered)

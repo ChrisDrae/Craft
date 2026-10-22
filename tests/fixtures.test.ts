@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { Biome, encodeBiomes } from "../src/biomes.js";
 import { BLOCKS, Block, HOTBAR, stateName, stateOf } from "../src/blocks.js";
 import { readWorldFile } from "../src/save/worldFile.js";
 import { loadSettings, saveSettings } from "../src/settings.js";
@@ -42,6 +43,26 @@ describe("saves from earlier versions", () => {
     expect(stateName(world.get(-5, 90, 20))).toBe("red_wool");
     expect(stateName(world.get(6, 100, 6))).toBe("water[level=3,falling=false]");
     expect(ticks.inChunk(0, 0)).toEqual([{ x: 6, y: 100, z: 6, block: Block.Water, due: 505 }]);
+    // Format 2 had no biomes: its chunks were made like plains, and are plains now
+    expect(world.chunk(0, 0)!.biomes.every((b) => b === Biome.Plains)).toBe(true);
+    expect(world.chunk(0, 0)!.generator).toBe(1);
+  });
+
+  it("opens a world saved in format 3: biomes per column, the new blocks", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-3.craftworld", import.meta.url))));
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-3"))!);
+    await save.loadNow(8, 8, 1);
+    expect(stateName(world.get(3, 120, 3))).toBe("birch_log[axis=z]");
+    expect(stateName(world.get(4, 121, 4))).toBe("tall_grass[half=upper]");
+    expect(stateName(world.get(5, 120, 5))).toBe("grass_block[snowy=true]");
+    expect(world.get(-5, 120, 20)).toBe(Block.DiamondOre);
+    const chunk = world.chunk(0, 0)!;
+    expect(chunk.generator).toBe(2);
+    expect(Array.from(chunk.biomes.subarray(98, 102))).toEqual([Biome.Jungle, Biome.Jungle, Biome.Desert, Biome.Desert]);
+    // And they are written back the same
+    expect(encodeBiomes(chunk.biomes)).toBe("jungle 100,desert 156");
   });
 });
 

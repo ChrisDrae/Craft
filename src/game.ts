@@ -13,7 +13,7 @@ import { viewDistance, type Settings } from "./settings.js";
 import { Sky, css } from "./sky.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { blockBehaviors } from "./fluids.js";
-import { AtlasTexture, animatedFrames, blockAtlas, iconTile, importedTextures, proceduralTiles, tileImage } from "./textures.js";
+import { AtlasTexture, animatedFrames, blockAtlas, iconPixels, importedTextures, proceduralTiles, tileImage } from "./textures.js";
 import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
 import { formatWhen, h } from "./ui/dom.js";
@@ -388,7 +388,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     el.title = info.label;
     el.style.setProperty("--top", info.top);
     el.style.setProperty("--side", info.side);
-    const tile = tiles?.get(iconTile(block));
+    const tile = tiles ? iconPixels(tiles, block) : undefined;
     if (!tile) return;
     if (!icons.has(block)) icons.set(block, `url(${tileImage(tile)}) center / cover`);
     el.style.setProperty("--icon", icons.get(block)!);
