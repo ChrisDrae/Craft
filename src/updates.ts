@@ -1,4 +1,4 @@
-import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, LEFT_OF, RIGHT_OF, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
 import { canFallInto, delayOf, isSource } from "./fluids.js";
 import { STURDY, SUPPORT } from "./shapes.js";
 import type { WorldTicks } from "./ticks.js";
@@ -113,6 +113,28 @@ function stairShape(world: VoxelWorld, x: number, y: number, z: number, state: n
 }
 
 /**
+ * Whether a chest pairs with the one beside it into a double chest: two chests side by side facing the same
+ * way, neither paired with another. The one on the left (seen from the front) is the left half.
+ */
+function chestType(world: VoxelWorld, x: number, y: number, z: number, state: number): string {
+  const facing = propertyOf(state, "facing");
+  const partner = (side: string, theirs: string): boolean => {
+    const d = FACING_DIR[side];
+    const s = world.get(x + DIR_X[d], y, z + DIR_Z[d]);
+    if (STATE_BLOCK[s] !== Block.Chest || propertyOf(s, "facing") !== facing) return false;
+    const type = propertyOf(s, "type");
+    return type === "single" || type === theirs;
+  };
+  // A pair stays together while both halves are there; a single chest pairs with the first one free
+  const current = propertyOf(state, "type");
+  if (current === "left" && partner(RIGHT_OF[facing], "right")) return "left";
+  if (current === "right" && partner(LEFT_OF[facing], "left")) return "right";
+  if (partner(RIGHT_OF[facing], "right")) return "left";
+  if (partner(LEFT_OF[facing], "left")) return "right";
+  return "single";
+}
+
+/**
  * Block updates: whenever a block changes, it and its six neighbors react, as in Minecraft. Fences, panes
  * and walls connect to what is around them, stairs take their corner shapes, blocks that lose their
  * support come off, and fluids and blocks that fall are scheduled to move. Changes made here cause updates
@@ -178,6 +200,8 @@ export class BlockUpdates {
       next = withProperties(state, values);
     } else if (shape === "stairs") {
       next = withProperties(state, { shape: stairShape(w, x, y, z, state) });
+    } else if (block === Block.Chest) {
+      next = withProperties(state, { type: chestType(w, x, y, z, state) });
     } else if (block === Block.Grass) {
       const above = STATE_BLOCK[w.get(x, y + 1, z)];
       next = withProperties(state, { snowy: String(above === Block.Snow || above === Block.SnowBlock) });

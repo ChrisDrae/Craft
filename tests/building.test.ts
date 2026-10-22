@@ -175,6 +175,27 @@ describe("doors and trapdoors", () => {
   });
 });
 
+describe("chests", () => {
+  it("pair up side by side facing the same way, left and right halves, a third staying alone", () => {
+    const { world, name } = site();
+    const chest = stateOf(Block.Chest, { facing: "north" });
+    world.set(0, 10, 0, chest);
+    world.set(1, 10, 0, chest);
+    // Facing north, seen from the north: east is on the right
+    expect(name(0, 10, 0)).toBe("chest[facing=north,type=left]");
+    expect(name(1, 10, 0)).toBe("chest[facing=north,type=right]");
+    world.set(2, 10, 0, chest);
+    expect(name(2, 10, 0)).toBe("chest[facing=north,type=single]");
+    // Facing another way: no pair
+    world.set(0, 10, 3, chest);
+    world.set(1, 10, 3, stateOf(Block.Chest, { facing: "south" }));
+    expect(name(0, 10, 3)).toBe("chest[facing=north,type=single]");
+    // Taking one half away leaves the other alone
+    world.set(1, 10, 0, Block.Air);
+    expect(name(0, 10, 0)).toBe("chest[facing=north,type=single]");
+  });
+});
+
 describe("what holds blocks up", () => {
   it("torches stand on floors and hang on walls, not ceilings, and come off with their wall", () => {
     const { world, name, place } = site();

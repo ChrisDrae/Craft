@@ -537,6 +537,9 @@ export function tileIndex(name: string): number {
 
 /** The direction (Dir) a facing value points to. */
 export const FACING_DIR: Readonly<Record<string, number>> = { north: Dir.NegZ, south: Dir.PosZ, east: Dir.PosX, west: Dir.NegX };
+/** The sides to the right and the left of a block's front, as seen by someone facing it (a double chest's halves). */
+export const RIGHT_OF: Readonly<Record<string, string>> = { north: "east", south: "west", east: "south", west: "north" };
+export const LEFT_OF: Readonly<Record<string, string>> = { north: "west", south: "east", east: "north", west: "south" };
 
 /** The look (Face) each state shows in each direction, at (state * 6 + dir), for cubes. */
 export const FACE_LOOK: Uint8Array = new Uint8Array(STATE_COUNT * 6);

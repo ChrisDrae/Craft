@@ -1,6 +1,6 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
 import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, furnaceAccepts, loadEntity, tickFurnaces, type BlockEntity } from "./blockEntities.js";
-import { BLOCKS, Block, FACING_DIR, HOTBAR, blockOf, propertyOf } from "./blocks.js";
+import { BLOCKS, Block, FACING_DIR, HOTBAR, LEFT_OF, RIGHT_OF, blockOf, propertyOf } from "./blocks.js";
 import { WORLD_HEIGHT, type ChunkGenerator } from "./chunk.js";
 import { Drops } from "./drops.js";
 import { Icons } from "./icons.js";
@@ -76,10 +76,6 @@ function stateOf(r: GuestData): GuestState {
   return { position: { ...r.position }, yaw: r.yaw, pitch: r.pitch, selected: r.selected, inventory: [...r.inventory] };
 }
 
-/** The side a double chest's other half is on, seen from its front: to the right of a left half. */
-const RIGHT_OF: Readonly<Record<string, string>> = { north: "east", south: "west", east: "south", west: "north" };
-const LEFT_OF: Readonly<Record<string, string>> = { north: "west", south: "east", east: "north", west: "south" };
-
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
   const el = document.getElementById(id);
   if (!(el instanceof type)) throw new Error(`Missing #${id}`);
@@ -123,11 +119,12 @@ export async function startGame(options: GameOptions): Promise<void> {
 
   const backend = createBackend(canvas, options.renderer);
   const textured = backend instanceof WebGLBackend;
-  // ?view=16..160 overrides the setting for this page
-  const urlView = Number(new URLSearchParams(location.search).get("view"));
+  // ?view=16..160 overrides the setting for this page; ?textures=craft leaves imported textures out
+  const pageParams = new URLSearchParams(location.search);
+  const urlView = Number(pageParams.get("view"));
   const view = (): number => (urlView >= 16 ? Math.min(160, urlView) : viewDistance(settings, textured));
   // Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
-  const imported = textured ? await importedTextures() : null;
+  const imported = textured && pageParams.get("textures") !== "craft" ? await importedTextures() : null;
   if (imported) console.info(`Craft: textures from Minecraft ${imported.version}`);
   const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
   // Light levels to colors, redrawn through the day
@@ -329,9 +326,10 @@ export async function startGame(options: GameOptions): Promise<void> {
   // world's spawn (a tree, maybe)
   const record = saved?.player ?? null;
   let worldName = saved ? saved.meta.name : "Craft";
+  // Quietly: the hotbar isn't drawn yet (it is once it is made, below)
   const restore = (slots: readonly (ReturnType<typeof saveStack> | null)[], selected: number): void => {
     for (let i = 0; i < PLAYER_SLOTS; i++) inventory.slots[i] = loadStack(slots[i]);
-    inventory.select(selected);
+    inventory.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, Math.floor(selected) || 0));
   };
   if (guest) {
     const { world: name, mode: worldMode, you } = await guest.welcome;
@@ -881,6 +879,8 @@ export async function startGame(options: GameOptions): Promise<void> {
       },
       guest,
       openToFriends,
+      drops,
+      items,
     },
   });
 }

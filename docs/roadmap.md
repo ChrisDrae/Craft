@@ -442,6 +442,12 @@ start rather than fitted to it later.
   breaks drop on the host's side for the tool they held; they see the items lying about, pick them up by
   asking, throw them; chests and furnaces are the host's, shown to the guest who opens them and changed by
   them. A guest sees only the half of a double chest they opened.
+- Checked in the browser: the survival start played with the mouse (a log broken by hand, picked up,
+  planks and a crafting table in the 2 x 2 grid, a pickaxe at the table), a furnace smelting and lit, a
+  double chest, and a reload that kept the mode, the inventory with a worn pickaxe, the chest's contents and
+  the items lying about; two browsers in one world with protocol 2; Canvas 2D at 60 fps. That found two
+  bugs: chests side by side never joined into a double chest (`BlockUpdates` now pairs them, keeping a pair
+  it has), and saved worlds and joins failed to open (the inventory drew the hotbar before it was made).
 
 
 - **Items** (`src/items.ts`): every block as an item, plus materials (sticks, coal, ingots, diamonds, flint,
