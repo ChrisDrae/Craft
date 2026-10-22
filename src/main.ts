@@ -15,8 +15,8 @@ function element<T extends HTMLElement>(id: string, type: new () => T): T {
 const canvas = element("canvas", HTMLCanvasElement);
 const menu = element("menu", HTMLElement);
 const settings = loadSettings();
-// ?world=<id> plays a saved world, ?seed=... a fresh one that isn't saved, ?join=<code> a friend's world,
-// nothing the title screen.
+// ?world=<id> plays a saved world, ?seed=... a fresh one that isn't saved (in survival, or with
+// &mode=creative), ?join=<code> a friend's world, nothing the title screen.
 // ?renderer=canvas|webgl and ?view=16..160 override the options for one page.
 const params = new URLSearchParams(location.search);
 const renderer = params.get("renderer");
@@ -122,7 +122,7 @@ if (joinCode !== null) {
 } else if (worldId) {
   await playSaved(worldId);
 } else if (seed !== null) {
-  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { seed: seed || "craft" } });
+  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { seed: seed || "craft", mode: params.get("mode") === "creative" ? "creative" : "survival" } });
 } else {
   await new TitleScreen(menu, await openStore(), settings).show();
 }

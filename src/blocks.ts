@@ -99,6 +99,7 @@ export const Block = {
   LargeFern: 118,
   LilyPad: 119,
   Pumpkin: 120,
+  Chest: 121,
 } as const;
 export type Block = number;
 
@@ -136,7 +137,9 @@ export type Shape =
   | "cactus"
   /** Two blocks high, crossed planes in each half (tall grass, large ferns). */
   | "tall"
-  | "lilypad";
+  | "lilypad"
+  /** A chest: a box a pixel in from the sides, 14 pixels high (two side by side make one long box). */
+  | "chest";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
@@ -292,6 +295,10 @@ const FALLING = bool("falling");
 const LAYERS: Property = { name: "layers", values: ["1", "2", "3", "4", "5", "6", "7", "8"] };
 /** A grass block with snow on it shows snow on its sides. */
 const SNOWY = bool("snowy");
+/** A furnace burning: its front glows, and it gives off light. */
+const LIT = bool("lit");
+/** A chest alone, or half of a double chest: the left or right half as seen from its front. */
+const CHEST_TYPE: Property = { name: "type", values: ["single", "left", "right"] };
 
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
@@ -344,7 +351,7 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Obsidian, "obsidian", "obsidian", { top: "#14121e" }),
   block(Block.StoneBricks, "stone_bricks", "stone bricks", { top: "#7a7a7a" }),
   block(Block.CraftingTable, "crafting_table", "crafting table", { top: "#a07a48", side: "#7b5a35" }, { textures: { top: "crafting_table_top", side: "crafting_table_side", bottom: "oak_planks", front: "crafting_table_front" } }),
-  block(Block.Furnace, "furnace", "furnace", { top: "#6e6e6e", side: "#5a5a5a" }, { textures: { top: "furnace_top", side: "furnace_side", front: "furnace_front" }, properties: [FACING] }),
+  block(Block.Furnace, "furnace", "furnace", { top: "#6e6e6e", side: "#5a5a5a" }, { textures: { top: "furnace_top", side: "furnace_side", front: "furnace_front" }, properties: [FACING, LIT] }),
   block(Block.Bookshelf, "bookshelf", "bookshelf", { top: "#b38d55", side: "#7a5a3a" }, { textures: { top: "oak_planks", side: "bookshelf" } }),
   block(Block.Ladder, "ladder", "ladder", { top: "#8a6a3a" }, { shape: "ladder", opacity: "cutout", properties: [FACING] }),
   block(Block.Lava, "lava", "lava", { top: "#d4600e" }, { shape: "fluid", breakable: false, emission: 15, lightFilter: 1, textures: { all: "lava_still" }, properties: [LEVEL, FALLING] }),
@@ -400,6 +407,7 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.LargeFern, "large_fern", "large fern", { top: "#5a8f3a" }, { ...TALL, textures: { top: "large_fern_top", side: "large_fern_bottom" } }),
   block(Block.LilyPad, "lily_pad", "lily pad", { top: "#208030" }, { shape: "lilypad", opacity: "cutout", tint: Tint.LilyPad }),
   block(Block.Pumpkin, "pumpkin", "pumpkin", { top: "#c07615", side: "#e08a1d" }, { textures: { top: "pumpkin_top", side: "pumpkin_side" } }),
+  block(Block.Chest, "chest", "chest", { top: "#a8742e", side: "#8a5a24" }, { shape: "chest", textures: { top: "chest_top", side: "chest_side", front: "chest_front" }, properties: [FACING, CHEST_TYPE] }),
 ];
 
 // States: the default ones take the blocks' own ids, the others the ids after them
@@ -508,7 +516,7 @@ export const CUBE_SHAPED: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (is
  */
 export const LIGHT_SINK = 16;
 /** Light each state gives off (0-15), and how much it dims light passing into it (15 stops it, see LIGHT_SINK). */
-export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b) => BLOCKS[b].emission);
+export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (b === Block.Furnace && propertyOf(s, "lit") === "true" ? 13 : BLOCKS[b].emission));
 export const LIGHT_FILTER: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (BLOCKS[b].lightFilter >= 15 && !OPAQUE[s] ? LIGHT_SINK : BLOCKS[b].lightFilter));
 /** See BlockInfo. */
 export const CULL_SAME: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].cullSame ? 1 : 0));
@@ -516,8 +524,8 @@ export const LEAFY: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].l
 /** 1 for water, 2 for lava, 0 for everything else. */
 export const FLUID: Uint8Array = Uint8Array.from(stateBlock, (b) => (b === Block.Water ? 1 : b === Block.Lava ? 2 : 0));
 
-/** Every texture any block uses, in a fixed order: blocks refer to them by index. Snowy grass and the grass overlay too. */
-export const TILE_NAMES: readonly string[] = [...new Set([...BLOCKS.flatMap((b) => (b.id === Block.Air ? [] : b.textures)), "grass_block_snow", "grass_block_side_overlay"])];
+/** Every texture any block uses, in a fixed order: blocks refer to them by index. Snowy grass, the grass overlay and a burning furnace's front too. */
+export const TILE_NAMES: readonly string[] = [...new Set([...BLOCKS.flatMap((b) => (b.id === Block.Air ? [] : b.textures)), "grass_block_snow", "grass_block_side_overlay", "furnace_front_on"])];
 const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
 
 /** The index of a texture in TILE_NAMES. */
@@ -568,6 +576,7 @@ for (let state = 0; state < STATE_COUNT; state++) {
       if (propertyOf(state, "snowy") === "true") FACE_TILE[i] = tileIndex("grass_block_snow");
       else FACE_OVERLAY[i] = tileIndex("grass_block_side_overlay");
     }
+    if (info.id === Block.Furnace && look === Face.Front && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("furnace_front_on");
     FACE_TINT[i] = info.id === Block.Grass ? (d === Dir.Up ? info.tint : Tint.None) : info.tint;
   }
 }

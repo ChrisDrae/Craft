@@ -385,3 +385,135 @@ button.danger {
   font: 600 28px/1.2 ui-monospace, monospace;
   letter-spacing: 0.15em;
 }
+
+/* Items: slots with counts and wear, the screens that hold them */
+.slot b {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  color: #fff;
+  font: 600 13px/1 ui-monospace, monospace;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+
+.slot i {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  height: 3px;
+  background: linear-gradient(90deg, hsl(calc(var(--wear, 1) * 120) 80% 45%) calc(var(--wear, 1) * 100%), #111 0);
+  pointer-events: none;
+}
+
+#hotbar .slot i[hidden] {
+  display: none;
+}
+
+.items .slots {
+  display: grid;
+  gap: 2px;
+  justify-content: center;
+  margin: 6px 0;
+}
+
+.items .slot {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: var(--icon, none) rgba(0, 0, 0, 0.35);
+  image-rendering: pixelated;
+  cursor: pointer;
+  user-select: none;
+}
+
+.items .slot:hover {
+  border-color: var(--accent);
+}
+
+.items .slot.result {
+  width: 52px;
+  height: 52px;
+}
+
+.items .slots.creative {
+  grid-template-columns: repeat(auto-fill, 44px);
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.items input[type="search"] {
+  width: 100%;
+  margin: 4px 0;
+  font: inherit;
+}
+
+.crafting,
+.furnace {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.furnace .column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.arrow-sign {
+  font-size: 28px;
+  opacity: 0.7;
+}
+
+.gauge {
+  position: relative;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.gauge.arrow {
+  width: 48px;
+  height: 10px;
+}
+
+.gauge.flame {
+  width: 12px;
+  height: 18px;
+  margin: 4px 0;
+}
+
+.gauge span {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: block;
+  background: #f5a524;
+}
+
+.gauge.arrow span {
+  top: 0;
+  width: 0;
+}
+
+.gauge.flame span {
+  right: 0;
+  height: 0;
+}
+
+.cursor-stack {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  width: 44px;
+  height: 44px;
+  background: var(--icon, none);
+  background-size: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
+}

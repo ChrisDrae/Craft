@@ -242,6 +242,15 @@ function partsOf(state: number): Parts | null {
       const tile = prop("half") === "upper" ? t[Face.Top] : t[Face.Side];
       return { quads: crossQuads(tile), collision: [], selection: [[px(2), 0, px(2), px(14), 1, px(14)]] };
     }
+    case "chest": {
+      // Built facing north; half of a double chest reaches to the side its other half is on
+      const type = prop("type");
+      const box: Box = [type === "right" ? 0 : px(1), 0, px(1), type === "left" ? 1 : px(15), px(14), px(15)];
+      const turned = turn(box, TURNS[prop("facing")]);
+      const front = FACING_DIR[prop("facing")];
+      const quads = boxQuads(turned, (d) => (d === front ? t[Face.Front] : t[lookOf(d)]));
+      return { quads, collision: [turned], selection: [turned] };
+    }
     case "lilypad": {
       // A leaf lying on the water, seen from above and below
       const leaf: Box = [0, px(0.25), 0, 1, px(0.25), 1];

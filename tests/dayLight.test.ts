@@ -98,6 +98,7 @@ describe("torches", () => {
     world.set(4, 10, 4, Block.Stone);
     const player = new Player(world, { x: 0.5, y: 10, z: 0.5 });
     const interaction = new BlockInteraction(world, player, { target: null } as unknown as Terrain);
+    interaction.inventory.put(7, { item: Block.Torch, count: 1, damage: 0 });
     interaction.select(7);
     expect(interaction.selectedBlock).toBe(Block.Torch);
     // Against the east side of the stone block

@@ -7,8 +7,10 @@ import { memoryPair } from "../src/net/connection.js";
 import { GuestSession } from "../src/net/guest.js";
 import { HostSession } from "../src/net/host.js";
 import { encode, type GuestState } from "../src/net/protocol.js";
+import { stack } from "../src/items.js";
 import { WorldTicks } from "../src/ticks.js";
 import { BlockUpdates } from "../src/updates.js";
+import { Drops } from "../src/drops.js";
 import { VoxelWorld } from "../src/world.js";
 import { flatWorld } from "./helpers.js";
 
@@ -21,10 +23,13 @@ function hostWorld() {
   const ticks = new WorldTicks(world, blockBehaviors());
   const updates = new BlockUpdates(world, ticks);
   const kept = new Map<string, GuestState>();
+  const drops = new Drops(world);
   const host = new HostSession({
     world,
     ticks,
     worldName: "Shared",
+    mode: "creative",
+    drops,
     host: () => ({ id: "host", name: "Host", x: 0.5, y: 10, z: 0.5, yaw: 0, pitch: 0 }),
     spawn: () => ({ x: 8.5, y: 10, z: 8.5 }),
     saved: (id) => kept.get(id) ?? null,
@@ -54,7 +59,7 @@ function hostWorld() {
       await Promise.all(guests.map((g) => g.session.settled()));
     }
   };
-  return { world, ticks, host, kept, join, run };
+  return { world, ticks, host, kept, drops, join, run };
 }
 
 /** An action the way BlockInteraction makes it: on the top face of a block, looking south. */
@@ -87,12 +92,12 @@ describe("multiplayer", () => {
     // A guest places a door: done at once on their side, then by the host, both halves reaching the other guest
     const door: Action = { ...onTop("place", 6, 9, 6, Block.OakDoor), yaw: Math.PI };
     expect(perform(a.world, door, [])).toBe(true);
-    a.session.act(door);
+    a.session.act(door, null);
     await run(3);
     expect(stateName(world.get(6, 11, 6))).toBe("oak_door[facing=north,half=upper,open=false,hinge=left]");
     expect(b.world.get(6, 11, 6)).toBe(world.get(6, 11, 6));
     // Water poured by a guest flows on the host, and the flow reaches the guests
-    a.session.act(onTop("place", 3, 9, 3, Block.Water));
+    a.session.act(onTop("place", 3, 9, 3, Block.Water), null);
     await run(30);
     expect(world.get(4, 10, 3)).not.toBe(Block.Air);
     expect(b.world.get(4, 10, 3)).toBe(world.get(4, 10, 3));
@@ -106,12 +111,12 @@ describe("multiplayer", () => {
     const far = onTop("place", 28, 9, 8, Block.Planks);
     perform(guest.world, far, []);
     expect(guest.world.get(28, 10, 8)).toBe(Block.Planks);
-    guest.session.act(far);
+    guest.session.act(far, null);
     await run(2);
     expect(world.get(28, 10, 8)).toBe(Block.Air);
     expect(guest.world.get(28, 10, 8)).toBe(Block.Air);
     // Into the host's feet
-    guest.session.act(onTop("place", 0, 9, 0, Block.Planks));
+    guest.session.act(onTop("place", 0, 9, 0, Block.Planks), null);
     await run(2);
     expect(world.get(0, 10, 0)).toBe(Block.Air);
   });
@@ -142,17 +147,18 @@ describe("multiplayer", () => {
     expect(host.guests).toHaveLength(0);
   });
 
-  it("keeps a guest's place and hotbar for when they come back, and sends far chunks again after they let go", async () => {
+  it("keeps a guest's place and inventory for when they come back, and sends far chunks again after they let go", async () => {
     const { kept, join, run } = hostWorld();
     const first = join("guest-1");
     await first.session.welcome;
-    first.session.hotbar(["stone", "glass", "torch"], 2);
+    first.session.inventory([stack(Block.Stone, 64), stack(Block.Glass, 5), null, stack(Block.Torch, 12)], 2);
     await run(3);
     first.session.leave();
     await run(1);
-    expect(kept.get("guest-1")).toMatchObject({ position: { x: 8.5, y: 10, z: 8.5 }, selected: 2, hotbar: ["stone", "glass", "torch"] });
+    expect(kept.get("guest-1")).toMatchObject({ position: { x: 8.5, y: 10, z: 8.5 }, selected: 2 });
+    expect(kept.get("guest-1")!.inventory.slice(0, 4)).toEqual([{ item: "stone", count: 64 }, { item: "glass", count: 5 }, null, { item: "torch", count: 12 }]);
     const again = join("guest-1");
-    expect((await again.session.welcome).you.hotbar).toEqual(["stone", "glass", "torch"]);
+    expect((await again.session.welcome).you.inventory[3]).toEqual({ item: "torch", count: 12 });
     await run(10);
     const chunk = again.world.chunk(1, 1)!;
     again.world.chunks.delete(VoxelWorld.key(1, 1));

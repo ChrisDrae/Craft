@@ -5,7 +5,9 @@ seeded terrain with 18 biomes, from deserts and jungles to snowy peaks, mountain
 overhangs, rivers, caves and ravines, ores by depth, dungeons, desert wells and ruins; walking, swimming
 and climbing; building with 121 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
 water and lava that flow, fall and harden where they meet; light levels with smooth lighting, torches and
-glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds.
+glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds. In survival you gather:
+blocks take time to break and drop as items, tools in five tiers break them faster, and you craft, smelt in
+furnaces and keep things in chests. In creative every block is at hand. Friends can join any world.
 
 ```sh
 npm install
@@ -13,10 +15,25 @@ npm run dev      # http://localhost:5173
 npm run check    # typecheck, tests, build
 ```
 
-The title screen lists your worlds: create one and play, or join a friend's. WASD moves, Space jumps (and swims up), Shift
-sprints, the left button breaks and the right one places (or opens and shuts doors and trapdoors), 1–9 or
-the wheel pick a hotbar slot, the middle button picks the block you aim at, E lists every block to put one in
-the hotbar, Esc opens the game menu (options, save and quit).
+The title screen lists your worlds: create one (in survival or creative) and play, or join a friend's.
+WASD moves, Space jumps (and swims up), Shift sprints. The left button breaks (hold it in survival); the
+right one places the held block, opens and shuts doors and trapdoors, and opens crafting tables, chests and
+furnaces. 1–9 or the wheel pick a hotbar slot, the middle button picks the block you aim at, E opens the
+inventory (every item in creative), Q throws the held item (Ctrl+Q the whole stack), Esc opens the game
+menu (options, save and quit).
+
+## Survival and creative
+
+A survival world starts with nothing. Break a tree by hand for logs, make planks and a crafting table in
+the inventory's 2×2 grid, then sticks and a wooden pickaxe at the table's 3×3 grid; stone needs a pickaxe
+to drop anything, iron ore a stone one, diamonds an iron one. Tools wear out. A furnace smelts ores, sand
+and logs with coal, charcoal or wood; a chest holds 27 stacks, two side by side 54. Items move as in
+Minecraft: the left button picks up and puts down stacks, the right one halves a stack or puts down one,
+shift moves a stack across, a double click gathers. About a hundred recipes: planks, sticks, tables,
+furnaces, chests, torches, tools and armor in every material, doors, stairs, slabs, panes, ladders, fences,
+walls and more. (Health, hunger and armor that protects come next, in Phase 6.)
+
+Worlds from before this had no game mode: they open in creative, as they were played.
 
 ## Worlds and saves
 

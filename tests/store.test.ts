@@ -5,7 +5,7 @@ import { readWorldFile, writeWorldFile } from "../src/save/worldFile.js";
 import { freshStore, newMeta } from "./saveHelpers.js";
 
 function chunk(world: string, cx: number, cz: number, fill: number): ChunkRecord {
-  return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), biomes: "plains 256", ticks: [] };
+  return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), biomes: "plains 256", ticks: [], entities: [], drops: [] };
 }
 
 const guest = (world: string, id: string) => ({
@@ -17,7 +17,7 @@ const guest = (world: string, id: string) => ({
   yaw: 0.5,
   pitch: 0,
   selected: 1,
-  hotbar: ["glass", "torch"],
+  inventory: [{ item: "glass", count: 3 }, { item: "torch", count: 1 }],
 });
 
 const player = (world: string) => ({
@@ -28,7 +28,7 @@ const player = (world: string) => ({
   yaw: 1,
   pitch: 0,
   selected: 2,
-  hotbar: ["stone"],
+  inventory: [{ item: "stone", count: 64 }],
 });
 
 describe("WorldStore", () => {

@@ -1,11 +1,22 @@
 import { Random, Texture } from "projector";
+import { DESTROY_TILES, ITEM_TILES, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles } from "./itemTextures.js";
+import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
 import { BLOCKS, Block, COLORS, FACE_TILE, Face, TILE_NAMES, Tint, type Block as BlockId } from "./blocks.js";
 import type { TileUVs } from "./chunkMesh.js";
 
-/** The textures Craft uses, named after Minecraft's block texture files (TILE_NAMES). */
-export const TILES: readonly string[] = TILE_NAMES;
+/**
+ * The textures in the atlas: the blocks' (TILE_NAMES, named after Minecraft's block texture files, in the
+ * same order so blocks find them by index), then the items' ("item_stick") and the stages of cracks.
+ */
+export const TILES: readonly string[] = [...TILE_NAMES, ...ITEM_TILES, ...DESTROY_TILES];
+const TILE_AT: ReadonlyMap<string, number> = new Map(TILES.map((n, i) => [n, i]));
+
+/** A texture's slot in the atlas (TILES), or -1. */
+export function atlasIndex(name: string): number {
+  return TILE_AT.get(name) ?? -1;
+}
 export type TileName = string;
 
 /** The texture on a block state's face in direction `dir` (Dir), for a cube. */
@@ -62,40 +73,6 @@ export const ANIMATED: Readonly<Record<string, { fps: number; frames: number }>>
   water_still: { fps: 10, frames: 32 },
   lava_still: { fps: 6, frames: 20 },
 };
-
-type Rgb = readonly [number, number, number];
-
-function hex(css: string): Rgb {
-  const n = parseInt(css.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-/** A tile painted pixel by pixel: `paint` returns the color (and alpha) of (x, y). */
-function paint(seed: string, color: (x: number, y: number, rnd: Random) => [number, number, number, number?]): TilePixels {
-  const rnd = new Random(seed);
-  const out = new Uint8ClampedArray(TILE * TILE * 4);
-  for (let y = 0; y < TILE; y++) {
-    for (let x = 0; x < TILE; x++) {
-      const [r, g, b, a = 255] = color(x, y, rnd);
-      const o = (y * TILE + x) * 4;
-      out[o] = r;
-      out[o + 1] = g;
-      out[o + 2] = b;
-      out[o + 3] = a;
-    }
-  }
-  return out;
-}
-
-/** The color brightened or darkened by a factor. */
-function scale(c: Rgb, k: number): [number, number, number] {
-  return [c[0] * k, c[1] * k, c[2] * k];
-}
-
-/** Random brightness around 1, spread `amount`. */
-function jitter(rnd: Random, amount: number): number {
-  return 1 + (rnd.next() - 0.5) * amount;
-}
 
 /** Stone with patches of ore of a color. */
 function ore(seed: string, color: Rgb): TilePixels {
@@ -467,7 +444,9 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
     const tile = tiles.get(name);
     if (tile) tiles.set(name, untint(tile, tintColor(kind, Biome.Plains)));
   }
-  for (const name of TILE_NAMES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
+  tiles.set("furnace_front_on", furnaceOn(tiles.get("furnace_front")!));
+  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages()]) tiles.set(name, tile);
+  for (const name of TILES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
   return tiles;
 }
 
@@ -535,8 +514,12 @@ export function overlay(base: TilePixels, top: TilePixels): TilePixels {
 export function minecraftTiles(files: ReadonlyMap<string, TilePixels>): Map<TileName, TilePixels> {
   const tiles = new Map<TileName, TilePixels>();
   for (const name of TILES) {
-    const tile = files.get(name);
-    if (tile) tiles.set(name, name === "water_still" ? waterTile(tile) : tile);
+    let tile = files.get(name);
+    if (!tile) continue;
+    if (name === "water_still") tile = waterTile(tile);
+    // Leather armor is gray to be dyed; undyed, it is leather brown
+    if (/^item_leather_(helmet|chestplate|leggings|boots)$/.test(name)) tile = tint(tile, hex("#a06540"));
+    tiles.set(name, tile);
   }
   return tiles;
 }
@@ -589,9 +572,17 @@ export async function importedTextures(): Promise<{
     }),
   );
   const files = new Map<string, TilePixels>();
-  for (const [name, image] of images) if (!/^(sun|clouds|moon)/.test(name)) files.set(name, firstFrame(image));
+  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity)/.test(name)) files.set(name, firstFrame(image));
   const tiles = proceduralTiles();
   for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
+  // The chest's faces come out of its model's texture, at its own size
+  const chest = images.get("chest_entity");
+  if (chest) {
+    const canvas = new OffscreenCanvas(chest.width, chest.height);
+    const g = canvas.getContext("2d")!;
+    g.drawImage(chest, 0, 0);
+    for (const [name, tile] of chestFromSheet(g.getImageData(0, 0, chest.width, chest.height).data, chest.width)) tiles.set(name, tile);
+  }
   // The moving ones come as strips of frames, top to bottom
   const frames = animatedFrames();
   for (const name of Object.keys(ANIMATED)) {

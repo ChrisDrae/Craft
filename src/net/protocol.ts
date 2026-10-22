@@ -1,5 +1,8 @@
 import type { Action } from "../actions.js";
+import type { SavedEntity } from "../blockEntities.js";
 import { STATE_COUNT, stateName } from "../blocks.js";
+import { ITEMS, type SavedStack } from "../items.js";
+import type { GameMode } from "../save/format.js";
 
 /**
  * What host and guests say to each other. Every message is one binary frame: the length of a JSON header
@@ -7,18 +10,16 @@ import { STATE_COUNT, stateName } from "../blocks.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
- * A fingerprint of the block states: blocks travel as state ids, which only mean the same to a host and a
- * guest running the same version of Craft.
+ * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
+ * a guest running the same version of Craft.
  */
 export const REGISTRY: number = (() => {
   let h = 2166136261 >>> 0;
-  for (let s = 0; s < STATE_COUNT; s++) {
-    const name = stateName(s);
-    for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
-  }
+  const names = [...Array.from({ length: STATE_COUNT }, (_, s) => stateName(s)), ...ITEMS.map((i) => i.name)];
+  for (const name of names) for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
   return h >>> 0;
 })();
 
@@ -39,20 +40,32 @@ export interface GuestState {
   yaw: number;
   pitch: number;
   selected: number;
-  hotbar: string[];
+  inventory: (SavedStack | null)[];
 }
+
+/** An item lying about, as guests see it: id, where, what and how many. */
+export type DropView = [id: number, x: number, y: number, z: number, item: number, count: number];
 
 export type ToHost =
   /** First thing a guest says: who they are, what they run, how far they see (in chunks). */
   | { t: "hello"; protocol: number; registry: number; id: string; name: string; view: number }
   | { t: "move"; x: number; y: number; z: number; yaw: number; pitch: number }
-  | ({ t: "act" } & Action)
-  | { t: "hotbar"; hotbar: string[]; selected: number }
+  /** An action done on the guest's side, with what the guest held (the tool that decides drops). */
+  | ({ t: "act"; held: SavedStack | null } & Action)
+  | { t: "inventory"; inventory: (SavedStack | null)[]; selected: number }
+  /** Picking up an item lying about: as much as fits, at most `max`. */
+  | { t: "take"; id: number; max: number }
+  /** Throwing a stack out, from (x, y, z) with that velocity. */
+  | { t: "throw"; item: SavedStack; x: number; y: number; z: number; vx: number; vy: number; vz: number }
+  /** Opening, changing and closing a chest or furnace. */
+  | { t: "open"; x: number; y: number; z: number }
+  | { t: "slots"; x: number; y: number; z: number; slots: Array<[number, SavedStack | null]> }
+  | { t: "close"; x: number; y: number; z: number }
   /** Chunks the guest let go of (too far away): the host sends them again when needed. */
   | { t: "dropped"; chunks: Array<[number, number]> };
 
 export type ToGuest =
-  | { t: "welcome"; id: string; world: string; time: number; you: GuestState }
+  | { t: "welcome"; id: string; world: string; time: number; mode: GameMode; you: GuestState }
   | { t: "refused"; reason: string }
   /** A chunk, its compressed blocks after the header (see encodeBlocks). */
   | { t: "chunk"; cx: number; cz: number; palette: string[]; biomes: string; generator: number }
@@ -60,6 +73,12 @@ export type ToGuest =
   | { t: "blocks"; changes: number[] }
   | { t: "players"; players: PlayerView[] }
   | { t: "time"; time: number }
+  /** The items lying near the guest. */
+  | { t: "drops"; drops: DropView[] }
+  /** What the guest picked up. */
+  | { t: "given"; item: SavedStack }
+  /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
+  | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };
 
 const encoder = new TextEncoder();

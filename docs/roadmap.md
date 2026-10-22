@@ -413,6 +413,37 @@ start rather than fitted to it later.
 
 ### Phase 5: Items, inventory, crafting, tools (L)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- A game mode per world came along (the start of Phase 6): survival gathers, breaks in time, drops and
+  crafts; creative has every item at hand (E lists them, with a search), breaks at once and uses nothing
+  up. New worlds pick one, older ones are creative (save format 5), quick play takes `&mode=creative`.
+- Items (`src/items.ts`): every block, 25 materials and foods, 25 tools in five tiers (gold as fast as
+  Minecraft's and as weak), 16 pieces of armor (worn in their slots; protection comes with health in
+  Phase 6). Not yet: buckets, shears, flint and steel, beds (Phase 6), food that can be eaten (Phase 6).
+- Inventory (`src/inventory.ts`): 36 slots, 4 armor slots and an off-hand slot (kept, not used yet).
+  Minecraft's clicks: pick up, put down, swap, halve, one at a time, shift to move across, double click to
+  gather; not yet dragging to spread a stack.
+- Crafting (`src/crafting.ts`): about a hundred shaped and shapeless recipes as data, with tags (any
+  planks, any log, coal or charcoal), shapes matched anywhere in the grid and mirrored; 2 x 2 in the
+  inventory, 3 x 3 at a crafting table; shift on the result crafts as many as fit. No recipe book.
+- Mining (`src/mining.ts`): Minecraft's hardness, tool kinds and tiers and its break time formula, the
+  drops of each block (ores give raw ore or gems, stone cobblestone, leaves now and then a sapling or an
+  apple, double slabs two slabs), tools wearing a use per block. Cracks show the progress on WebGL.
+- Dropped items (`src/drops.ts`): entities that fall, slide, merge with their kind, get picked up after a
+  moment and go after five minutes; saved with their chunk. Block items show as spinning cubes with their
+  textures, others as their picture.
+- Block entities (`src/blockEntities.ts`): chests (27 slots, a double chest 54) and furnaces (fuel, 10 s per
+  item, coal for 8, a lit front that gives off light), saved with their chunk; breaking one spills what it
+  held.
+- Icons: blocks drawn once into little cubes from their textures (`src/icons.ts`), items from Minecraft's
+  item textures when imported (66 of them, and the chest from its model's texture), Craft's own drawings
+  otherwise.
+- Multiplayer (protocol 2): a guest's inventory is theirs (the host keeps it for their next visit); their
+  breaks drop on the host's side for the tool they held; they see the items lying about, pick them up by
+  asking, throw them; chests and furnaces are the host's, shown to the guest who opens them and changed by
+  them. A guest sees only the half of a double chest they opened.
+
+
 - **Items** (`src/items.ts`): every block as an item, plus materials (sticks, coal, ingots, diamonds, flint,
   string, leather), tools and food. Stacks of up to 64 (16 for some items, 1 for tools), tools with durability.
 - **Inventory:** 36 slots (9 of them the hotbar), 4 armor slots and an off-hand. E opens the inventory screen
@@ -568,4 +599,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 4 and M are done; next is Phase 5, items, inventory, crafting and tools.
+Phases 0 to 5 and M are done; next is Phase 6, survival: health, hunger, armor, beds and death.

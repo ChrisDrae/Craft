@@ -44,6 +44,8 @@ function positionKey(x: number, y: number, z: number): number {
 export class WorldTicks extends SimObject {
   /** Ticks since the world began. */
   time: number = 0;
+  /** Called at the end of every tick (furnaces burn then). */
+  onTick: (() => void) | null = null;
   private readonly world: VoxelWorld;
   private readonly behaviors: ReadonlyMap<Block, TickBehavior>;
   private readonly randomTicked: boolean;
@@ -136,6 +138,7 @@ export class WorldTicks extends SimObject {
       this.behaviors.get(e.block)?.scheduled?.(w, e.x, e.y, e.z, state, this);
     }
     if (this.randomTicked) this.randomTicks();
+    this.onTick?.();
   }
 
   private randomTicks(): void {

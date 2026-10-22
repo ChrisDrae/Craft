@@ -1,13 +1,16 @@
 import { SimObject } from "projector";
 import type { Action } from "../actions.js";
+import type { SavedEntity } from "../blockEntities.js";
 import { decodeBiomes } from "../biomes.js";
+import { loadStack, saveStack, type ItemStack, type SavedStack } from "../items.js";
+import type { GameMode } from "../save/format.js";
 import type { Chunk } from "../chunk.js";
 import { lightChunk } from "../light.js";
 import { decodeBlocks, decompress } from "../save/codec.js";
 import type { WorldTicks } from "../ticks.js";
 import type { VoxelWorld } from "../world.js";
 import type { Connection } from "./connection.js";
-import { PROTOCOL_VERSION, REGISTRY, decode, encode, type GuestState, type PlayerView, type ToGuest, type ToHost } from "./protocol.js";
+import { PROTOCOL_VERSION, REGISTRY, decode, encode, type DropView, type GuestState, type PlayerView, type ToGuest, type ToHost } from "./protocol.js";
 
 /** Seconds between position updates sent to the host. */
 const MOVES = 0.05;
@@ -38,8 +41,14 @@ export interface Pose {
 export class GuestSession extends SimObject {
   /** The other players, as the host last said. */
   others: PlayerView[] = [];
-  /** Resolves with the world's name and the player's state when the host welcomes us. */
-  readonly welcome: Promise<{ world: string; you: GuestState }>;
+  /** The items lying about nearby, as the host last said. */
+  drops: DropView[] = [];
+  /** Resolves with the world's name, how it is played and the player's state when the host welcomes us. */
+  readonly welcome: Promise<{ world: string; mode: GameMode; you: GuestState }>;
+  /** Called with what the host handed over (an item picked up). */
+  onGiven: ((stack: ItemStack) => void) | null = null;
+  /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
+  onContainer: ((x: number, y: number, z: number, entity: SavedEntity | null) => void) | null = null;
   /** Called when the host says goodbye or the link breaks, after the welcome. */
   onBye: ((reason: string) => void) | null = null;
   /** Called with a chunk about to be replaced by a fresh copy (the terrain drops its meshes). */
@@ -52,7 +61,7 @@ export class GuestSession extends SimObject {
   private moveTimer: number = 0;
   private lastMove: string = "";
   private dropped: Array<[number, number]> = [];
-  private resolveWelcome!: (w: { world: string; you: GuestState }) => void;
+  private resolveWelcome!: (w: { world: string; mode: GameMode; you: GuestState }) => void;
   private rejectWelcome!: (e: Error) => void;
 
   constructor(conn: Connection, options: GuestOptions) {
@@ -85,7 +94,7 @@ export class GuestSession extends SimObject {
       case "welcome":
         this.welcomed = true;
         this.options.ticks.time = msg.time;
-        this.resolveWelcome({ world: msg.world, you: msg.you });
+        this.resolveWelcome({ world: msg.world, mode: msg.mode === "creative" ? "creative" : "survival", you: msg.you });
         return;
       case "refused":
         this.rejectWelcome(new Error(msg.reason));
@@ -110,6 +119,17 @@ export class GuestSession extends SimObject {
       case "time":
         this.options.ticks.time = msg.time;
         return;
+      case "drops":
+        this.drops = msg.drops;
+        return;
+      case "given": {
+        const s = loadStack(msg.item);
+        if (s) this.onGiven?.(s);
+        return;
+      }
+      case "container":
+        this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);
+        return;
       case "bye":
         this.welcomed = false;
         this.onBye?.(msg.reason);
@@ -118,14 +138,38 @@ export class GuestSession extends SimObject {
     }
   }
 
-  /** Tells the host about an action done here. */
-  act(a: Action): void {
-    this.send({ t: "act", ...a });
+  /** Tells the host about an action done here, and what the player held (it decides the drops). */
+  act(a: Action, held: ItemStack | null): void {
+    this.send({ t: "act", ...a, held: saveStack(held) });
   }
 
-  /** Tells the host what the hotbar holds. */
-  hotbar(names: string[], selected: number): void {
-    this.send({ t: "hotbar", hotbar: names, selected });
+  /** Tells the host what the player carries (it keeps it for the next visit). */
+  inventory(slots: readonly (ItemStack | null)[], selected: number): void {
+    this.send({ t: "inventory", inventory: slots.map(saveStack), selected });
+  }
+
+  /** Asks for an item lying about, as much as fits (`max`). */
+  take(id: number, max: number): void {
+    this.send({ t: "take", id, max });
+  }
+
+  /** Throws a stack out from a point. */
+  throwItem(stack: ItemStack, from: { x: number; y: number; z: number }, velocity: { x: number; y: number; z: number }): void {
+    this.send({ t: "throw", item: saveStack(stack)!, x: from.x, y: from.y, z: from.z, vx: velocity.x, vy: velocity.y, vz: velocity.z });
+  }
+
+  /** Opens a chest or furnace: the host sends its contents (onContainer) until it is closed. */
+  open(x: number, y: number, z: number): void {
+    this.send({ t: "open", x, y, z });
+  }
+
+  /** Changes slots of the open chest or furnace. */
+  setSlots(x: number, y: number, z: number, slots: Array<[number, SavedStack | null]>): void {
+    this.send({ t: "slots", x, y, z, slots });
+  }
+
+  close(x: number, y: number, z: number): void {
+    this.send({ t: "close", x, y, z });
   }
 
   /** For Terrain.onUnload: the host sends the chunk again when it is needed. */

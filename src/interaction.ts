@@ -1,38 +1,54 @@
 import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, type Action } from "./actions.js";
-import { HOTBAR, blockOf, type Block } from "./blocks.js";
+import { Block, blockOf } from "./blocks.js";
+import { HOTBAR_SLOTS, INVENTORY_SLOTS, Inventory } from "./inventory.js";
+import { ITEMS, type Item, type ItemStack } from "./items.js";
+import { breakTime } from "./mining.js";
 import type { Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
+import type { GameMode } from "./save/format.js";
 import { SELECTION } from "./shapes.js";
 import type { Terrain } from "./terrain.js";
 import type { VoxelWorld } from "./world.js";
-/** Seconds between repeated breaks or placements while a button is held. */
+
+/** Seconds between repeated placements while the button is held, and between breaks in creative. */
 const REPEAT = 0.25;
+/** Seconds of pause after breaking a block in survival before the next one starts, as Minecraft's. */
+const BREAK_PAUSE = 0.25;
 
 /** What the crosshair can hit in a block: fluids have no boxes, so the ray goes through them. */
 const selectionOf = (state: number): Float64Array => SELECTION[state];
 
+/** Blocks that open a screen when used: a crafting table, a chest, a furnace. */
+const OPENS: ReadonlySet<number> = new Set([Block.CraftingTable, Block.Chest, Block.Furnace]);
+
 /**
  * Breaking, placing and using blocks: finds the block under the crosshair every frame (outlined by the
- * terrain), breaks it with the left button, and with the right one opens or shuts a door or trapdoor or
- * places the selected hotbar block against it, repeating while the button is held. The middle button picks
- * the block aimed at into the hotbar. What breaking or placing does to the blocks around (torches coming
- * off, water flowing in, fences connecting) is up to the block updates.
+ * terrain). The left button breaks it: at once in creative, in survival after as long as the block and the
+ * held tool take (the progress shows as cracks), wearing the tool. The right one opens a crafting table,
+ * chest or furnace, opens or shuts a door or trapdoor, or places the held block (in survival using one up),
+ * repeating while the button is held. The middle button picks the block aimed at: any block in creative,
+ * from the inventory in survival. What breaking or placing does to the blocks around (torches coming off,
+ * water flowing in, fences connecting) is up to the block updates.
  */
 export class BlockInteraction extends SimObject {
   target: VoxelHit | null = null;
   /** Where the crosshair meets the target, or null (then its middle counts). */
   hit: Vec3 | null = null;
-  /** The blocks in hotbar slots 1-9. */
-  readonly hotbar: Block[] = [...HOTBAR];
-  /** Hotbar slot, 0-8. */
-  selected: number = 0;
-  /** Called with the selected slot when the selection or the hotbar's blocks change. */
+  readonly inventory: Inventory;
+  mode: GameMode = "creative";
+  /** Called with the selected slot when the selection or the hotbar's items change. */
   onSelect: ((slot: number) => void) | null = null;
-  /** Called with every action that changed something (a guest sends them to the host). */
-  onAction: ((a: Action) => void) | null = null;
+  /** Called with every action that changed something, and what was held (a guest sends them to the host). */
+  onAction: ((a: Action, held: ItemStack | null) => void) | null = null;
+  /** Called with a block this player broke, as it was, and what they held: for its drops. */
+  onBroken: ((x: number, y: number, z: number, state: number, held: ItemStack | null) => void) | null = null;
+  /** Called when the player uses a crafting table, chest or furnace. */
+  onOpen: ((x: number, y: number, z: number, state: number) => void) | null = null;
   /** The feet of the other players, whom blocks aren't placed into. */
   others: () => readonly Vec3[] = () => [];
+  /** How far breaking the target has come (0-1), for the cracks; null when nothing is being broken. */
+  progress: number | null = null;
   private readonly world: VoxelWorld;
   private readonly player: Player;
   private readonly terrain: Terrain;
@@ -40,33 +56,54 @@ export class BlockInteraction extends SimObject {
   private readonly blockAt: (x: number, y: number, z: number) => number;
   private held: "break" | "place" | null = null;
   private timer: number = 0;
+  /** The block being broken (survival) and seconds spent on it. */
+  private breaking: { x: number; y: number; z: number; state: number } | null = null;
+  private elapsed: number = 0;
 
-  constructor(world: VoxelWorld, player: Player, terrain: Terrain) {
+  constructor(world: VoxelWorld, player: Player, terrain: Terrain, inventory: Inventory = new Inventory()) {
     super();
     this.world = world;
     this.player = player;
     this.terrain = terrain;
+    this.inventory = inventory;
     this.blockAt = (x, y, z) => world.get(x, y, z);
   }
 
+  get selected(): number {
+    return this.inventory.selected;
+  }
+
+  /** The block the held item places, or air. */
   get selectedBlock(): Block {
-    return this.hotbar[this.selected];
+    const held = this.inventory.held;
+    return held ? (ITEMS[held.item].block ?? Block.Air) : Block.Air;
   }
 
   select(slot: number): void {
-    const n = this.hotbar.length;
-    this.selected = ((slot % n) + n) % n;
-    this.onSelect?.(this.selected);
+    this.inventory.select(slot);
+    this.onSelect?.(this.inventory.selected);
   }
 
-  /** Puts a block into the selected hotbar slot, or selects the slot that already has it. */
-  choose(block: Block): void {
-    const slot = this.hotbar.indexOf(block);
-    if (slot >= 0) {
-      this.select(slot);
+  /**
+   * Puts an item into the hotbar: selects a hotbar slot that has it; in creative otherwise puts it into the
+   * selected slot; in survival brings it from the rest of the inventory, if it is there.
+   */
+  choose(item: Item): void {
+    const slots = this.inventory.slots;
+    const inHotbar = slots.findIndex((s, i) => i < HOTBAR_SLOTS && s?.item === item);
+    if (inHotbar >= 0) {
+      this.select(inHotbar);
       return;
     }
-    this.hotbar[this.selected] = block;
+    if (this.mode === "creative") {
+      this.inventory.put(this.selected, { item, count: ITEMS[item].maxStack, damage: 0 });
+    } else {
+      const from = slots.findIndex((s, i) => i >= HOTBAR_SLOTS && i < INVENTORY_SLOTS && s?.item === item);
+      if (from < 0) return;
+      const swap = slots[this.selected];
+      this.inventory.put(this.selected, slots[from]);
+      this.inventory.put(from, swap);
+    }
     this.onSelect?.(this.selected);
   }
 
@@ -80,14 +117,16 @@ export class BlockInteraction extends SimObject {
     if (!action) return;
     this.held = action;
     this.timer = REPEAT;
-    this.act(action);
+    if (action === "place" || this.mode === "creative") this.act(action);
+    else this.timer = 0;
   }
 
   release(button: number): void {
     if ((button === 0 && this.held === "break") || (button === 2 && this.held === "place")) this.held = null;
+    if (button === 0) this.stopBreaking();
   }
 
-  /** The action on the target with the selected block, from where the player looks. */
+  /** The action on the target with the held block, from where the player looks. */
   private action(act: Action["act"]): Action | null {
     const t = this.target;
     if (!t) return null;
@@ -97,14 +136,22 @@ export class BlockInteraction extends SimObject {
 
   /** Does an action (see actions.ts), and tells onAction if it did anything. */
   private apply(a: Action | null): boolean {
+    const held = this.inventory.held;
     if (!a || !perform(this.world, a, [this.player.position, ...this.others()])) return false;
-    this.onAction?.(a);
+    this.onAction?.(a, held);
     return true;
   }
 
-  /** Breaks the target block; the block updates deal with what that does around it. */
+  /** Breaks the target block, wearing the tool in survival; onBroken gets what it was. */
   breakTarget(): boolean {
-    return this.apply(this.action("break"));
+    const t = this.target;
+    if (!t) return false;
+    const state = this.world.get(t.x, t.y, t.z);
+    const held = this.inventory.held;
+    if (!this.apply(this.action("break"))) return false;
+    if (this.mode === "survival" && breakTime(blockOf(state), held) > 0) this.inventory.wearHeld(held && ITEMS[held.item].tool?.kind === "sword" ? 2 : 1);
+    this.onBroken?.(t.x, t.y, t.z, state, held);
+    return true;
   }
 
   /** Opens or shuts the target if it's a door (both halves) or a trapdoor. Returns whether it was one. */
@@ -113,19 +160,73 @@ export class BlockInteraction extends SimObject {
   }
 
   /**
-   * Places the selected block against the face of the target, or adds it to the target (see
-   * placeBlock): not where it has nothing to hold it up, the place is taken, or a player stands there.
+   * Places the held block against the face of the target, or adds it to the target (see placeBlock): not
+   * where it has nothing to hold it up, the place is taken, or a player stands there. In survival it uses
+   * one up.
    */
   placeAtTarget(): boolean {
-    return this.apply(this.action("place"));
+    if (this.selectedBlock === Block.Air) return false;
+    if (!this.apply(this.action("place"))) return false;
+    if (this.mode === "survival") this.inventory.useHeld(1);
+    return true;
+  }
+
+  /** Takes the held stack (one of it, or all) out of the hotbar, to throw. */
+  throwHeld(all: boolean): ItemStack | null {
+    const held = this.inventory.held;
+    if (!held) return null;
+    const n = all ? held.count : 1;
+    this.inventory.useHeld(n);
+    return { ...held, count: n };
   }
 
   override update(dt: number): void {
+    if (this.held === "break" && this.mode === "survival") {
+      this.breakSurvival(dt);
+      return;
+    }
     if (!this.held) return;
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer += REPEAT;
     this.act(this.held);
+  }
+
+  /** Survival breaking: time spent on the same block adds up until it breaks; another block starts over. */
+  private breakSurvival(dt: number): void {
+    if (this.timer > 0) {
+      this.timer -= dt;
+      return;
+    }
+    const t = this.target;
+    if (!t) {
+      this.stopBreaking();
+      return;
+    }
+    const b = this.breaking;
+    if (!b || b.x !== t.x || b.y !== t.y || b.z !== t.z || b.state !== t.block) {
+      this.breaking = { x: t.x, y: t.y, z: t.z, state: t.block };
+      this.elapsed = 0;
+    }
+    const time = breakTime(blockOf(t.block), this.inventory.held);
+    if (time === Infinity) {
+      this.progress = null;
+      return;
+    }
+    this.elapsed += dt;
+    this.progress = time > 0 ? Math.min(1, this.elapsed / time) : 1;
+    if (this.elapsed >= time) {
+      this.breakTarget();
+      this.stopBreaking();
+      this.timer = BREAK_PAUSE;
+      this.sync();
+    }
+  }
+
+  private stopBreaking(): void {
+    this.breaking = null;
+    this.elapsed = 0;
+    this.progress = null;
   }
 
   /** After the player moved the camera: what the crosshair points at now. */
@@ -141,8 +242,18 @@ export class BlockInteraction extends SimObject {
   }
 
   private act(action: "break" | "place"): void {
-    if (action === "break") this.breakTarget();
-    else if (!this.useTarget()) this.placeAtTarget();
+    if (action === "break") {
+      this.breakTarget();
+    } else {
+      const t = this.target;
+      if (t && OPENS.has(blockOf(t.block)) && this.onOpen) {
+        // Not again while the button is held
+        this.held = null;
+        this.onOpen(t.x, t.y, t.z, t.block);
+        return;
+      }
+      if (!this.useTarget()) this.placeAtTarget();
+    }
     // Aim again right away, so a held button acts on what is there now
     this.sync();
   }

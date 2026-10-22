@@ -1,3 +1,4 @@
+import { entityFor, keeps, type BlockEntity } from "./blockEntities.js";
 import { Block, CUBE_SHAPED, CULL_SAME, DIR_X, DIR_Y, DIR_Z, FLUID, LEAFY, SOLID, STATE_BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, MODEL_FACE, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
 import { ownHeight } from "./fluids.js";
@@ -21,6 +22,8 @@ export class VoxelWorld implements LightWorld {
   fancyLeaves: boolean = false;
   /** Called after every block change with its position (BlockUpdates.changed). */
   onChanged: ((x: number, y: number, z: number) => void) | null = null;
+  /** Called when a chest or furnace goes with its block, with what it held (the game drops it). */
+  onEntityRemoved: ((x: number, y: number, z: number, entity: BlockEntity) => void) | null = null;
 
   constructor(generator: ChunkGenerator) {
     this.generator = generator;
@@ -114,6 +117,20 @@ export class VoxelWorld implements LightWorld {
     return dropped;
   }
 
+  /** What the chest or furnace at a block holds (made empty the first time), or null for other blocks. */
+  blockEntity(x: number, y: number, z: number): BlockEntity | null {
+    const chunk = this.chunks.get(VoxelWorld.key(x >> 4, z >> 4));
+    if (!chunk || y < 0 || y >= WORLD_HEIGHT) return null;
+    const key = (y << 8) | ((z & 15) << 4) | (x & 15);
+    const state = chunk.get(x & 15, y, z & 15);
+    const kept = chunk.entities.get(key);
+    if (kept && keeps(kept, state)) return kept;
+    const made = entityFor(STATE_BLOCK[state]);
+    if (made) chunk.entities.set(key, made);
+    else chunk.entities.delete(key);
+    return made;
+  }
+
   /** Block state at integer world coordinates: bedrock below the world, air above it and in missing chunks. */
   get(x: number, y: number, z: number): number {
     if (y < 0) return Block.Bedrock;
@@ -191,6 +208,12 @@ export class VoxelWorld implements LightWorld {
     const s = y >> 4;
     chunk.set(lx, y, lz, state);
     chunk.unsaved = true;
+    const entityKey = (y << 8) | (lz << 4) | lx;
+    const entity = chunk.entities.get(entityKey);
+    if (entity && !keeps(entity, state)) {
+      chunk.entities.delete(entityKey);
+      this.onEntityRemoved?.(x, y, z, entity);
+    }
     chunk.packed = null;
     chunk.sections[s].dirty = true;
     if (ly === 0 && s > 0) chunk.sections[s - 1].dirty = true;

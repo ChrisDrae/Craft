@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Biome, encodeBiomes } from "../src/biomes.js";
 import { BLOCKS, Block, HOTBAR, stateName, stateOf } from "../src/blocks.js";
+import type { ChestEntity } from "../src/blockEntities.js";
+import { itemByName } from "../src/items.js";
 import { readWorldFile } from "../src/save/worldFile.js";
 import { loadSettings, saveSettings } from "../src/settings.js";
 import { freshStore, openWorld } from "./saveHelpers.js";
@@ -24,13 +26,17 @@ describe("saves from earlier versions", () => {
     expect(world.get(4, 100, 4)).toBe(Block.Bricks);
     expect(world.get(-5, 90, 20)).toBe(Block.GoldOre);
     expect(ticks.inChunk(0, 0)).toEqual([{ x: 5, y: 100, z: 5, block: Block.Sand, due: 540 }]);
-    // Format 1 had no hotbar to save: the player gets the default one
-    expect(data.player!.hotbar).toEqual(HOTBAR.map((b) => BLOCKS[b].name));
+    // Format 1 had no hotbar to save: the player gets the default one, as their inventory since format 5;
+    // the world was played with every block at hand
+    expect(data.player!.inventory.slice(0, 9)).toEqual(HOTBAR.map((b) => ({ item: BLOCKS[b].name, count: 1 })));
+    expect(data.player!.inventory).toHaveLength(41);
+    expect(data.meta.mode).toBe("creative");
   });
 
   it("opens a world saved in format 2: block shapes, fluid levels and the hotbar", async () => {
     const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-2.craftworld", import.meta.url))));
-    expect(data.player).toMatchObject({ selected: 3, hotbar: ["stone", "oak_planks", "glass", "oak_stairs", "torch", "oak_door", "white_wool", "water", "lava"] });
+    expect(data.player!.selected).toBe(3);
+    expect(data.player!.inventory.slice(0, 9).map((s) => s?.item)).toEqual(["stone", "oak_planks", "glass", "oak_stairs", "torch", "oak_door", "white_wool", "water", "lava"]);
 
     const store = await freshStore();
     await store.writeWorld(data);
@@ -75,11 +81,29 @@ describe("saves from earlier versions", () => {
       name: "Alex",
       position: { x: 20.5, y: 70, z: -3.5 },
       selected: 4,
-      hotbar: ["glass", "oak_door", "birch_log"],
+      inventory: [{ item: "glass", count: 1 }, { item: "oak_door", count: 1 }, { item: "birch_log", count: 1 }, ...new Array(38).fill(null)],
     });
     const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-4"))!);
     await save.loadNow(8, 8, 0);
     expect(world.get(8, 120, 8)).toBe(Block.Glowstone);
+  });
+});
+
+describe("saves from earlier versions, items", () => {
+  it("opens a world saved in format 5: survival, the inventory, a chest's contents, items lying about", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-5.craftworld", import.meta.url))));
+    expect(data.meta.mode).toBe("survival");
+    expect(data.player!.selected).toBe(1);
+    expect(data.player!.inventory.slice(0, 2)).toEqual([{ item: "iron_pickaxe", count: 1, damage: 17 }, { item: "torch", count: 23 }]);
+    expect(data.player!.inventory[36]).toEqual({ item: "diamond", count: 1 });
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-5"))!);
+    await save.loadNow(8, 8, 0);
+    const chest = world.blockEntity(5, 120, 5) as ChestEntity;
+    expect(chest.items[13]).toEqual({ item: itemByName("iron_ingot"), count: 9, damage: 0 });
+    const record = await store.getChunk("fixture-world-5", 0, 0);
+    expect(record!.drops.map((d) => d.item)).toEqual([{ item: "cobblestone", count: 3 }]);
   });
 });
 

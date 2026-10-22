@@ -1,3 +1,4 @@
+import type { BlockEntity } from "./blockEntities.js";
 import { OPAQUE } from "./blocks.js";
 
 export const CHUNK_SIZE = 16;
@@ -76,6 +77,8 @@ export class Chunk {
   biomes: Uint8Array = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
   /** The version of the terrain generator that made it (GENERATOR_VERSION; 0 before it was known). */
   generator: number = 0;
+  /** What chests and furnaces hold, by position in the chunk ((y << 8) | (z << 4) | x). */
+  readonly entities: Map<number, BlockEntity> = new Map();
 
   constructor(
     readonly cx: number,
