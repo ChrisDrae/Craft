@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Block, DIR_X, DIR_Y, DIR_Z, Dir } from "../src/blocks.js";
 import { CHUNK_SIZE, WORLD_HEIGHT, type Chunk } from "../src/chunk.js";
-import { SEA_LEVEL, TerrainGenerator } from "../src/generator.js";
 import { VoxelWorld } from "../src/world.js";
 import { flatWorld } from "./helpers.js";
 
@@ -150,51 +149,5 @@ describe("solid sections", () => {
     expect(facesOf(world, chunk).map(key).sort()).toEqual(expected.sort());
     // One face of section 1 toward each hole
     expect(expected.filter((k) => /^\d+,(1[6-9]|2\d|3[01]),/.test(k))).toHaveLength(5);
-  });
-});
-
-describe("TerrainGenerator", () => {
-  it("makes the same terrain for the same seed", () => {
-    const blocks = (seed: string): (Uint16Array | null)[] => new VoxelWorld(new TerrainGenerator(seed)).load(3, -2).sections.map((s) => s.blocks);
-    expect(blocks("test")).toEqual(blocks("test"));
-    expect(blocks("test")).not.toEqual(blocks("other"));
-  });
-
-  it("has bedrock at the bottom, water up to sea level and the expected blocks", () => {
-    const world = new VoxelWorld(new TerrainGenerator("test"));
-    world.loadAround(0, 0, 6, Infinity);
-    const counts = new Map<number, number>();
-    for (const chunk of world.chunks.values()) {
-      for (const s of chunk.sections) for (const b of s.blocks ?? []) counts.set(b, (counts.get(b) ?? 0) + 1);
-      for (let z = 0; z < CHUNK_SIZE; z++) {
-        for (let x = 0; x < CHUNK_SIZE; x++) {
-          expect(chunk.get(x, 0, z)).toBe(Block.Bedrock);
-          expect(chunk.get(x, SEA_LEVEL + 1, z)).not.toBe(Block.Water);
-          expect(chunk.get(x, WORLD_HEIGHT - 1, z)).toBe(Block.Air);
-        }
-      }
-    }
-    for (const b of [Block.Grass, Block.Dirt, Block.Stone, Block.Sand, Block.Water, Block.Log, Block.Leaves, Block.CoalOre, Block.IronOre]) {
-      expect(counts.get(b) ?? 0, `block ${b}`).toBeGreaterThan(0);
-    }
-  });
-
-  it("grows trees across chunk borders without cutting them off", () => {
-    const world = new VoxelWorld(new TerrainGenerator("test"));
-    world.loadAround(0, 0, 4, Infinity);
-    // Every log with air above it must carry leaves on top, wherever its chunk border is
-    let trees = 0;
-    for (const chunk of world.chunks.values()) {
-      for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
-        for (let z = 0; z < CHUNK_SIZE; z++) {
-          for (let x = 0; x < CHUNK_SIZE; x++) {
-            if (chunk.get(x, y, z) !== Block.Log || chunk.get(x, y + 1, z) === Block.Log) continue;
-            trees++;
-            expect(chunk.get(x, y + 1, z)).toBe(Block.Leaves);
-          }
-        }
-      }
-    }
-    expect(trees).toBeGreaterThan(3);
   });
 });

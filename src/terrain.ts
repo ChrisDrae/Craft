@@ -39,6 +39,8 @@ export class Terrain extends SimObject {
   supply: ChunkSupply = new DirectSupply();
   /** Called with every chunk as it is unloaded. */
   onUnload: ((chunk: Chunk) => void) | null = null;
+  /** More places to keep chunks loaded around, as far as each sees in chunks (a host's guests). */
+  others: () => ReadonlyArray<{ x: number; z: number; radius: number }> = () => [];
   /** Chunk meshes built per frame at most, nearest first, so the chunk being edited updates at once. */
   meshBudget: number = 4;
   /** Faces farther than this (in blocks) are not drawn. */
@@ -110,11 +112,20 @@ export class Terrain extends SimObject {
   override update(): void {
     const f = this.focus;
     this.supply.requestAround(this.world, f.x, f.z, this.radius);
-    for (const chunk of this.world.unloadOutside(f.x, f.z, this.radius + UNLOAD_MARGIN)) {
-      const nodes = this.chunkNodes.get(chunk);
-      if (nodes) this.dropNodes(chunk, nodes);
+    const others = this.others();
+    for (const o of others) this.supply.requestAround(this.world, o.x, o.z, o.radius);
+    const near = (cx: number, cz: number): boolean =>
+      others.some((o) => (cx - Math.floor(o.x / CHUNK_SIZE)) ** 2 + (cz - Math.floor(o.z / CHUNK_SIZE)) ** 2 <= (o.radius + UNLOAD_MARGIN + 0.5) ** 2);
+    for (const chunk of this.world.unloadOutside(f.x, f.z, this.radius + UNLOAD_MARGIN, others.length > 0 ? near : undefined)) {
+      this.drop(chunk);
       this.onUnload?.(chunk);
     }
+  }
+
+  /** Lets go of a chunk's meshes (it was unloaded, or is being replaced). */
+  drop(chunk: Chunk): void {
+    const nodes = this.chunkNodes.get(chunk);
+    if (nodes) this.dropNodes(chunk, nodes);
   }
 
   /** After everything that edits blocks this frame: bring the chunk meshes up to date. */

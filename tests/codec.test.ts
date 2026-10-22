@@ -63,7 +63,7 @@ describe("chunk encoding", () => {
   it("keeps a chunk's scheduled ticks by block name, and marks a read chunk saved", async () => {
     const world = generated();
     const ticks = [{ x: 2, y: 70, z: 3, block: Block.Sand, due: 41 }];
-    const record = await chunkRecord("w", snapshotChunk(world.chunk(0, 0)!, 1, ticks));
+    const record = await chunkRecord("w", snapshotChunk(world.chunk(0, 0)!, ticks));
     expect(record.ticks).toEqual([{ x: 2, y: 70, z: 3, block: "sand", due: 41 }]);
     const back = await readChunkRecord(record);
     expect(back.ticks).toEqual(ticks);

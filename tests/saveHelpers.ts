@@ -27,6 +27,7 @@ export function newMeta(id: string, seed: string = "saves"): WorldMeta {
     spawn: null,
     chunks: 0,
     bytes: 0,
+    mode: "survival",
   };
 }
 
@@ -36,7 +37,7 @@ export const standing: PlayerState = {
   yaw: 0.5,
   pitch: -0.2,
   selected: 3,
-  hotbar: ["stone", "oak_planks", "glass", "oak_stairs", "torch", "oak_door", "white_wool", "water", "lava"],
+  inventory: [{ item: "stone", count: 64 }, { item: "iron_pickaxe", count: 1, damage: 30 }, null, { item: "torch", count: 12 }, ...new Array(37).fill(null)],
 };
 
 /** A world being played as the game does it: generated directly, with ticks and a save. */

@@ -20,6 +20,8 @@ export interface Quad {
   cull: number;
   /** The way it faces (Dir), for shading and the light it takes, or -1 (plants: unshaded, lit by their own block). */
   dir: number;
+  /** Its color by biome (Tint), its block's. */
+  tint: number;
 }
 
 /** A box in the block's own coordinates: min x, y, z, max x, y, z. */
@@ -79,7 +81,7 @@ function boxQuads(box: Box, tile: (d: number) => number, faces: readonly number[
       corners.set([x, y, z], k * 3);
       uvs.set(cornerUV(d, x, y, z), k * 2);
     }
-    return { corners, uvs, tile: tile(d), cull: onSide[d] ? d : -1, dir: d };
+    return { corners, uvs, tile: tile(d), cull: onSide[d] ? d : -1, dir: d, tint: 0 };
   });
 }
 
@@ -103,7 +105,7 @@ function crossQuads(tile: number): Quad[] {
       [q, p],
     ]) {
       const corners = Float64Array.of(s[0], 0, s[1], e[0], 0, e[1], e[0], 1, e[1], s[0], 1, s[1]);
-      quads.push({ corners, uvs: Float64Array.of(0, 1, 1, 1, 1, 0, 0, 0), tile, cull: -1, dir: -1 });
+      quads.push({ corners, uvs: Float64Array.of(0, 1, 1, 1, 1, 0, 0, 0), tile, cull: -1, dir: -1, tint: 0 });
     }
   }
   return quads;
@@ -235,10 +237,33 @@ function partsOf(state: number): Parts | null {
       const box: Box = [px(1), 0, px(1), px(15), 1, px(15)];
       return boxes(b, [box], [[px(1), 0, px(1), px(15), px(15), px(15)]]);
     }
+    case "tall": {
+      // The upper half shows the top texture
+      const tile = prop("half") === "upper" ? t[Face.Top] : t[Face.Side];
+      return { quads: crossQuads(tile), collision: [], selection: [[px(2), 0, px(2), px(14), 1, px(14)]] };
+    }
+    case "chest": {
+      // Built facing north; half of a double chest reaches to the side its other half is on
+      const type = prop("type");
+      const box: Box = [type === "right" ? 0 : px(1), 0, px(1), type === "left" ? 1 : px(15), px(14), px(15)];
+      const turned = turn(box, TURNS[prop("facing")]);
+      const front = FACING_DIR[prop("facing")];
+      const quads = boxQuads(turned, (d) => (d === front ? t[Face.Front] : t[lookOf(d)]));
+      return { quads, collision: [turned], selection: [turned] };
+    }
+    case "lilypad": {
+      // A leaf lying on the water, seen from above and below
+      const leaf: Box = [0, px(0.25), 0, 1, px(0.25), 1];
+      return { quads: boxQuads(leaf, () => t[Face.Top], [Dir.Up, Dir.Down]), collision: [[0, 0, 0, 1, px(1.5), 1]], selection: [[0, 0, 0, 1, px(1.5), 1]] };
+    }
   }
 }
 
-const PARTS: readonly (Parts | null)[] = Array.from({ length: STATE_COUNT }, (_, s) => partsOf(s));
+const PARTS: readonly (Parts | null)[] = Array.from({ length: STATE_COUNT }, (_, s) => {
+  const parts = partsOf(s);
+  for (const q of parts?.quads ?? []) q.tint = BLOCKS[STATE_BLOCK[s]].tint;
+  return parts;
+});
 
 /** The quads of every state drawn as a model, or null (full cubes and fluids). */
 export const MODELS: readonly (Quad[] | null)[] = PARTS.map((p) => p?.quads ?? null);
@@ -322,6 +347,6 @@ export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s)
     return facing === "up" ? Dir.Down : FACING_DIR[facing] ^ 1;
   }
   if (shape === "ladder") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
-  if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door") return Dir.Down;
+  if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door" || shape === "tall" || shape === "lilypad") return Dir.Down;
   return -1;
 });

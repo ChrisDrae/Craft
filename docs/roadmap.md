@@ -112,6 +112,7 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | 2 | Light, day and night, sky | L | 0; Projector R12–R14 |
 | 3 | Block shapes, more blocks, fluids | L | 0, 2 |
 | 4 | Terrain 2.0: biomes, caves, structures | L | 3 |
+| M | Multiplayer: friends join a host's session | L | 4 |
 | 5 | Items, inventory, crafting, tools | L | 3 |
 | 6 | Survival and game modes | M | 5 |
 | 7 | Mobs and combat | L | 6 |
@@ -313,6 +314,35 @@ migrating from today's format.
 
 ### Phase 4: Terrain 2.0 (L)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- 18 biomes: the 15 planned and dark forest, frozen river and frozen ocean. Climate is sampled at density
+  points 4 blocks apart (as Minecraft's biomes are) and each column takes a nearby point's biome with a
+  little jitter, so borders aren't square. Chunks store a biome per column (save format 3); chunks from
+  before are plains, as they were made.
+- Biome colors blend over 6 x 6 columns around each corner. Grass, leaves, ferns, sugar cane and water are
+  stored gray (Minecraft's own are) and colored per corner by the mesh; birch and spruce leaves and lily
+  pads have fixed colors. Grass block sides get Minecraft's tinted overlay as a second quad, drawn over the
+  first (WebGL's depth test lets the second through). Snow on grass shows on its sides (`snowy`).
+- Shape: Minecraft's density on 4 x 8 x 4 points, interpolated, from splines of the climate: coasts, hills,
+  rivers in valleys, mountains with cliffs and overhangs up to about y 235, swamps at the water line.
+- Caves: noise caves only (caverns and tunnels, some opening to the surface) and noise ravines instead of
+  carvers, so they meet across chunk borders by construction; lava below y 10. **No aquifers:** caves are
+  dry, and are kept from touching the sea and rivers so these don't drain into them.
+- Ores by depth as measured over 24 land chunks: coal (median y 59), copper (48), iron (35), gold (17),
+  redstone and lapis low, diamonds below 16 at about 4 per chunk, emeralds single in mountains. No
+  deepslate.
+- Trees: oak, big oak, swamp oak, birch, spruce, jungle (and 2 x 2 giant ones), acacia, dark oak (2 x 2).
+  Plants: grass, tall grass, ferns, large ferns, eight flowers, dead bushes, cacti, sugar cane by water,
+  lily pads on swamps, pumpkins. Snow on cold ground and on peaks above y 150, ice on cold water. No vines
+  or cocoa yet.
+- Structures: dungeons (with a spawner; the chest comes with Phase 5's inventories), desert wells, ruins of
+  old stone. Trees don't grow through them.
+- 121 blocks: five more woods (log, leaves, planks), sandstone, five ores, mossy and cracked stone,
+  spawner, the plants above. Tall grass and large ferns are two-high like doors.
+- Measured in Chrome: generating takes 1.5 ms per chunk in the worker, which kept every chunk in view
+  loaded flying at 44 blocks/s; meshing 0.96 ms per chunk (0.47 before: tints, overlays, cave faces);
+  frames at most 8.7 ms flying; Canvas 2D 60 fps at 7.9 ms (more plants to draw).
+
 - **Climate and biomes** (`src/gen/`): noise for temperature, humidity, continentalness and erosion picks a
   biome per column: ocean, deep ocean, beach, river, plains, forest, birch forest, taiga, snowy plains,
   desert, savanna, jungle, swamp, stony mountains, snowy peaks. Each brings surface rules, vegetation and tint
@@ -330,7 +360,95 @@ migrating from today's format.
 - **Tests:** determinism per seed, every biome appearing within a fixed area, ore depth histograms, structures
   across chunk borders.
 
+### Phase M: Multiplayer (L)
+
+**Done on 2026-10-22.** What changed against the plan below:
+- Guests do their own actions at once with the same rules as the host (`src/actions.ts`, shared with
+  single player) and send them; the host does them again after checking reach, the block and that the
+  face is real, and sends what really is there to every guest, the actor included, putting right a guess
+  it refused. Movement is the guest's own (not checked beyond being numbers), as Minecraft's servers do
+  only loosely.
+- The host sends chunks in the packed form saves use, nearest first, a few per frame and only while the
+  data channel's buffer is low; a guest tells the host which chunks it let go of. Block changes in the
+  chunks a guest has go out once a frame, after any chunk still being compressed for them.
+- Host and guest check they run the same Craft: the protocol version and a fingerprint of all block states
+  (states travel as ids).
+- Signaling: `/api/signal` (mailboxes per world code, one offer and one answer per join, no trickle ICE)
+  and `/api/ice` (STUN, and Cloudflare TURN credentials when a key is set), one module run by Vercel
+  Functions with Upstash Redis and by the Vite dev and preview servers in memory.
+- Guests are saved by the host: save format 4 and a `guests` store (IndexedDB version 2, created on
+  upgrade); `.craftworld` files carry them. Quick-play worlds keep returning guests' places until the page
+  closes.
+- Other players are figures of boxes in a shirt color of their own, lit by the light where they stand,
+  with name tags; joins and leaves are noticed. The player's name is in Options, asked for on the first
+  join; a random id kept in the browser says who comes back.
+- Not done: copy-and-paste invites without any server (a deployment needs its functions), and importing
+  Minecraft's textures in the browser (guests on a deployed game see Craft's own).
+- Measured in Chrome, two browsers on one computer over WebRTC: a guest joined and had 151 chunks in 3.2
+  s; while it flew at 20 blocks/s for 10 s it never missed a chunk within 4, and the host's frames stayed
+  at a median of 1 ms and at most 3.3 ms.
+
+Asked for after Phase 4 was planned: friends play in one world, hosted by one of them, with nothing to run
+but the game. Proposed to come right after Phase 4, so items, mobs and survival are built for it from the
+start rather than fitted to it later.
+
+- **The host's browser is the server.** The host plays as usual; generation, ticks, fluids, block updates
+  and saves run there, as now. "Open to friends" gives an invite link (`<domain>/?join=<code>`).
+- **Clients** show the host's world: they receive chunks in the packed form saves use (biomes and all),
+  block changes as they happen, other players and the time, and send their position and actions (break,
+  place, use). The host checks actions against reach and rules before applying them. Movement is predicted
+  locally and corrected by the host.
+- **Transport:** WebRTC data channels, browser to browser. Introductions (signaling) go through a small
+  function next to the static game (Vercel), a few kilobytes per join; STUN finds the way through home
+  routers, and a TURN relay (Cloudflare's free tier) is used where that fails. Game traffic never touches
+  the deployment. A copy-and-paste invite works without any server.
+- **Saves:** player records per player id in the host's world (format change); the world lives in the
+  host's browser, and the session ends when the host closes it.
+- **Textures:** a deployed game can't serve Minecraft's textures; each player may import their own into
+  their browser instead of `npm run textures`.
+- **Done when:** two browsers on different networks build in the same world, see each other move, and the
+  joining player's things are where they left them when they come back.
+- **Tests:** a host and clients in one test over an in-memory transport: chunk sync, edits both ways,
+  rejected actions, a client reconnecting.
+
 ### Phase 5: Items, inventory, crafting, tools (L)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- A game mode per world came along (the start of Phase 6): survival gathers, breaks in time, drops and
+  crafts; creative has every item at hand (E lists them, with a search), breaks at once and uses nothing
+  up. New worlds pick one, older ones are creative (save format 5), quick play takes `&mode=creative`.
+- Items (`src/items.ts`): every block, 25 materials and foods, 25 tools in five tiers (gold as fast as
+  Minecraft's and as weak), 16 pieces of armor (worn in their slots; protection comes with health in
+  Phase 6). Not yet: buckets, shears, flint and steel, beds (Phase 6), food that can be eaten (Phase 6).
+- Inventory (`src/inventory.ts`): 36 slots, 4 armor slots and an off-hand slot (kept, not used yet).
+  Minecraft's clicks: pick up, put down, swap, halve, one at a time, shift to move across, double click to
+  gather; not yet dragging to spread a stack.
+- Crafting (`src/crafting.ts`): about a hundred shaped and shapeless recipes as data, with tags (any
+  planks, any log, coal or charcoal), shapes matched anywhere in the grid and mirrored; 2 x 2 in the
+  inventory, 3 x 3 at a crafting table; shift on the result crafts as many as fit. No recipe book.
+- Mining (`src/mining.ts`): Minecraft's hardness, tool kinds and tiers and its break time formula, the
+  drops of each block (ores give raw ore or gems, stone cobblestone, leaves now and then a sapling or an
+  apple, double slabs two slabs), tools wearing a use per block. Cracks show the progress on WebGL.
+- Dropped items (`src/drops.ts`): entities that fall, slide, merge with their kind, get picked up after a
+  moment and go after five minutes; saved with their chunk. Block items show as spinning cubes with their
+  textures, others as their picture.
+- Block entities (`src/blockEntities.ts`): chests (27 slots, a double chest 54) and furnaces (fuel, 10 s per
+  item, coal for 8, a lit front that gives off light), saved with their chunk; breaking one spills what it
+  held.
+- Icons: blocks drawn once into little cubes from their textures (`src/icons.ts`), items from Minecraft's
+  item textures when imported (66 of them, and the chest from its model's texture), Craft's own drawings
+  otherwise.
+- Multiplayer (protocol 2): a guest's inventory is theirs (the host keeps it for their next visit); their
+  breaks drop on the host's side for the tool they held; they see the items lying about, pick them up by
+  asking, throw them; chests and furnaces are the host's, shown to the guest who opens them and changed by
+  them. A guest sees only the half of a double chest they opened.
+- Checked in the browser: the survival start played with the mouse (a log broken by hand, picked up,
+  planks and a crafting table in the 2 x 2 grid, a pickaxe at the table), a furnace smelting and lit, a
+  double chest, and a reload that kept the mode, the inventory with a worn pickaxe, the chest's contents and
+  the items lying about; two browsers in one world with protocol 2; Canvas 2D at 60 fps. That found two
+  bugs: chests side by side never joined into a double chest (`BlockUpdates` now pairs them, keeping a pair
+  it has), and saved worlds and joins failed to open (the inventory drew the hotbar before it was made).
+
 
 - **Items** (`src/items.ts`): every block as an item, plus materials (sticks, coal, ingots, diamonds, flint,
   string, leather), tools and food. Stacks of up to 64 (16 for some items, 1 for tools), tools with durability.
@@ -480,10 +598,11 @@ Settled on 2026-10-22, all as recommended:
 2. **The Canvas 2D renderer** stays as a fallback that gets new blocks, and light as face shading, but not
    smooth lighting, the sky or particles.
 3. **Saves store every generated chunk,** so worlds stay intact when the generator changes.
-4. **Multiplayer** is out of scope; Phase 0 keeps the simulation free of DOM and rendering code, so it stays
-   possible.
+4. **Multiplayer** by sharing a host's session (changed on 2026-10-22; first out of scope): the host's
+   browser runs the world and friends join over WebRTC, introduced by a small function next to the
+   deployed game (Phase M). Phase 0 kept the simulation free of DOM and rendering code for this.
 5. **Assets:** sounds and entity, item and GUI textures are imported from the player's installation like the
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 3 are done; next is Phase 4, terrain 2.0: biomes, caves and structures.
+Phases 0 to 5 and M are done; next is Phase 6, survival: health, hunger, armor, beds and death.

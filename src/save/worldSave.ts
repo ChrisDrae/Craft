@@ -1,11 +1,11 @@
 import { SimObject } from "projector";
+import type { Drops, SavedDrop } from "../drops.js";
 import type { Chunk } from "../chunk.js";
 import type { ChunkSupply, SkipChunk } from "../chunkSupply.js";
-import { GENERATOR_VERSION } from "../generator.js";
 import type { ScheduledTick, WorldTicks } from "../ticks.js";
 import { VoxelWorld } from "../world.js";
 import { chunkRecord, readChunkRecord, snapshotChunk, type ChunkSnapshot } from "./codec.js";
-import { FORMAT_VERSION, type PlayerRecord, type WorldMeta } from "./format.js";
+import { FORMAT_VERSION, type GuestRecord, type PlayerRecord, type WorldMeta } from "./format.js";
 import type { WorldStore } from "./store.js";
 
 /** Seconds between autosaves. */
@@ -29,6 +29,10 @@ export interface WorldSaveOptions {
   savedChunks: ReadonlyArray<[number, number]>;
   /** The player now, for every save. */
   player: () => PlayerState;
+  /** The guests to save (those playing and those who left since the last save), without their bookkeeping fields. */
+  guests?: () => Array<Omit<GuestRecord, "format" | "world">>;
+  /** The items lying about, saved with the chunks they are in. */
+  drops?: Drops;
 }
 
 /**
@@ -51,10 +55,12 @@ export class WorldSave extends SimObject implements ChunkSupply {
   private readonly ticks: WorldTicks;
   private readonly generator: ChunkSupply;
   private readonly player: () => PlayerState;
+  private readonly guests: () => Array<Omit<GuestRecord, "format" | "world">>;
   private readonly saved: Set<number>;
   /** Stored size of the chunks read or written this session, to keep meta.bytes right. */
   private readonly sizes: Map<number, number> = new Map();
-  private readonly unloaded: Map<number, { chunk: Chunk; ticks: ScheduledTick[] }> = new Map();
+  private readonly unloaded: Map<number, { chunk: Chunk; ticks: ScheduledTick[]; drops: SavedDrop[] }> = new Map();
+  private readonly drops: Drops | null;
   private readonly reading: Set<number> = new Set();
   private readonly skip: SkipChunk;
   private elapsed: number = 0;
@@ -70,6 +76,8 @@ export class WorldSave extends SimObject implements ChunkSupply {
     this.ticks = options.ticks;
     this.generator = options.generator;
     this.player = options.player;
+    this.guests = options.guests ?? (() => []);
+    this.drops = options.drops ?? null;
     this.saved = new Set(options.savedChunks.map(([cx, cz]) => VoxelWorld.key(cx, cz)));
     this.skip = (cx, cz) => {
       const key = VoxelWorld.key(cx, cz);
@@ -90,6 +98,7 @@ export class WorldSave extends SimObject implements ChunkSupply {
         this.unloaded.delete(key);
         world.insert(back.chunk);
         this.ticks.restore(back.ticks);
+        this.drops?.restore(back.drops);
       } else if (this.saved.has(key) && !this.reading.has(key) && this.reading.size < READS) {
         void this.read(cx, cz);
       }
@@ -107,10 +116,11 @@ export class WorldSave extends SimObject implements ChunkSupply {
     await Promise.all(reads);
   }
 
-  /** For Terrain.onUnload: a chunk with something unsaved waits for the next save. */
+  /** For Terrain.onUnload: a chunk with something unsaved (or items lying in it) waits for the next save. */
   unload(chunk: Chunk): void {
     const ticks = this.ticks.takeChunk(chunk.cx, chunk.cz);
-    if (chunk.unsaved || ticks.length > 0) this.unloaded.set(VoxelWorld.key(chunk.cx, chunk.cz), { chunk, ticks });
+    const drops = this.drops?.inChunk(chunk.cx, chunk.cz, true) ?? [];
+    if (chunk.unsaved || ticks.length > 0 || drops.length > 0) this.unloaded.set(VoxelWorld.key(chunk.cx, chunk.cz), { chunk, ticks, drops });
   }
 
   override update(dt: number): void {
@@ -145,13 +155,14 @@ export class WorldSave extends SimObject implements ChunkSupply {
     const loaded: Chunk[] = [];
     for (const chunk of this.world.chunks.values()) {
       if (!chunk.unsaved) continue;
-      snaps.push(snapshotChunk(chunk, GENERATOR_VERSION, this.ticks.inChunk(chunk.cx, chunk.cz)));
+      snaps.push(snapshotChunk(chunk, this.ticks.inChunk(chunk.cx, chunk.cz), this.drops?.inChunk(chunk.cx, chunk.cz, false)));
       chunk.unsaved = false;
       loaded.push(chunk);
     }
     const leaving = [...this.unloaded];
-    for (const [, { chunk, ticks }] of leaving) snaps.push(snapshotChunk(chunk, GENERATOR_VERSION, ticks));
+    for (const [, { chunk, ticks, drops }] of leaving) snaps.push(snapshotChunk(chunk, ticks, drops));
     const player: PlayerRecord = { format: FORMAT_VERSION, world: this.meta.id, ...this.player() };
+    const guests: GuestRecord[] = this.guests().map((g) => ({ format: FORMAT_VERSION, world: this.meta.id, ...g }));
     try {
       const chunks = await Promise.all(snaps.map((s) => chunkRecord(this.meta.id, s)));
       let bytes = this.meta.bytes;
@@ -162,7 +173,7 @@ export class WorldSave extends SimObject implements ChunkSupply {
         if (!this.saved.has(key)) count++;
       }
       const meta: WorldMeta = { ...this.meta, time: this.ticks.time, lastPlayed: Date.now(), bytes, chunks: count };
-      await this.store.save({ meta, player, chunks });
+      await this.store.save({ meta, player, chunks, guests });
       this.meta = meta;
       for (const c of chunks) {
         const key = VoxelWorld.key(c.cx, c.cz);
@@ -193,10 +204,11 @@ export class WorldSave extends SimObject implements ChunkSupply {
       const record = await this.store.getChunk(this.meta.id, cx, cz);
       if (!record) throw new Error("it isn't in the store");
       this.sizes.set(key, record.blocks.length);
-      const { chunk, ticks } = await readChunkRecord(record);
+      const { chunk, ticks, drops } = await readChunkRecord(record);
       if (!this.world.chunk(cx, cz)) {
         this.world.insert(chunk);
         this.ticks.restore(ticks);
+        this.drops?.restore(drops);
       }
     } catch (e) {
       // Made anew instead (and saved over the damaged one)

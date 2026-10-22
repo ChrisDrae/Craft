@@ -1,5 +1,5 @@
-import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
-import { canFallInto, delayOf } from "./fluids.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, LEFT_OF, RIGHT_OF, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { canFallInto, delayOf, isSource } from "./fluids.js";
 import { STURDY, SUPPORT } from "./shapes.js";
 import type { WorldTicks } from "./ticks.js";
 import type { VoxelWorld } from "./world.js";
@@ -16,10 +16,34 @@ function sturdy(state: number, d: number): boolean {
   return STURDY[state * 6 + d] === 1;
 }
 
+const isSoil = (block: number): boolean => block === Block.Grass || block === Block.Dirt;
+
+/**
+ * Whether a block can stand on the block below it, for plants and the lower halves of doors and tall
+ * plants: flowers and grass on grass or dirt, dead bushes on sand too, sugar cane on sugar cane or on
+ * ground by water, doors on a solid floor.
+ */
+export function standsOn(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
+  const below = world.get(x, y - 1, z);
+  const b = STATE_BLOCK[below];
+  switch (STATE_BLOCK[state]) {
+    case Block.DeadBush:
+      return isSoil(b) || b === Block.Sand;
+    case Block.SugarCane: {
+      if (b === Block.SugarCane) return true;
+      if (!isSoil(b) && b !== Block.Sand) return false;
+      for (const d of [0, 1, 4, 5]) if (FLUID[world.get(x + DIR_X[d], y - 1, z + DIR_Z[d])] === 1) return true;
+      return false;
+    }
+  }
+  return SHAPE[state] === "door" ? sturdy(below, Dir.Up) : isSoil(b);
+}
+
 /**
  * Whether the block at (x, y, z) in `state` is held up by what it rests or hangs on (see SUPPORT):
- * plants by grass or dirt, cactus by sand or cactus, a door's lower half by a solid floor and its upper
- * half, the upper half by the lower one, everything else by a solid face.
+ * plants by the ground they grow on (standsOn), cactus by sand or cactus, lily pads by still water, the
+ * lower half of a door or tall plant by its ground and its upper half, the upper half by the lower one,
+ * everything else by a solid face.
  */
 export function supported(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
   const d = SUPPORT[state];
@@ -28,16 +52,19 @@ export function supported(world: VoxelWorld, x: number, y: number, z: number, st
   const nb = STATE_BLOCK[n];
   switch (SHAPE[state]) {
     case "cross":
-      return nb === Block.Grass || nb === Block.Dirt;
+      return standsOn(world, x, y, z, state);
     case "cactus":
       return nb === Block.Sand || nb === Block.Cactus;
     case "carpet":
       return n !== Block.Air && FLUID[n] === 0;
-    case "door": {
-      const door = STATE_BLOCK[state];
-      if (propertyOf(state, "half") === "upper") return nb === door && propertyOf(n, "half") === "lower";
+    case "lilypad":
+      return (FLUID[n] === 1 && isSource(n)) || nb === Block.Ice;
+    case "door":
+    case "tall": {
+      const own = STATE_BLOCK[state];
+      if (propertyOf(state, "half") === "upper") return nb === own && propertyOf(n, "half") === "lower";
       const above = world.get(x, y + 1, z);
-      return sturdy(n, Dir.Up) && STATE_BLOCK[above] === door && propertyOf(above, "half") === "upper";
+      return standsOn(world, x, y, z, state) && STATE_BLOCK[above] === own && propertyOf(above, "half") === "upper";
     }
     default:
       return sturdy(n, d ^ 1);
@@ -83,6 +110,28 @@ function stairShape(world: VoxelWorld, x: number, y: number, z: number, state: n
     if (FACING_DIR[ff] >> 1 !== f >> 1 && takes(ff)) return ff === LEFT[facing] ? "inner_left" : "inner_right";
   }
   return "straight";
+}
+
+/**
+ * Whether a chest pairs with the one beside it into a double chest: two chests side by side facing the same
+ * way, neither paired with another. The one on the left (seen from the front) is the left half.
+ */
+function chestType(world: VoxelWorld, x: number, y: number, z: number, state: number): string {
+  const facing = propertyOf(state, "facing");
+  const partner = (side: string, theirs: string): boolean => {
+    const d = FACING_DIR[side];
+    const s = world.get(x + DIR_X[d], y, z + DIR_Z[d]);
+    if (STATE_BLOCK[s] !== Block.Chest || propertyOf(s, "facing") !== facing) return false;
+    const type = propertyOf(s, "type");
+    return type === "single" || type === theirs;
+  };
+  // A pair stays together while both halves are there; a single chest pairs with the first one free
+  const current = propertyOf(state, "type");
+  if (current === "left" && partner(RIGHT_OF[facing], "right")) return "left";
+  if (current === "right" && partner(LEFT_OF[facing], "left")) return "right";
+  if (partner(RIGHT_OF[facing], "right")) return "left";
+  if (partner(LEFT_OF[facing], "left")) return "right";
+  return "single";
 }
 
 /**
@@ -151,6 +200,11 @@ export class BlockUpdates {
       next = withProperties(state, values);
     } else if (shape === "stairs") {
       next = withProperties(state, { shape: stairShape(w, x, y, z, state) });
+    } else if (block === Block.Chest) {
+      next = withProperties(state, { type: chestType(w, x, y, z, state) });
+    } else if (block === Block.Grass) {
+      const above = STATE_BLOCK[w.get(x, y + 1, z)];
+      next = withProperties(state, { snowy: String(above === Block.Snow || above === Block.SnowBlock) });
     }
     if (next !== state) w.set(x, y, z, next);
   }

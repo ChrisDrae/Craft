@@ -1,22 +1,36 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
-import { BLOCKS, PLACEABLE, blockByName, type Block } from "./blocks.js";
-import { WORLD_HEIGHT } from "./chunk.js";
+import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, furnaceAccepts, loadEntity, tickFurnaces, type BlockEntity } from "./blockEntities.js";
+import { BLOCKS, Block, FACING_DIR, HOTBAR, LEFT_OF, RIGHT_OF, blockOf, propertyOf } from "./blocks.js";
+import { WORLD_HEIGHT, type ChunkGenerator } from "./chunk.js";
+import { Drops } from "./drops.js";
+import { Icons } from "./icons.js";
+import { HOTBAR_SLOTS, INVENTORY_SLOTS, PLAYER_SLOTS, arraySlot, type Slot } from "./inventory.js";
+import { ITEMS, loadStack, saveStack, type Item, type ItemStack } from "./items.js";
+import { ItemView } from "./itemView.js";
+import { dropsOf } from "./mining.js";
 import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
 import { LightMap } from "./lightmap.js";
 import { Player } from "./player.js";
-import type { PlayerRecord, WorldMeta } from "./save/format.js";
+import { Avatars } from "./net/avatars.js";
+import type { Connection } from "./net/connection.js";
+import { GuestSession } from "./net/guest.js";
+import { HostSession, type Guest } from "./net/host.js";
+import type { GuestState, PlayerView } from "./net/protocol.js";
+import { Hosting } from "./net/rtc.js";
+import type { GameMode, GuestRecord, PlayerRecord, WorldMeta } from "./save/format.js";
 import type { WorldStore } from "./save/store.js";
 import { WorldSave } from "./save/worldSave.js";
-import { viewDistance, type Settings } from "./settings.js";
+import { playerId, viewDistance, type Settings } from "./settings.js";
 import { Sky, css } from "./sky.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { blockBehaviors } from "./fluids.js";
-import { AtlasTexture, animatedFrames, blockAtlas, iconTile, importedTextures, proceduralTiles, tileImage } from "./textures.js";
+import { AtlasTexture, animatedFrames, blockAtlas, importedTextures, proceduralTiles } from "./textures.js";
 import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
 import { formatWhen, h } from "./ui/dom.js";
+import { ItemScreen } from "./ui/items.js";
 import { optionsScreen } from "./ui/options.js";
 import { VoxelWorld } from "./world.js";
 
@@ -41,8 +55,25 @@ export interface GameOptions {
   settings: Settings;
   /** The renderer for this page: the option's, unless the address says otherwise. */
   renderer: Settings["renderer"];
-  /** The world to play, or a seed for quick play (nothing saved). */
-  world: SavedWorld | { seed: string };
+  /**
+   * The world to play: a saved one, a seed for quick play (nothing saved), or a friend's world joined
+   * over a connection to its host.
+   */
+  world: SavedWorld | { seed: string; mode?: GameMode } | { guest: Connection };
+}
+
+/** A guest's world makes nothing itself: its chunks come from the host. */
+const NOTHING: ChunkGenerator = { generate: () => {} };
+
+/** A guest as the save keeps them. */
+type GuestData = Omit<GuestRecord, "format" | "world">;
+
+function recordOf(g: Guest): GuestData {
+  return { id: g.id, name: g.name, ...g.state, position: { ...g.state.position }, inventory: [...g.state.inventory] };
+}
+
+function stateOf(r: GuestData): GuestState {
+  return { position: { ...r.position }, yaw: r.yaw, pitch: r.pitch, selected: r.selected, inventory: [...r.inventory] };
 }
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -79,7 +110,8 @@ function findLand(generator: TerrainGenerator): { x: number; z: number } {
 export async function startGame(options: GameOptions): Promise<void> {
   const { canvas, menu, settings } = options;
   const saved = "store" in options.world ? options.world : null;
-  const seed = saved ? saved.meta.seed : (options.world as { seed: string }).seed;
+  const joined = "guest" in options.world ? options.world.guest : null;
+  const seed = saved ? saved.meta.seed : "seed" in options.world ? options.world.seed : "";
   const hotbarEl = element("hotbar", HTMLElement);
   const blockName = element("block-name", HTMLElement);
   const underwaterEl = element("underwater", HTMLElement);
@@ -87,11 +119,12 @@ export async function startGame(options: GameOptions): Promise<void> {
 
   const backend = createBackend(canvas, options.renderer);
   const textured = backend instanceof WebGLBackend;
-  // ?view=16..160 overrides the setting for this page
-  const urlView = Number(new URLSearchParams(location.search).get("view"));
+  // ?view=16..160 overrides the setting for this page; ?textures=craft leaves imported textures out
+  const pageParams = new URLSearchParams(location.search);
+  const urlView = Number(pageParams.get("view"));
   const view = (): number => (urlView >= 16 ? Math.min(160, urlView) : viewDistance(settings, textured));
   // Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
-  const imported = textured ? await importedTextures() : null;
+  const imported = textured && pageParams.get("textures") !== "craft" ? await importedTextures() : null;
   if (imported) console.info(`Craft: textures from Minecraft ${imported.version}`);
   const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
   // Light levels to colors, redrawn through the day
@@ -115,32 +148,146 @@ export async function startGame(options: GameOptions): Promise<void> {
   sim.scene.ambient.intensity = 0.3;
   sim.scene.lights = [new HemisphereLight("#d6e6ff", "#8a7a66", 0.4), new DirectionalLight({ x: -0.5, y: -1, z: -0.35 }, 0.45)];
 
-  const generator = new TerrainGenerator(seed);
-  const world = new VoxelWorld(generator);
+  const generator = joined ? null : new TerrainGenerator(seed);
+  const world = new VoxelWorld(generator ?? NOTHING);
   const player = new Player(world, { x: 0.5, y: WORLD_HEIGHT, z: 0.5 });
   player.sensitivity = LOOK_SPEED * settings.sensitivity;
   const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
   terrain.renderDistance = view();
   terrain.lightMap = lightMap;
-  let chunks: ChunkSupply = new DirectSupply();
-  try {
-    chunks = new WorkerSupply(seed);
-  } catch (e) {
-    console.warn("Craft: no module workers, generating chunks on the main thread.", e);
+  // A guest's chunks all come from the host
+  let chunks: ChunkSupply = joined ? { requestAround: () => {} } : new DirectSupply();
+  if (!joined) {
+    try {
+      chunks = new WorkerSupply(seed);
+    } catch (e) {
+      console.warn("Craft: no module workers, generating chunks on the main thread.", e);
+    }
   }
   sim.add(player);
-  // Fluids flow and sand falls on scheduled ticks; every block change updates the blocks around it
-  const ticks = sim.add(new WorldTicks(world, blockBehaviors(), seed));
-  const updates = new BlockUpdates(world, ticks);
-  world.onChanged = (x, y, z) => updates.changed(x, y, z);
+  // Fluids flow and sand falls on scheduled ticks; every block change updates the blocks around it (on a
+  // guest's side the host does all that, and the changes come from there)
+  const ticks = sim.add(new WorldTicks(world, joined ? new Map() : blockBehaviors(), seed));
+  /** This world shared with friends, once opened to them. */
+  let host: HostSession | null = null;
+  if (!joined) {
+    const updates = new BlockUpdates(world, ticks);
+    world.onChanged = (x, y, z) => {
+      updates.changed(x, y, z);
+      host?.changed(x, y, z);
+    };
+  }
   if (atlasTexture) {
     const animated = atlasTexture;
     sim.onUpdate(() => animated.animate((ticks.time + ticks.partial) / TICKS_PER_SECOND));
   }
   const interaction = sim.add(new BlockInteraction(world, player, terrain));
+  const inventory = interaction.inventory;
+  let mode: GameMode = saved ? saved.meta.mode : "seed" in options.world ? (options.world.mode ?? "survival") : "survival";
+  interaction.mode = mode;
+  /** The friend's world this is, if joined. */
+  let guest: GuestSession | null = null;
+  if (joined) {
+    guest = sim.add(new GuestSession(joined, { world, ticks, id: playerId(), name: settings.name || "Guest", view: terrain.radius }));
+    const session = guest;
+    terrain.onUnload = (chunk) => session.drop(chunk);
+    session.onReplace = (chunk) => terrain.drop(chunk);
+    interaction.onAction = (a, held) => session.act(a, held);
+    sim.onUpdate((dt) => session.report(dt, player));
+  }
+
+  // Items lying about: they fall and are picked up where the world runs (alone, or the host); a guest is
+  // told where they are and asks for those it walks into
+  const drops = sim.add(new Drops(world));
+  drops.collectors = () => (guest ? [] : [{ position: player.position, take: (s: ItemStack) => inventory.add(s) }]);
+  const icons = new Icons(tiles);
+  const itemView = sim.add(new ItemView(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null));
+  itemView.drops = () =>
+    guest
+      ? guest.drops.map(([id, x, y, z, item, count]) => ({ id, item, count, position: { x, y, z } }))
+      : [...drops.items.values()].map((d) => ({ id: d.id, item: d.stack.item, count: d.stack.count, position: d.position }));
+  itemView.cracking = () => {
+    const t = interaction.target;
+    const p = interaction.progress;
+    return t && p !== null ? { x: t.x, y: t.y, z: t.z, state: t.block, progress: p } : null;
+  };
+  if (!joined) {
+    // What broken blocks drop (in survival), and what a broken chest or furnace held; furnaces burn on
+    interaction.onBroken = (x, y, z, state, held) => {
+      if (mode === "survival") drops.spill(x, y, z, dropsOf(state, held, Math.random));
+    };
+    world.onEntityRemoved = (x, y, z, e) => drops.spill(x, y, z, e.items);
+    ticks.onTick = () => tickFurnaces(world);
+  }
+
+  /** Throws a stack out in front of the player, the way they look. */
+  function throwStack(s: ItemStack): void {
+    const d = sim.camera.getForward({ x: 0, y: 0, z: 0 });
+    const from = { x: player.position.x + d.x * 0.4, y: player.eyeY - 0.3, z: player.position.z + d.z * 0.4 };
+    const velocity = { x: d.x * 6, y: d.y * 6 + 1.5, z: d.z * 6 };
+    if (guest) guest.throwItem(s, from, velocity);
+    else drops.spawn(from.x, from.y, from.z, s, velocity, 2);
+  }
+
+  /** How many of an item the inventory still has room for. */
+  function roomFor(item: Item): number {
+    const max = ITEMS[item].maxStack;
+    let room = 0;
+    for (let i = 0; i < INVENTORY_SLOTS; i++) {
+      const s = inventory.slots[i];
+      if (!s) room += max;
+      else if (s.item === item && s.damage === 0 && max > 1) room += max - s.count;
+    }
+    return room;
+  }
+
+  if (guest) {
+    const session = guest;
+    // Picking up: asking for what lies close, once a second at most per item
+    const asked = new Map<number, number>();
+    sim.onUpdate(() => {
+      const p = player.position;
+      const now = performance.now();
+      for (const [id, x, y, z, item] of session.drops) {
+        if (Math.abs(x - p.x) > 1.5 || Math.abs(z - p.z) > 1.5 || y < p.y - 0.75 || y > p.y + 2.5) continue;
+        if ((asked.get(id) ?? 0) > now) continue;
+        const room = roomFor(item);
+        if (room <= 0) continue;
+        asked.set(id, now + 1000);
+        session.take(id, room);
+      }
+    });
+    session.onGiven = (s) => {
+      const left = inventory.add(s);
+      if (left) throwStack(left);
+    };
+    // What the player carries goes to the host now and then, for keeping
+    let inventoryTimer = 0;
+    inventory.onChange = () => {
+      clearTimeout(inventoryTimer);
+      inventoryTimer = window.setTimeout(() => session.inventory(inventory.slots, inventory.selected), 500);
+      refreshHotbar();
+    };
+  } else {
+    inventory.onChange = () => refreshHotbar();
+  }
+  // The other players, whom blocks aren't placed into, drawn with their names
+  const others = (): PlayerView[] =>
+    guest ? guest.others : (host?.guests ?? []).map((g) => ({ id: g.id, name: g.name, ...g.state.position, yaw: g.state.yaw, pitch: g.state.pitch }));
+  interaction.others = () => others();
+  const avatars = sim.add(new Avatars(world, lightMap, element("nametags", HTMLElement), canvas));
+  avatars.players = others;
   // After the player, so it follows the camera where the player put it; drawn on WebGL only
   const sky = sim.add(new Sky(ticks, lightMap, imported?.sky ?? null));
   sky.visible = textured;
+
+  // Guests who left since the last save, kept for it (and for when they come back before then)
+  const leftGuests = new Map<string, GuestData>();
+  let savingLeft: GuestData[] = [];
+  const guestRecords = (): GuestData[] => {
+    savingLeft = [...leftGuests.values()];
+    return [...savingLeft, ...(host?.guests ?? []).map(recordOf)];
+  };
 
   // The save, if this world is kept: it supplies saved chunks and takes unloaded ones
   let save: WorldSave | null = null;
@@ -159,33 +306,51 @@ export async function startGame(options: GameOptions): Promise<void> {
           velocity: { ...player.velocity },
           yaw: player.yaw,
           pitch: player.pitch,
-          selected: interaction.selected,
-          hotbar: interaction.hotbar.map((b) => BLOCKS[b].name),
+          selected: inventory.selected,
+          inventory: inventory.slots.map(saveStack),
         }),
+        guests: guestRecords,
+        drops,
       }),
     );
     terrain.supply = save;
     terrain.onUnload = (chunk) => save!.unload(chunk);
-  } else {
+  } else if (!joined) {
     terrain.supply = chunks;
     terrain.onUnload = (chunk) => ticks.takeChunk(chunk.cx, chunk.cz);
+  } else {
+    terrain.supply = chunks;
   }
 
-  // Where the player stands: as saved, or on the highest block at the world's spawn (a tree, maybe)
+  // Where the player stands: where the host says (a guest), as saved, or on the highest block at the
+  // world's spawn (a tree, maybe)
   const record = saved?.player ?? null;
-  if (record) {
+  let worldName = saved ? saved.meta.name : "Craft";
+  // Quietly: the hotbar isn't drawn yet (it is once it is made, below)
+  const restore = (slots: readonly (ReturnType<typeof saveStack> | null)[], selected: number): void => {
+    for (let i = 0; i < PLAYER_SLOTS; i++) inventory.slots[i] = loadStack(slots[i]);
+    inventory.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, Math.floor(selected) || 0));
+  };
+  if (guest) {
+    const { world: name, mode: worldMode, you } = await guest.welcome;
+    worldName = name;
+    mode = interaction.mode = worldMode;
+    Object.assign(player.position, you.position);
+    player.yaw = you.yaw;
+    player.pitch = you.pitch;
+    restore(you.inventory, you.selected);
+  } else if (record) {
     Object.assign(player.position, record.position);
     Object.assign(player.velocity, record.velocity);
     player.yaw = record.yaw;
     player.pitch = record.pitch;
-    record.hotbar.forEach((name, i) => {
-      const block = blockByName(name);
-      if (block !== null && i < interaction.hotbar.length) interaction.hotbar[i] = block;
-    });
-    interaction.select(record.selected);
+    restore(record.inventory, record.selected);
     await save!.loadNow(player.position.x, player.position.z, 1);
   } else {
-    const land = saved?.meta.spawn ?? findLand(generator);
+    // A new player: nothing in survival, the usual blocks at hand in creative
+    if (mode === "creative") HOTBAR.forEach((b, i) => (inventory.slots[i] = { item: b, count: 64, damage: 0 }));
+    // Not a guest here: the world has its generator
+    const land = saved?.meta.spawn ?? findLand(generator!);
     player.position.x = Math.floor(land.x) + 0.5;
     player.position.z = Math.floor(land.z) + 0.5;
     if (save) await save.loadNow(player.position.x, player.position.z, 1);
@@ -198,6 +363,8 @@ export async function startGame(options: GameOptions): Promise<void> {
       await save.save();
     }
   }
+  /** Where newcomers to the world start. */
+  const spawnPoint = saved?.meta.spawn ?? { x: player.position.x, y: player.position.y, z: player.position.z };
 
   // Fog and the background: the sky's horizon color, darker the less sky light reaches the eyes (black in
   // caves); under water a short blue fog as bright as the light around
@@ -236,6 +403,8 @@ export async function startGame(options: GameOptions): Promise<void> {
   let statusLine: HTMLElement | null = null;
   if (save) {
     save.onSaved = (ok, e) => {
+      // Guests who left are in the save now, unless they came and went again meanwhile
+      if (ok) for (const r of savingLeft) if (leftGuests.get(r.id) === r) leftGuests.delete(r.id);
       saveError = ok ? null : String((e as Error)?.message ?? e);
       if (statusLine?.isConnected) {
         statusLine.textContent = status();
@@ -256,16 +425,15 @@ export async function startGame(options: GameOptions): Promise<void> {
     crosshair.hidden = !on && !started;
     interaction.release(0);
     interaction.release(2);
-    if (on) {
-      blockList = false;
-      return;
-    }
-    if (blockList) showBlockList();
-    else showPauseMenu();
+    if (on) return;
+    friendsShown = false;
+    if (ended !== null) showEnded(ended);
+    else if (!items.open) showPauseMenu();
     if (started) void save?.save().catch(() => {});
   }
 
   function play(): void {
+    if (ended !== null) return;
     started = true;
     Promise.resolve(canvas.requestPointerLock()).catch(() => {
       // Where the browser refuses pointer lock (some embedded or automated browsers), dragging looks around
@@ -276,6 +444,12 @@ export async function startGame(options: GameOptions): Promise<void> {
   }
 
   async function quit(): Promise<void> {
+    if (guest) {
+      guest.leave();
+      location.href = location.pathname;
+      return;
+    }
+    stopSharing();
     if (save) {
       menu.replaceChildren(h("div", { class: "screen" }, h("h2", {}, "Saving world…")));
       try {
@@ -289,7 +463,11 @@ export async function startGame(options: GameOptions): Promise<void> {
   }
 
   function status(): string {
-    if (!save) return "Quick play: this world isn't saved.";
+    if (guest) return "A friend's world: it is saved on their side.";
+    const sharing = hosting ? ` Open to friends: ${hosting.code}, ${host?.guests.length ?? 0} playing.` : "";
+    if (!save) return `Quick play: this world isn't saved.${sharing}`;
+    if (saveError) return `Saving failed: ${saveError}`;
+    if (sharing) return `${save.lastSaved === null ? "Not saved yet." : `Saved ${formatWhen(Date.now() - (performance.now() - save.lastSaved))}.`}${sharing}`;
     if (saveError) return `Saving failed: ${saveError}`;
     return save.lastSaved === null ? "Not saved yet." : `Saved ${formatWhen(Date.now() - (performance.now() - save.lastSaved))}.`;
   }
@@ -299,13 +477,14 @@ export async function startGame(options: GameOptions): Promise<void> {
       h(
         "div",
         { class: "screen" },
-        h("h1", {}, saved ? saved.meta.name : "Craft"),
+        h("h1", {}, worldName),
         h(
           "div",
           { class: "buttons column" },
           h("button", { class: "primary", autofocus: true, onclick: play }, started ? "Back to game" : "Play"),
           h("button", { onclick: showOptions }, "Options…"),
-          h("button", { onclick: () => void quit() }, save ? "Save and quit to title" : "Quit to title"),
+          !guest && h("button", { onclick: () => void openToFriends() }, hosting ? `Friends (${host?.guests.length ?? 0} playing)…` : "Open to friends…"),
+          h("button", { onclick: () => void quit() }, guest ? "Leave world" : save ? "Save and quit to title" : "Quit to title"),
         ),
         (statusLine = h("p", { class: saveError ? "error" : "muted" }, status())),
         h(
@@ -316,10 +495,123 @@ export async function startGame(options: GameOptions): Promise<void> {
             ["Space", "jump, swim up"],
             ["Shift", "sprint"],
             ["Left click", "break"],
-            ["Right click", "place"],
-            ["1–9, wheel", "pick a block"],
+            ["Right click", "place, use"],
+            ["1–9, wheel", "choose from the hotbar"],
+            ["E", mode === "creative" ? "all items" : "inventory"],
+            ["Q", "throw the held item (Ctrl: all of it)"],
             ["Esc", "this menu"],
           ].map(([key, what]) => h("li", {}, h("b", {}, key), what)),
+        ),
+      ),
+    );
+    menu.querySelector<HTMLElement>("[autofocus]")?.focus();
+  }
+
+  // Sharing the world: friends join it by its code, connecting to this browser directly
+  let hosting: Hosting | null = null;
+  let hostingError: string | null = null;
+  let friendsShown = false;
+
+  async function openToFriends(): Promise<void> {
+    if (!host) {
+      host = sim.add(
+        new HostSession({
+          world,
+          ticks,
+          worldName,
+          mode,
+          drops,
+          host: () => ({ id: "host", name: settings.name || "Host", ...player.position, yaw: player.yaw, pitch: player.pitch }),
+          spawn: () => spawnPoint,
+          saved: async (id) => {
+            const left = leftGuests.get(id);
+            if (left) return stateOf(left);
+            const r = saved ? await saved.store.getGuest(saved.meta.id, id) : null;
+            return r ? stateOf(r) : null;
+          },
+          onLeave: (g) => leftGuests.set(g.id, recordOf(g)),
+          onGuests: () => {
+            if (friendsShown && menu.isConnected && !menu.hidden) showFriends();
+          },
+        }),
+      );
+      const session = host;
+      terrain.others = () => session.focuses();
+    }
+    if (!hosting) {
+      const session = host;
+      const opening = new Hosting((conn) => session.accept(conn));
+      opening.onStatus = (error) => {
+        hostingError = error;
+        if (friendsShown) showFriends();
+      };
+      friendsShown = true;
+      menu.replaceChildren(h("div", { class: "screen" }, h("h2", {}, "Opening the world to friends…")));
+      try {
+        await opening.start();
+        hosting = opening;
+        hostingError = null;
+      } catch (e) {
+        hostingError = (e as Error).message;
+      }
+    }
+    showFriends();
+  }
+
+  function stopSharing(): void {
+    hosting?.stop();
+    hosting = null;
+    host?.close();
+  }
+
+  function showFriends(): void {
+    friendsShown = true;
+    const back = (): void => {
+      friendsShown = false;
+      showPauseMenu();
+    };
+    if (!hosting) {
+      menu.replaceChildren(
+        h(
+          "div",
+          { class: "screen" },
+          h("h2", {}, "Open to friends"),
+          h("p", { class: "error" }, `The world couldn't be opened to friends: ${hostingError ?? "unknown error"}`),
+          h("p", { class: "muted" }, "Friends are introduced by the game's server (api/signal, see the README)."),
+          h("div", { class: "buttons" }, h("button", { autofocus: true, onclick: back }, "Back")),
+        ),
+      );
+      return;
+    }
+    const link = `${location.origin}${location.pathname}?join=${hosting.code}`;
+    const field = h("input", { readonly: true, value: link });
+    const copy = h("button", { onclick: () => void navigator.clipboard?.writeText(link).then(() => (copy.textContent = "Copied")) }, "Copy link");
+    const guests = host?.guests ?? [];
+    menu.replaceChildren(
+      h(
+        "div",
+        { class: "screen" },
+        h("h2", {}, "Open to friends"),
+        h("p", {}, "Friends join with this code, or the link:"),
+        h("p", { class: "code" }, hosting.code),
+        h("div", { class: "invite" }, field, copy),
+        h("p", {}, guests.length > 0 ? `Playing: ${guests.map((g) => g.name).join(", ")}` : "Nobody has joined yet."),
+        hostingError && h("p", { class: "error" }, `Friends can't join right now: ${hostingError}`),
+        h("p", { class: "muted" }, "This browser hosts the world: friends can play while this tab is open. Their places are kept in the world's save."),
+        h(
+          "div",
+          { class: "buttons" },
+          h("button", { class: "primary", autofocus: true, onclick: back }, "Back"),
+          h(
+            "button",
+            {
+              onclick: () => {
+                stopSharing();
+                back();
+              },
+            },
+            "Stop sharing",
+          ),
         ),
       ),
     );
@@ -370,81 +662,225 @@ export async function startGame(options: GameOptions): Promise<void> {
     { passive: true },
   );
   window.addEventListener("keydown", (e) => {
-    if (e.code === "KeyE" && blockList) {
-      play();
+    if (items.open && (e.code === "KeyE" || e.code === "Escape") && !(e.target instanceof HTMLInputElement && e.code === "KeyE")) {
+      items.close();
       return;
     }
     if (!player.controls) return;
     const digit = /^Digit([1-9])$/.exec(e.code);
     if (digit) interaction.select(Number(digit[1]) - 1);
-    if (e.code === "KeyE") openBlockList();
+    if (e.code === "KeyE") showItems(() => (mode === "creative" ? items.showCreative() : items.showInventory()));
+    if (e.code === "KeyQ") {
+      const s = interaction.throwHeld(e.ctrlKey);
+      if (s) throwStack(s);
+    }
     if (e.code === "Escape" && dragMode) setPlaying(false);
   });
 
-  // Icons: a block's side texture, or its colors without textures
-  const icons = new Map<Block, string>();
-  function paintIcon(el: HTMLElement, block: Block): void {
-    const info = BLOCKS[block];
-    el.title = info.label;
-    el.style.setProperty("--top", info.top);
-    el.style.setProperty("--side", info.side);
-    const tile = tiles?.get(iconTile(block));
-    if (!tile) return;
-    if (!icons.has(block)) icons.set(block, `url(${tileImage(tile)}) center / cover`);
-    el.style.setProperty("--icon", icons.get(block)!);
+  // The hotbar: the first nine slots of the inventory, with counts and how worn tools are
+  function paintStack(el: HTMLElement, s: ItemStack | null): void {
+    const info = s ? ITEMS[s.item] : null;
+    el.title = info?.label ?? "";
+    const block = info?.block ?? null;
+    el.style.setProperty("--top", block !== null ? BLOCKS[block].top : (info?.color ?? "transparent"));
+    el.style.setProperty("--side", block !== null ? BLOCKS[block].side : (info?.color ?? "transparent"));
+    const bg = s ? icons.background(s.item) : null;
+    if (bg) el.style.setProperty("--icon", bg);
+    else if (s) el.style.removeProperty("--icon");
+    else el.style.setProperty("--icon", "none");
   }
-
-  // Hotbar
-  const slots = interaction.hotbar.map((_, i) => {
-    const slot = h("div", { class: "slot" }, h("span", {}, String(i + 1)));
+  const slotEls = Array.from({ length: HOTBAR_SLOTS }, (_, i) => {
+    const slot = h("div", { class: "slot" }, h("span", {}, String(i + 1)), h("b"), h("i"));
     hotbarEl.append(slot);
     return slot;
   });
-  let nameTimer = 0;
-  const showHotbar = (selected: number): void =>
-    slots.forEach((el, i) => {
-      el.classList.toggle("selected", i === selected);
-      paintIcon(el, interaction.hotbar[i]);
+  function refreshHotbar(): void {
+    slotEls.forEach((el, i) => {
+      const s = inventory.slots[i];
+      el.classList.toggle("selected", i === inventory.selected);
+      paintStack(el, s);
+      (el.children[1] as HTMLElement).textContent = s && s.count > 1 ? String(s.count) : "";
+      const durability = s ? ITEMS[s.item].durability : 0;
+      const wear = el.children[2] as HTMLElement;
+      wear.hidden = !(s && s.damage > 0 && durability > 0);
+      if (s && durability > 0) wear.style.setProperty("--wear", String(1 - s.damage / durability));
     });
+  }
+  let nameTimer = 0;
   interaction.onSelect = (slot) => {
-    showHotbar(slot);
-    blockName.textContent = BLOCKS[interaction.hotbar[slot]].label;
+    refreshHotbar();
+    const held = inventory.slots[slot];
+    blockName.textContent = held ? ITEMS[held.item].label : "";
     blockName.classList.add("shown");
     clearTimeout(nameTimer);
     nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
   };
-  showHotbar(interaction.selected);
+  refreshHotbar();
   hotbarEl.hidden = false;
 
-  // The block list (E): every block, one click puts it into the selected hotbar slot
-  let blockList = false;
-  function openBlockList(): void {
-    blockList = true;
+  // Screens with items: the inventory (E), the creative list, crafting tables, chests, furnaces
+  const items = new ItemScreen(menu, { icons, inventory, spill: throwStack });
+  items.onClose = () => {
+    if (openContainer && guest) guest.close(openContainer.x, openContainer.y, openContainer.z);
+    openContainer = null;
+    play();
+  };
+  sim.onUpdate(() => {
+    items.tick();
+    // A chest or furnace that went (broken by someone) closes its screen
+    if (openContainer && !guest && !world.blockEntity(openContainer.x, openContainer.y, openContainer.z)) items.close();
+  });
+  /** The chest or furnace open on screen. */
+  let openContainer: { x: number; y: number; z: number; entity: BlockEntity } | null = null;
+
+  function showItems(show: () => void): void {
+    show();
     if (locked()) document.exitPointerLock();
     else setPlaying(false);
   }
-  function showBlockList(): void {
+
+  /** Slots over a chest's or furnace's items: changes are saved, and a guest's go to the host. */
+  function entitySlots(x: number, y: number, z: number, e: BlockEntity): Slot[] {
+    return e.items.map((_, i) =>
+      arraySlot(e.items, i, e.kind === "furnace" ? (s) => furnaceAccepts(i, s) : () => true, 64, () => {
+        if (guest) {
+          guest.setSlots(x, y, z, [[i, saveStack(e.items[i])]]);
+        } else {
+          const chunk = world.chunk(x >> 4, z >> 4);
+          if (chunk) chunk.unsaved = true;
+        }
+      }),
+    );
+  }
+
+  /** A chest's slots, a double chest's both halves (the left one first). */
+  function chestSlots(x: number, y: number, z: number, state: number, e: BlockEntity): Slot[] {
+    const own = entitySlots(x, y, z, e);
+    const type = propertyOf(state, "type");
+    if (guest || type === "single") return own;
+    const facing = propertyOf(state, "facing");
+    const d = FACING_DIR[type === "left" ? RIGHT_OF[facing] : LEFT_OF[facing]];
+    const dx = d === 0 ? 1 : d === 1 ? -1 : 0;
+    const dz = d === 4 ? 1 : d === 5 ? -1 : 0;
+    const other = world.blockEntity(x + dx, y, z + dz);
+    if (!other || other.kind !== "chest") return own;
+    const theirs = entitySlots(x + dx, y, z + dz, other);
+    return type === "left" ? [...own, ...theirs] : [...theirs, ...own];
+  }
+
+  function showContainer(x: number, y: number, z: number, state: number, e: BlockEntity): void {
+    openContainer = { x, y, z, entity: e };
+    if (e.kind === "chest") {
+      const slots = chestSlots(x, y, z, state, e);
+      showItems(() => items.showChest(slots, slots.length > 27 ? "Large chest" : "Chest"));
+    } else {
+      const slots = entitySlots(x, y, z, e);
+      showItems(() => items.showFurnace([slots[FURNACE_INPUT], slots[FURNACE_FUEL], slots[FURNACE_OUTPUT]], e));
+    }
+  }
+
+  interaction.onOpen = (x, y, z, state) => {
+    const block = blockOf(state);
+    if (block === Block.CraftingTable) {
+      showItems(() => items.showTable());
+    } else if (guest) {
+      // Shown when the host sends what it holds
+      openContainer = null;
+      pendingOpen = { x, y, z, state };
+      guest.open(x, y, z);
+    } else {
+      const e = world.blockEntity(x, y, z);
+      if (e) showContainer(x, y, z, state, e);
+    }
+  };
+  let pendingOpen: { x: number; y: number; z: number; state: number } | null = null;
+  if (guest) {
+    guest.onContainer = (x, y, z, saved) => {
+      const open = openContainer && openContainer.x === x && openContainer.y === y && openContainer.z === z ? openContainer : null;
+      if (!saved) {
+        if (open) items.close();
+        return;
+      }
+      const fresh = loadEntity(saved);
+      if (!fresh) return;
+      if (open) {
+        // The same entity object stays (the slots read it): its contents change
+        Object.assign(open.entity, fresh);
+        if (open.entity.kind === "furnace") items.setFurnace(open.entity);
+        items.refreshSlots();
+      } else if (pendingOpen && pendingOpen.x === x && pendingOpen.y === y && pendingOpen.z === z) {
+        showContainer(x, y, z, pendingOpen.state, fresh);
+        pendingOpen = null;
+      }
+    };
+  }
+
+  // Who comes and goes
+  const noticeEl = element("notice", HTMLElement);
+  function notice(text: string): void {
+    const line = h("div", {}, text);
+    noticeEl.append(line);
+    setTimeout(() => (line.style.opacity = "0"), 4000);
+    setTimeout(() => line.remove(), 4700);
+  }
+  const present = new Map<string, string>();
+  sim.onUpdate(() => {
+    const now = new Map(others().map((p) => [p.id, p.name]));
+    for (const [id, name] of now) if (!present.has(id)) notice(`${name} joined the world`);
+    for (const [id, name] of present) if (!now.has(id)) notice(`${name} left the world`);
+    present.clear();
+    for (const [id, name] of now) present.set(id, name);
+  });
+
+  // A friend's world ends when its host leaves (or the connection breaks)
+  let ended: string | null = null;
+  function showEnded(reason: string): void {
     menu.replaceChildren(
       h(
         "div",
-        { class: "screen wide" },
-        h("h2", {}, "Blocks"),
-        h(
-          "div",
-          { class: "blocks" },
-          ...PLACEABLE.map((block) => {
-            const el = h("button", { class: "slot", "aria-label": BLOCKS[block].label, onclick: () => (interaction.choose(block), play()) });
-            paintIcon(el, block);
-            return el;
-          }),
-        ),
-        h("p", { class: "muted" }, "Click a block to put it in the selected hotbar slot. E or Esc goes back."),
+        { class: "screen" },
+        h("h2", {}, reason),
+        h("div", { class: "buttons" }, h("button", { autofocus: true, onclick: () => (location.href = location.pathname) }, "Back to title")),
       ),
     );
+    menu.querySelector<HTMLElement>("[autofocus]")?.focus();
   }
+  if (guest) {
+    guest.onBye = (reason) => {
+      ended = reason;
+      if (locked()) document.exitPointerLock();
+      setPlaying(false);
+      showEnded(reason);
+    };
+  }
+  window.addEventListener("pagehide", () => {
+    guest?.leave();
+    stopSharing();
+  });
 
   setPlaying(false);
   sim.start();
   // For poking at the running game from the browser console
-  Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain, ticks, save } });
+  Object.assign(globalThis, {
+    craft: {
+      sim,
+      backend,
+      world,
+      player,
+      interaction,
+      terrain,
+      ticks,
+      save,
+      get host() {
+        return host;
+      },
+      get hosting() {
+        return hosting;
+      },
+      guest,
+      openToFriends,
+      drops,
+      items,
+    },
+  });
 }
