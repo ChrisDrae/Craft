@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Block } from "../src/blocks.js";
+import { SELECTION } from "../src/shapes.js";
 import { raycastVoxels } from "../src/raycast.js";
 import { flatWorld } from "./helpers.js";
 
-const solid = (b: number): boolean => b !== Block.Air && b !== Block.Water;
+const solid = (b: number): Float64Array => SELECTION[b];
 
 describe("raycastVoxels", () => {
   const world = flatWorld(10);
@@ -42,5 +43,20 @@ describe("raycastVoxels", () => {
     const hit = raycastVoxels(blockAt, solid, 1.5, 11.5, 1.5, 0, -1, 0, 6);
     expect(hit).toMatchObject({ x: 1, y: 9, z: 1, block: Block.Stone });
     world.set(1, 10, 1, Block.Air);
+  });
+  it("hits a smaller box where the ray meets it, and passes over it otherwise", () => {
+    // A bottom slab in every cell at y 10 (the ground's top is y 9)
+    const slab = Float64Array.of(0, 0, 0, 1, 0.5, 1);
+    const at = (_x: number, y: number): number => (y === 10 ? 1 : 0);
+    const boxes = (b: number): Float64Array => (b === 1 ? slab : new Float64Array(0));
+    const down = raycastVoxels(at, boxes, 0.5, 12, 0.5, 0, -1, 0, 6);
+    expect(down).toMatchObject({ x: 0, y: 10, z: 0, nx: 0, ny: 1, nz: 0 });
+    expect(down!.distance).toBeCloseTo(1.5);
+    // Level with the top half of the cells: through them all, nothing to hit
+    expect(raycastVoxels(at, boxes, 0.5, 10.75, 0.5, 1, 0, 0, 6)).toBeNull();
+    // Level with the slabs: the side of the next one
+    const side = raycastVoxels(at, boxes, 0.5, 10.25, 0.5, 1, 0, 0, 6);
+    expect(side).toMatchObject({ x: 1, y: 10, nx: -1 });
+    expect(side!.distance).toBeCloseTo(0.5);
   });
 });

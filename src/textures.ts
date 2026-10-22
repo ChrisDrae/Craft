@@ -1,0 +1,514 @@
+import { Random, Texture } from "projector";
+import { Atlas, TILE, type TilePixels } from "./atlas.js";
+import { BLOCKS, Block, COLORS, FACE_TILE, Face, TILE_NAMES, type Block as BlockId } from "./blocks.js";
+import type { TileUVs } from "./chunkMesh.js";
+
+/** The textures Craft uses, named after Minecraft's block texture files (TILE_NAMES). */
+export const TILES: readonly string[] = TILE_NAMES;
+export type TileName = string;
+
+/** The texture on a block state's face in direction `dir` (Dir), for a cube. */
+export function tileFor(state: number, dir: number): TileName {
+  return TILE_NAMES[FACE_TILE[state * 6 + dir]];
+}
+
+/** The texture that stands for a block in the hotbar and the block list: its side. */
+export function iconTile(block: BlockId): TileName {
+  return BLOCKS[block].textures[Face.Side];
+}
+
+/** Textures that move: frames per second shown, and how many frames Craft draws when it paints its own. */
+export const ANIMATED: Readonly<Record<string, { fps: number; frames: number }>> = {
+  water_still: { fps: 10, frames: 32 },
+  lava_still: { fps: 6, frames: 20 },
+};
+
+type Rgb = [number, number, number];
+
+function hex(css: string): Rgb {
+  const n = parseInt(css.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** A tile painted pixel by pixel: `paint` returns the color (and alpha) of (x, y). */
+function paint(seed: string, color: (x: number, y: number, rnd: Random) => [number, number, number, number?]): TilePixels {
+  const rnd = new Random(seed);
+  const out = new Uint8ClampedArray(TILE * TILE * 4);
+  for (let y = 0; y < TILE; y++) {
+    for (let x = 0; x < TILE; x++) {
+      const [r, g, b, a = 255] = color(x, y, rnd);
+      const o = (y * TILE + x) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = a;
+    }
+  }
+  return out;
+}
+
+/** The color brightened or darkened by a factor. */
+function scale(c: Rgb, k: number): [number, number, number] {
+  return [c[0] * k, c[1] * k, c[2] * k];
+}
+
+/** Random brightness around 1, spread `amount`. */
+function jitter(rnd: Random, amount: number): number {
+  return 1 + (rnd.next() - 0.5) * amount;
+}
+
+/** Stone with patches of ore of a color. */
+function ore(seed: string, color: Rgb): TilePixels {
+  const stone = hex("#7f7f7f");
+  const spots = new Random(`${seed}/spots`);
+  const centers: Array<[number, number]> = [];
+  for (let k = 0; k < 4; k++) centers.push([2 + spots.next() * 12, 2 + spots.next() * 12]);
+  return paint(seed, (x, y, rnd) => {
+    const near = centers.some(([cx, cy]) => Math.hypot(x - cx, y - cy) < 1.6 + rnd.next() * 0.9);
+    return near ? scale(color, jitter(rnd, 0.35)) : scale(stone, jitter(rnd, 0.25));
+  });
+}
+
+/**
+ * Pixel-art textures made in code, used when no Minecraft textures were imported. Seeded, so they look
+ * the same every time.
+ */
+export function proceduralTiles(): Map<TileName, TilePixels> {
+  const grass = hex("#62a83f");
+  const dirt = hex("#86603f");
+  const stone = hex("#7f7f7f");
+  const bark = hex("#5f4a2e");
+  const wood = hex("#a8895a");
+  const tiles = new Map<TileName, TilePixels>();
+  tiles.set("grass_block_top", paint("grass", (_x, _y, rnd) => scale(grass, rnd.next() < 0.1 ? 1.25 : jitter(rnd, 0.25))));
+  const fringe = new Random("fringe");
+  const depth = Array.from({ length: TILE }, () => 3 + Math.floor(fringe.next() * 3));
+  tiles.set("grass_block_side", paint("grass side", (x, y, rnd) => (y < depth[x] ? scale(grass, jitter(rnd, 0.25)) : scale(dirt, jitter(rnd, 0.35)))));
+  tiles.set("dirt", paint("dirt", (_x, _y, rnd) => scale(dirt, rnd.next() < 0.08 ? 0.7 : jitter(rnd, 0.35))));
+  tiles.set("stone", paint("stone", (_x, y, rnd) => scale(stone, (y % 5 === 2 && rnd.next() < 0.4 ? 0.82 : 1) * jitter(rnd, 0.2))));
+  tiles.set("sand", paint("sand", (_x, _y, rnd) => scale(hex("#dcd29c"), jitter(rnd, 0.12))));
+  tiles.set("water_still", paint("water", (x, y, rnd) => scale(hex("#3d6fdc"), ((x + y * 3) % 11 === 0 ? 1.18 : 1) * jitter(rnd, 0.08))));
+  tiles.set("oak_log", paint("log", (x, _y, rnd) => scale(bark, (x % 4 === 0 ? 0.75 : 1) * jitter(rnd, 0.25))));
+  tiles.set(
+    "oak_log_top",
+    paint("log top", (x, y, rnd) => {
+      const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+      if (d > 6.5) return scale(bark, jitter(rnd, 0.2));
+      return scale(wood, (Math.floor(d) % 2 === 0 ? 1 : 0.85) * jitter(rnd, 0.08));
+    }),
+  );
+  tiles.set(
+    "oak_leaves",
+    paint("leaves", (_x, _y, rnd) => {
+      // Holes to see through, cut out by the material's alphaTest
+      if (rnd.next() < 0.16) return [0, 0, 0, 0];
+      return scale(hex("#3e8a2a"), jitter(rnd, 0.45));
+    }),
+  );
+  const seams = new Random("planks");
+  const offsets = [0, 1, 2, 3].map(() => Math.floor(seams.next() * 16));
+  tiles.set(
+    "oak_planks",
+    paint("planks", (x, y, rnd) => {
+      const board = Math.floor(y / 4);
+      if (y % 4 === 3 || x === offsets[board]) return scale(hex("#b38d55"), 0.68);
+      return scale(hex("#b38d55"), jitter(rnd, 0.12));
+    }),
+  );
+  const stones = new Random("cobble");
+  const centers = Array.from({ length: 9 }, () => [stones.next() * 16, stones.next() * 16, 0.75 + stones.next() * 0.4]);
+  tiles.set(
+    "cobblestone",
+    paint("cobblestone", (x, y, rnd) => {
+      // Rounded stones, with dark mortar where two are equally close
+      let a = Infinity;
+      let b = Infinity;
+      let shade = 1;
+      for (const [cx, cy, k] of centers) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < a) {
+          b = a;
+          a = d;
+          shade = k;
+        } else if (d < b) {
+          b = d;
+        }
+      }
+      return b - a < 1 ? scale(stone, 0.5) : scale(stone, shade * jitter(rnd, 0.15));
+    }),
+  );
+  tiles.set(
+    "bricks",
+    paint("bricks", (x, y, rnd) => {
+      const row = Math.floor(y / 4);
+      const shift = row % 2 === 0 ? 0 : 4;
+      if (y % 4 === 3 || (x + shift) % 8 === 7) return scale(hex("#bdb3a6"), jitter(rnd, 0.1));
+      return scale(hex("#985040"), jitter(rnd, 0.18));
+    }),
+  );
+  tiles.set("coal_ore", ore("coal", hex("#2a2a2a")));
+  tiles.set("iron_ore", ore("iron", hex("#d8af93")));
+  tiles.set("gold_ore", ore("gold", hex("#fcee4b")));
+  tiles.set("bedrock", paint("bedrock", (_x, _y, rnd) => scale(hex("#55525a"), rnd.next() < 0.3 ? 0.45 : jitter(rnd, 0.6))));
+  tiles.set(
+    "torch",
+    paint("torch", (x, y, rnd) => {
+      // A stick two pixels wide in the middle, rows 6-15, burning at the top; the rest is cut out
+      if (x < 7 || x > 8 || y < 6) return [0, 0, 0, 0];
+      if (y === 6) return scale(hex("#fff3a8"), jitter(rnd, 0.1));
+      if (y === 7) return scale(hex("#ffb52e"), jitter(rnd, 0.1));
+      return scale(hex("#8a6a3a"), (x === 8 ? 0.8 : 1) * jitter(rnd, 0.15));
+    }),
+  );
+  tiles.set(
+    "glowstone",
+    paint("glowstone", (_x, _y, rnd) => {
+      const v = rnd.next();
+      return scale(hex(v < 0.2 ? "#8a5a2a" : v < 0.6 ? "#e0b050" : "#ffe9a0"), jitter(rnd, 0.15));
+    }),
+  );
+  for (const [name, frames] of animatedFrames()) tiles.set(name, frames[0]);
+  const plank = hex("#b38d55");
+  const dark = hex("#5f4a2e");
+  tiles.set("gravel", paint("gravel", (_x, _y, rnd) => scale(hex(["#7d7470", "#9a908a", "#5e5650", "#867a70"][Math.floor(rnd.next() * 4)]), jitter(rnd, 0.15))));
+  tiles.set(
+    "glass",
+    paint("glass", (x, y) => {
+      // A frame, a few glints, the rest clear
+      if (x === 0 || y === 0 || x === 15 || y === 15) return [214, 232, 238, 255];
+      if ((x - y === 4 || x - y === 5) && x < 10) return [235, 245, 248, 255];
+      return [0, 0, 0, 0];
+    }),
+  );
+  tiles.set("ice", paint("ice", (x, y, rnd) => scale(hex("#91b7fd"), ((x + y) % 7 === 0 ? 1.15 : 1) * jitter(rnd, 0.08))));
+  tiles.set("snow", paint("snow", (_x, _y, rnd) => scale(hex("#f2f7f7"), jitter(rnd, 0.06))));
+  tiles.set("clay", paint("clay", (_x, _y, rnd) => scale(hex("#9fa4b0"), jitter(rnd, 0.12))));
+  tiles.set("obsidian", paint("obsidian", (_x, _y, rnd) => scale(hex(rnd.next() < 0.15 ? "#3b2a52" : "#15121f"), jitter(rnd, 0.3))));
+  tiles.set(
+    "stone_bricks",
+    paint("stone bricks", (x, y, rnd) => {
+      const row = Math.floor(y / 8);
+      if (y % 8 === 7 || (x + (row % 2 ? 8 : 0)) % 16 === 15) return scale(stone, 0.55);
+      return scale(stone, jitter(rnd, 0.14));
+    }),
+  );
+  tiles.set(
+    "crafting_table_top",
+    paint("table top", (x, y, rnd) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return scale(dark, jitter(rnd, 0.1));
+      if (x % 5 === 0 || y % 5 === 0) return scale(plank, 0.6);
+      return scale(plank, jitter(rnd, 0.12));
+    }),
+  );
+  const tableSide = (seed: string, tool: (x: number, y: number) => boolean): TilePixels =>
+    paint(seed, (x, y, rnd) => {
+      if (y < 3) return scale(plank, jitter(rnd, 0.1));
+      if (tool(x, y)) return scale(hex("#9a9a9a"), jitter(rnd, 0.1));
+      return scale(dark, (x % 4 === 0 ? 0.8 : 1) * jitter(rnd, 0.15));
+    });
+  tiles.set("crafting_table_side", tableSide("table side", (x, y) => x >= 4 && x <= 11 && y === 6 + ((x * 3) % 4)));
+  tiles.set("crafting_table_front", tableSide("table front", (x, y) => (x === 4 && y >= 5 && y <= 12) || (y === 5 && x >= 4 && x <= 10)));
+  tiles.set("furnace_side", paint("furnace side", (_x, _y, rnd) => scale(stone, jitter(rnd, 0.25))));
+  tiles.set("furnace_top", paint("furnace top", (x, y, rnd) => scale(stone, (x === 0 || y === 0 || x === 15 || y === 15 ? 0.7 : 1.1) * jitter(rnd, 0.15))));
+  tiles.set(
+    "furnace_front",
+    paint("furnace front", (x, y, rnd) => {
+      if (x >= 4 && x <= 11 && y >= 9 && y <= 13) return [20, 18, 18];
+      if (x >= 4 && x <= 11 && y >= 3 && y <= 5) return scale(stone, 0.5);
+      return scale(stone, jitter(rnd, 0.25));
+    }),
+  );
+  const books = new Random("books");
+  const spines = Array.from({ length: 32 }, () => hex(["#7a2a1a", "#2a4a7a", "#3a6a2a", "#7a6a2a", "#5a2a6a"][Math.floor(books.next() * 5)]));
+  tiles.set(
+    "bookshelf",
+    paint("bookshelf", (x, y, rnd) => {
+      if (y < 2 || y > 13 || y === 7 || y === 8) return scale(plank, jitter(rnd, 0.12));
+      if (x === 0 || x === 15) return scale(dark, 1);
+      const shelf = y < 7 ? 0 : 16;
+      return scale(spines[shelf + Math.floor(x / 2)], (x % 2 ? 0.85 : 1) * jitter(rnd, 0.1));
+    }),
+  );
+  tiles.set(
+    "ladder",
+    paint("ladder", (x, y, rnd) => {
+      if (x === 2 || x === 3 || x === 12 || x === 13 || (y % 4 === 1 && x > 3 && x < 12)) return scale(hex("#8a6a3a"), jitter(rnd, 0.15));
+      return [0, 0, 0, 0];
+    }),
+  );
+  const doorPaint = (seed: string, window: boolean): TilePixels =>
+    paint(seed, (x, y, rnd) => {
+      if (window && x >= 3 && x <= 12 && y >= 2 && y <= 7 && x !== 7 && x !== 8) return [0, 0, 0, 0];
+      if (x <= 1 || x >= 14 || y <= 1 || y >= 14) return scale(dark, jitter(rnd, 0.1));
+      return scale(plank, (x % 4 === 0 ? 0.85 : 1) * jitter(rnd, 0.1));
+    });
+  tiles.set("oak_door_top", doorPaint("door top", true));
+  tiles.set("oak_door_bottom", doorPaint("door bottom", false));
+  tiles.set(
+    "oak_trapdoor",
+    paint("trapdoor", (x, y, rnd) => {
+      if ((x === 4 || x === 11) && (y === 4 || y === 11)) return [0, 0, 0, 0];
+      if (x <= 1 || x >= 14 || y <= 1 || y >= 14) return scale(dark, jitter(rnd, 0.1));
+      return scale(plank, jitter(rnd, 0.12));
+    }),
+  );
+  tiles.set("glass_pane_top", paint("pane top", (_x, _y, rnd) => scale(hex("#d6e8ee"), jitter(rnd, 0.05))));
+  const flower = (seed: string, petals: string, center: string): TilePixels =>
+    paint(seed, (x, y, rnd) => {
+      if ((x === 7 || x === 8) && y >= 8) return scale(hex("#3e8a2a"), jitter(rnd, 0.2));
+      if (x === 6 && y === 11) return scale(hex("#4e9a3a"), 1);
+      const d = Math.hypot(x - 7.5, y - 5.5);
+      if (d < 1.2) return scale(hex(center), 1);
+      if (d < 3.2) return scale(hex(petals), jitter(rnd, 0.15));
+      return [0, 0, 0, 0];
+    });
+  tiles.set("dandelion", flower("dandelion", "#f1d42c", "#d8a010"));
+  tiles.set("poppy", flower("poppy", "#c8261a", "#2a2010"));
+  const blades = new Random("blades");
+  const heights = Array.from({ length: TILE }, () => (blades.next() < 0.7 ? 4 + Math.floor(blades.next() * 10) : 0));
+  tiles.set("short_grass", paint("short grass", (x, y, rnd) => (heights[x] > 0 && y >= 16 - heights[x] ? scale(hex("#5d9b3a"), jitter(rnd, 0.3)) : [0, 0, 0, 0])));
+  tiles.set(
+    "oak_sapling",
+    paint("sapling", (x, y, rnd) => {
+      if (x === 7 && y >= 9) return scale(bark, jitter(rnd, 0.2));
+      if (Math.hypot(x - 7, y - 6) < 4.2 && rnd.next() < 0.8) return scale(hex("#3e7a2a"), jitter(rnd, 0.35));
+      return [0, 0, 0, 0];
+    }),
+  );
+  const cactus = hex("#5a8a2e");
+  tiles.set("cactus_side", paint("cactus side", (x, _y, rnd) => (x === 0 || x === 15 ? [0, 0, 0, 0] : scale(cactus, (x % 4 === 1 ? 0.75 : 1) * (rnd.next() < 0.05 ? 1.5 : 1) * jitter(rnd, 0.12)))));
+  tiles.set("cactus_top", paint("cactus top", (x, y, rnd) => (x === 0 || y === 0 || x === 15 || y === 15 ? [0, 0, 0, 0] : scale(cactus, (Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) > 5 ? 0.8 : 1.1) * jitter(rnd, 0.1)))));
+  tiles.set("cactus_bottom", paint("cactus bottom", (x, y, rnd) => (x === 0 || y === 0 || x === 15 || y === 15 ? [0, 0, 0, 0] : scale(cactus, 0.85 * jitter(rnd, 0.1)))));
+  COLORS.forEach((c, i) => {
+    const color = hex(BLOCKS[Block.WhiteWool + i].top);
+    tiles.set(`${c}_wool`, paint(`${c} wool`, (x, y, rnd) => scale(color, ((x + y) % 2 ? 0.94 : 1.04) * jitter(rnd, 0.06))));
+  });
+  for (const name of TILE_NAMES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
+  return tiles;
+}
+
+/** Craft's own frames of the moving textures (ANIMATED): rippling water, churning lava. Each loops seamlessly. */
+export function animatedFrames(): Map<TileName, TilePixels[]> {
+  const out = new Map<TileName, TilePixels[]>();
+  const loop = (name: string, color: (x: number, y: number, t: number) => Rgb): void => {
+    const n = ANIMATED[name].frames;
+    out.set(
+      name,
+      Array.from({ length: n }, (_, f) => paint(name, (x, y) => color(x, y, (f / n) * Math.PI * 2))),
+    );
+  };
+  const tau = Math.PI * 2;
+  loop("water_still", (x, y, t) => {
+    const wave = Math.sin((x / 16) * tau * 2 + t) * Math.cos((y / 16) * tau + t) * 0.5 + Math.sin(((x + y) / 16) * tau - t) * 0.5;
+    return scale(hex("#3d6fdc"), 1 + wave * 0.1);
+  });
+  loop("lava_still", (x, y, t) => {
+    const heat = (Math.sin((x / 16) * tau * 2 + t) * Math.sin((y / 16) * tau * 2 - t) + Math.cos(((x - y) / 16) * tau + t)) / 2;
+    const k = Math.max(0, heat);
+    return [212 + 43 * k, 96 + 110 * k, 14 + 40 * k];
+  });
+  return out;
+}
+
+/** Plains biome colors, which Minecraft multiplies into its grayscale grass, leaf and water textures. */
+const GRASS_TINT = hex("#91bd59");
+const FOLIAGE_TINT = hex("#77ab2f");
+const WATER_TINT = hex("#3f76e4");
+
+/** A copy of the tile with its colors multiplied by a tint. */
+export function tint(tile: TilePixels, color: Rgb): TilePixels {
+  const out = new Uint8ClampedArray(tile);
+  for (let i = 0; i < out.length; i += 4) {
+    out[i] = (out[i] * color[0]) / 255;
+    out[i + 1] = (out[i + 1] * color[1]) / 255;
+    out[i + 2] = (out[i + 2] * color[2]) / 255;
+  }
+  return out;
+}
+
+/** A copy of `base` with `top` drawn over it (alpha blended). */
+export function overlay(base: TilePixels, top: TilePixels): TilePixels {
+  const out = new Uint8ClampedArray(base);
+  for (let i = 0; i < out.length; i += 4) {
+    const a = top[i + 3] / 255;
+    for (let c = 0; c < 3; c++) out[i + c] = top[i + c] * a + out[i + c] * (1 - a);
+  }
+  return out;
+}
+
+/**
+ * Turns Minecraft's texture files into Craft's tiles: grass, leaves and water tinted like a plains
+ * biome, the grass overlay laid onto the grass side, and water made opaque (its material is translucent
+ * already). `files` maps file names (without .png) to their first 16 x 16 frame.
+ */
+export function minecraftTiles(files: ReadonlyMap<string, TilePixels>): Map<TileName, TilePixels> {
+  const tiles = new Map<TileName, TilePixels>();
+  for (const name of TILES) {
+    let tile = files.get(name);
+    if (!tile) continue;
+    if (name === "grass_block_top" || name === "short_grass") tile = tint(tile, GRASS_TINT);
+    if (name === "oak_leaves") tile = tint(tile, FOLIAGE_TINT);
+    if (name === "water_still") tile = waterTile(tile);
+    const fringe = files.get("grass_block_side_overlay");
+    if (name === "grass_block_side" && fringe) tile = overlay(tile, tint(fringe, GRASS_TINT));
+    tiles.set(name, tile);
+  }
+  return tiles;
+}
+
+/** Minecraft's water, tinted like plains and made opaque (its material is translucent already). */
+function waterTile(tile: TilePixels): TilePixels {
+  const out = tint(tile, WATER_TINT);
+  for (let i = 3; i < out.length; i += 4) out[i] = 255;
+  return out;
+}
+
+/** Where `npm run textures` puts the textures it imports (not part of builds). */
+const IMPORTED = "textures/minecraft/";
+
+/** Minecraft's phases of the moon, in the order they come: full the first night, then waning. */
+export const MOON_PHASES = ["full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"] as const;
+
+/** Images for the sky from Minecraft (any of them may be missing; Craft draws its own then). */
+export interface SkyImages {
+  sun: ImageBitmap | null;
+  /** One per phase (MOON_PHASES order), or null. */
+  moon: ImageBitmap[] | null;
+  clouds: ImageBitmap | null;
+}
+
+/**
+ * The textures imported from Minecraft by `npm run textures`: block tiles (with procedural ones for any it
+ * didn't have), the sky's images, and the version they came from. Null when nothing was imported (or in
+ * a build, which leaves them out).
+ */
+export async function importedTextures(): Promise<{
+  tiles: Map<TileName, TilePixels>;
+  frames: Map<TileName, TilePixels[]>;
+  sky: SkyImages;
+  version: string;
+} | null> {
+  let manifest: { version: string; textures: string[] };
+  try {
+    const response = await fetch(`${IMPORTED}manifest.json`);
+    if (!response.ok) return null;
+    manifest = await response.json();
+  } catch {
+    return null;
+  }
+  const images = new Map<string, ImageBitmap>();
+  await Promise.all(
+    manifest.textures.map(async (name) => {
+      const response = await fetch(`${IMPORTED}${name}.png`);
+      if (response.ok) images.set(name, await createImageBitmap(await response.blob()));
+    }),
+  );
+  const files = new Map<string, TilePixels>();
+  for (const [name, image] of images) if (!/^(sun|clouds|moon)/.test(name)) files.set(name, firstFrame(image));
+  const tiles = proceduralTiles();
+  for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
+  // The moving ones come as strips of frames, top to bottom
+  const frames = animatedFrames();
+  for (const name of Object.keys(ANIMATED)) {
+    const image = images.get(name);
+    if (!image) continue;
+    const strip = Array.from({ length: Math.max(1, Math.floor(image.height / image.width)) }, (_, i) => frameAt(image, i));
+    frames.set(name, name === "water_still" ? strip.map(waterTile) : strip);
+  }
+  const phases = MOON_PHASES.map((p) => images.get(`moon_${p}`));
+  const sheet = images.get("moon_phases");
+  return {
+    tiles,
+    frames,
+    sky: {
+      sun: images.get("sun") ?? null,
+      moon: phases.every((p) => p) ? (phases as ImageBitmap[]) : sheet ? await moonSheet(sheet) : null,
+      clouds: images.get("clouds") ?? null,
+    },
+    version: manifest.version,
+  };
+}
+
+/** The phases from the moon sheet of older Minecraft versions: 4 x 2, in phase order. */
+function moonSheet(sheet: ImageBitmap): Promise<ImageBitmap[]> {
+  const w = sheet.width / 4;
+  const h = sheet.height / 2;
+  return Promise.all(MOON_PHASES.map((_, i) => createImageBitmap(sheet, (i % 4) * w, Math.floor(i / 4) * h, w, h)));
+}
+
+/** Frame i of an image's strip of square frames, scaled to a tile. */
+function frameAt(image: ImageBitmap, i: number): TilePixels {
+  const canvas = new OffscreenCanvas(TILE, TILE);
+  const g = canvas.getContext("2d")!;
+  // Resource packs with larger textures are averaged down; 16 pixel ones are copied as they are
+  g.imageSmoothingEnabled = image.width > TILE;
+  g.drawImage(image, 0, i * image.width, image.width, image.width, 0, 0, TILE, TILE);
+  return g.getImageData(0, 0, TILE, TILE).data;
+}
+
+/** The top square of an image (the first frame of an animation strip), scaled to a tile. */
+function firstFrame(image: ImageBitmap): TilePixels {
+  return frameAt(image, 0);
+}
+
+/** Every tile in one atlas (slot i holds TILES[i]), and each tile's rectangle in it (u0, v0, u1, v1 at i * 4). */
+export function blockAtlas(tiles: ReadonlyMap<TileName, TilePixels>): { atlas: Atlas; uvs: TileUVs } {
+  const atlas = new Atlas(TILES.length);
+  const uvs = new Float32Array(TILES.length * 4);
+  TILES.forEach((name, i) => {
+    const tile = tiles.get(name);
+    if (!tile) throw new Error(`Missing texture ${name}`);
+    atlas.put(i, tile);
+    uvs.set(atlas.rect(i), i * 4);
+  });
+  return { atlas, uvs };
+}
+
+/**
+ * The atlas as a texture: crisp pixels up close, mipmaps against shimmering in the distance. Moving
+ * textures get their frames drawn in as time passes (animate).
+ */
+export class AtlasTexture {
+  readonly texture: Texture;
+  private readonly atlas: Atlas;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly frames: ReadonlyMap<number, TilePixels[]>;
+  private readonly shown: Map<number, number> = new Map();
+
+  /** `frames`: the frames of the moving textures, by name. */
+  constructor(atlas: Atlas, frames: ReadonlyMap<TileName, TilePixels[]> = new Map()) {
+    this.atlas = atlas;
+    this.canvas = document.createElement("canvas");
+    this.canvas.width = atlas.width;
+    this.canvas.height = atlas.height;
+    this.canvas.getContext("2d")!.putImageData(new ImageData(atlas.pixels, atlas.width, atlas.height), 0, 0);
+    this.texture = new Texture(this.canvas, { filter: "nearest", wrap: "clamp" });
+    this.frames = new Map([...frames].map(([name, list]) => [TILES.indexOf(name), list]));
+  }
+
+  /** Shows the frames of the moving textures for a moment, in seconds. */
+  animate(seconds: number): void {
+    let changed = false;
+    for (const [i, list] of this.frames) {
+      const frame = Math.floor(seconds * ANIMATED[TILES[i]].fps) % list.length;
+      if (this.shown.get(i) === frame) continue;
+      this.shown.set(i, frame);
+      this.atlas.put(i, list[frame]);
+      const [x, y, w, h] = this.atlas.cell(i);
+      const region = new ImageData(w, h);
+      for (let row = 0; row < h; row++) region.data.set(this.atlas.pixels.subarray(((y + row) * this.atlas.width + x) * 4, ((y + row) * this.atlas.width + x + w) * 4), row * w * 4);
+      this.canvas.getContext("2d")!.putImageData(region, x, y);
+      changed = true;
+    }
+    if (changed) this.texture.markDirty();
+  }
+}
+
+/** A tile as an image URL, for the hotbar. */
+export function tileImage(tile: TilePixels): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE;
+  canvas.height = TILE;
+  canvas.getContext("2d")!.putImageData(new ImageData(tile, TILE, TILE), 0, 0);
+  return canvas.toDataURL();
+}

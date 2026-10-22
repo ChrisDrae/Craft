@@ -1,6 +1,10 @@
 import { Material } from "projector";
 
-/** Block ids, one byte each in a chunk. */
+/** The 16 dye colors, in Minecraft's order: wool and carpet come in each. */
+export const COLORS = ["white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"] as const;
+const DYES = ["#e9ecec", "#f07613", "#bd44b3", "#3aafd9", "#f8c527", "#70b919", "#ed8dac", "#3e4447", "#8e8e86", "#158991", "#792aac", "#35399d", "#724728", "#546d1b", "#a12722", "#141519"];
+
+/** Block ids. A block's default state has the same id (see the states below). */
 export const Block = {
   Air: 0,
   Grass: 1,
@@ -17,29 +21,133 @@ export const Block = {
   IronOre: 12,
   GoldOre: 13,
   Bedrock: 14,
+  Torch: 15,
+  Glowstone: 16,
+  Gravel: 17,
+  Glass: 18,
+  Ice: 19,
+  SnowBlock: 20,
+  Clay: 21,
+  Obsidian: 22,
+  StoneBricks: 23,
+  CraftingTable: 24,
+  Furnace: 25,
+  Bookshelf: 26,
+  Ladder: 27,
+  Lava: 28,
+  OakDoor: 29,
+  OakTrapdoor: 30,
+  GlassPane: 31,
+  OakFence: 32,
+  CobblestoneWall: 33,
+  Dandelion: 34,
+  Poppy: 35,
+  ShortGrass: 36,
+  OakSapling: 37,
+  Cactus: 38,
+  Snow: 39,
+  OakSlab: 40,
+  StoneSlab: 41,
+  CobblestoneSlab: 42,
+  BrickSlab: 43,
+  StoneBrickSlab: 44,
+  OakStairs: 45,
+  StoneStairs: 46,
+  CobblestoneStairs: 47,
+  BrickStairs: 48,
+  StoneBrickStairs: 49,
+  /** WhiteWool + a color's index in COLORS. */
+  WhiteWool: 50,
+  /** WhiteCarpet + a color's index in COLORS. */
+  WhiteCarpet: 66,
 } as const;
-export type Block = (typeof Block)[keyof typeof Block];
+export type Block = number;
 
-/** Face directions: +x, -x, +y, -y, +z, -z. */
+/** Face directions: +x, -x, +y, -y, +z, -z (east, west, up, down, south, north). */
 export const Dir = { PosX: 0, NegX: 1, Up: 2, Down: 3, PosZ: 4, NegZ: 5 } as const;
 export type Dir = (typeof Dir)[keyof typeof Dir];
 export const DIR_X: readonly number[] = [1, -1, 0, 0, 0, 0];
 export const DIR_Y: readonly number[] = [0, 0, 1, -1, 0, 0];
 export const DIR_Z: readonly number[] = [0, 0, 0, 0, 1, -1];
+/** The opposite of a direction: the face of the neighbor that touches a face in direction d. */
+export const opposite = (d: number): number => d ^ 1;
+
+/**
+ * How a block lets sight through. Opaque blocks hide the faces next to them; cut-out ones (leaves) have
+ * see-through pixels; translucent ones (water) are drawn see-through, after everything else.
+ */
+export type Opacity = "opaque" | "cutout" | "translucent" | "none";
+
+/** How a block is drawn: a full cube, or a model of smaller boxes and quads (see shapes.ts). */
+export type Shape =
+  | "cube"
+  | "fluid"
+  | "cross"
+  | "torch"
+  | "slab"
+  | "stairs"
+  | "fence"
+  | "pane"
+  | "wall"
+  | "door"
+  | "trapdoor"
+  | "ladder"
+  | "carpet"
+  | "snow"
+  | "cactus";
+
+/** Which of a block's looks (textures and colors) a face shows. */
+export const Face = { Top: 0, Side: 1, Bottom: 2, Front: 3 } as const;
+
+/** A block property, such as a log's axis: its name and its values, the first being the default. */
+export interface Property {
+  readonly name: string;
+  readonly values: readonly string[];
+}
+
+/** Texture names for a block's looks; `all` for every face, the others where they differ. */
+export interface Textures {
+  all?: string;
+  top?: string;
+  side?: string;
+  bottom?: string;
+  front?: string;
+}
 
 export interface BlockInfo {
+  readonly id: Block;
+  /** Stable name, as saves store it: "oak_log". */
   readonly name: string;
-  /** Stops the player. */
+  /** What the player sees: "log". */
+  readonly label: string;
+  readonly shape: Shape;
+  /** Stops entities (in the boxes of its shape). */
   readonly solid: boolean;
-  /** Hides the faces of the blocks next to it. */
-  readonly opaque: boolean;
+  readonly opacity: Opacity;
   readonly breakable: boolean;
-  /** Fill colors of the top, the sides and the bottom. */
+  /** Light level the block gives off, 0-15. */
+  readonly emission: number;
+  /** How much more light dims passing into the block than through air: 15 stops it. */
+  readonly lightFilter: number;
+  /** Falls when nothing holds it up (sand, gravel). */
+  readonly gravity: boolean;
+  /** Hides its faces toward another block of its kind (glass, water). */
+  readonly cullSame: boolean;
+  /** Leaves: hide what is behind them when drawn without see-through textures. */
+  readonly leafy: boolean;
+  /** Placing a block on it takes its place (short grass, flowing fluids). */
+  readonly replaceable: boolean;
+  /** Fill colors of the top, the sides and the bottom (Canvas 2D, the hotbar without textures). */
   readonly top: string;
   readonly side: string;
   readonly bottom: string;
-  /** Material per face direction (Dir). */
+  /** Material per look (Top, Side, Bottom; Front uses Side). */
   readonly materials: readonly Material[];
+  /** Texture names per look (Face): top, side, bottom, front. */
+  readonly textures: readonly [string, string, string, string];
+  readonly properties: readonly Property[];
+  /** Ids of the block's states, in the order of its property values (the last property counting fastest). */
+  readonly states: readonly number[];
 }
 
 interface Colors {
@@ -49,10 +157,18 @@ interface Colors {
 }
 
 interface BlockOptions {
+  shape?: Shape;
+  textures?: Textures;
   solid?: boolean;
-  opaque?: boolean;
+  opacity?: Opacity;
   breakable?: boolean;
-  opacity?: number;
+  properties?: Property[];
+  emission?: number;
+  lightFilter?: number;
+  gravity?: boolean;
+  cullSame?: boolean;
+  leafy?: boolean;
+  replaceable?: boolean;
 }
 
 /** Faces of the same color share one material, so they share the renderer's styles too. */
@@ -68,56 +184,307 @@ function materialFor(color: string, opacity: number): Material {
   return m;
 }
 
-function block(name: string, colors: Colors, options: BlockOptions = {}): BlockInfo {
+/** Shapes without collision: you walk through plants, torches and fluids. */
+const PASSABLE: readonly Shape[] = ["cross", "torch", "fluid"];
+
+function block(id: Block, name: string, label: string, colors: Colors, options: BlockOptions = {}): BlockInfo {
   const top = colors.top;
   const side = colors.side ?? top;
   const bottom = colors.bottom ?? side;
-  const opacity = options.opacity ?? 1;
-  const s = materialFor(side, opacity);
+  const shape = options.shape ?? "cube";
+  const opacity = options.opacity ?? "opaque";
+  const alpha = opacity === "translucent" ? 0.7 : 1;
+  const t = options.textures ?? { all: name };
+  const sideTile = t.side ?? t.all ?? name;
+  const topTile = t.top ?? t.all ?? sideTile;
+  const filter = opacity === "opaque" && (shape === "cube" || shape === "slab" || shape === "stairs") ? 15 : 0;
   return {
+    id,
     name,
-    solid: options.solid ?? true,
-    opaque: options.opaque ?? true,
+    label,
+    shape,
+    solid: options.solid ?? !PASSABLE.includes(shape),
+    opacity,
     breakable: options.breakable ?? true,
+    emission: options.emission ?? 0,
+    lightFilter: options.lightFilter ?? filter,
+    gravity: options.gravity ?? false,
+    cullSame: options.cullSame ?? (shape === "fluid" || ((opacity === "cutout" || opacity === "translucent") && shape === "cube" && !options.leafy)),
+    leafy: options.leafy ?? false,
+    replaceable: options.replaceable ?? false,
     top,
     side,
     bottom,
-    materials: [s, s, materialFor(top, opacity), materialFor(bottom, opacity), s, s],
+    materials: [materialFor(top, alpha), materialFor(side, alpha), materialFor(bottom, alpha)],
+    textures: [topTile, sideTile, t.bottom ?? t.all ?? topTile, t.front ?? sideTile],
+    properties: options.properties ?? [],
+    states: [],
   };
+}
+
+const bool = (name: string): Property => ({ name, values: ["false", "true"] });
+const AXIS: Property = { name: "axis", values: ["y", "x", "z"] };
+/** Where a torch points: up on the floor, or away from the wall it hangs on. */
+const TORCH_FACING: Property = { name: "facing", values: ["up", "north", "south", "east", "west"] };
+/** The way a block faces, toward its front (furnaces, stairs, doors, ladders: away from the wall). */
+const FACING: Property = { name: "facing", values: ["north", "south", "east", "west"] };
+const HALF: Property = { name: "half", values: ["bottom", "top"] };
+const DOOR_HALF: Property = { name: "half", values: ["lower", "upper"] };
+const OPEN = bool("open");
+const HINGE: Property = { name: "hinge", values: ["left", "right"] };
+const STAIR_SHAPE: Property = { name: "shape", values: ["straight", "inner_left", "inner_right", "outer_left", "outer_right"] };
+const SLAB_TYPE: Property = { name: "type", values: ["bottom", "top", "double"] };
+const CONNECTIONS: Property[] = ["north", "east", "south", "west"].map(bool);
+const LEVEL: Property = { name: "level", values: ["0", "1", "2", "3", "4", "5", "6", "7"] };
+const FALLING = bool("falling");
+const LAYERS: Property = { name: "layers", values: ["1", "2", "3", "4", "5", "6", "7", "8"] };
+
+const AIR = { solid: false, opacity: "none", breakable: false } as const;
+const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
+
+function slab(id: Block, name: string, label: string, color: string, texture: string): BlockInfo {
+  return block(id, `${name}_slab`, `${label} slab`, { top: color }, { shape: "slab", textures: { all: texture }, properties: [SLAB_TYPE] });
+}
+
+function stairs(id: Block, name: string, label: string, color: string, texture: string): BlockInfo {
+  return block(id, `${name}_stairs`, `${label} stairs`, { top: color }, { shape: "stairs", textures: { all: texture }, properties: [FACING, HALF, STAIR_SHAPE] });
 }
 
 /** Everything about a block, indexed by its id. */
 export const BLOCKS: readonly BlockInfo[] = [
-  block("air", { top: "#000000" }, { solid: false, opaque: false, breakable: false }),
-  block("grass", { top: "#67a842", side: "#7c7445", bottom: "#86603f" }),
-  block("dirt", { top: "#86603f" }),
-  block("stone", { top: "#808080" }),
-  block("sand", { top: "#dcd29c" }),
-  block("water", { top: "#3d6fdc" }, { solid: false, opaque: false, breakable: false, opacity: 0.7 }),
-  block("log", { top: "#a8895a", side: "#664f31" }),
-  block("leaves", { top: "#3e8a2a" }),
-  block("planks", { top: "#b38d55" }),
-  block("cobblestone", { top: "#6c6c6c" }),
-  block("bricks", { top: "#985040" }),
-  block("coal ore", { top: "#3a3a3a" }),
-  block("iron ore", { top: "#b8987c" }),
-  block("gold ore", { top: "#e6c53e" }),
-  block("bedrock", { top: "#4d4950" }, { breakable: false }),
+  block(Block.Air, "air", "air", { top: "#000000" }, AIR),
+  block(Block.Grass, "grass_block", "grass", { top: "#67a842", side: "#7c7445", bottom: "#86603f" }, { textures: { top: "grass_block_top", side: "grass_block_side", bottom: "dirt" } }),
+  block(Block.Dirt, "dirt", "dirt", { top: "#86603f" }),
+  block(Block.Stone, "stone", "stone", { top: "#808080" }),
+  block(Block.Sand, "sand", "sand", { top: "#dcd29c" }, { gravity: true }),
+  block(Block.Water, "water", "water", { top: "#3d6fdc" }, { shape: "fluid", opacity: "translucent", breakable: false, lightFilter: 1, textures: { all: "water_still" }, properties: [LEVEL, FALLING] }),
+  block(Block.Log, "oak_log", "log", { top: "#a8895a", side: "#664f31" }, { textures: { top: "oak_log_top", side: "oak_log" }, properties: [AXIS] }),
+  block(Block.Leaves, "oak_leaves", "leaves", { top: "#3e8a2a" }, { opacity: "cutout", lightFilter: 1, leafy: true }),
+  block(Block.Planks, "oak_planks", "planks", { top: "#b38d55" }),
+  block(Block.Cobblestone, "cobblestone", "cobblestone", { top: "#6c6c6c" }),
+  block(Block.Bricks, "bricks", "bricks", { top: "#985040" }),
+  block(Block.CoalOre, "coal_ore", "coal ore", { top: "#3a3a3a" }),
+  block(Block.IronOre, "iron_ore", "iron ore", { top: "#b8987c" }),
+  block(Block.GoldOre, "gold_ore", "gold ore", { top: "#e6c53e" }),
+  block(Block.Bedrock, "bedrock", "bedrock", { top: "#4d4950" }, { breakable: false }),
+  block(Block.Torch, "torch", "torch", { top: "#ffd86a", side: "#8a6a3a" }, { shape: "torch", opacity: "cutout", properties: [TORCH_FACING], emission: 14 }),
+  block(Block.Glowstone, "glowstone", "glowstone", { top: "#e8c06a" }, { emission: 15 }),
+  block(Block.Gravel, "gravel", "gravel", { top: "#857f7b" }, { gravity: true }),
+  block(Block.Glass, "glass", "glass", { top: "#c0e0e8" }, { opacity: "cutout" }),
+  block(Block.Ice, "ice", "ice", { top: "#91b7fd" }, { opacity: "translucent", lightFilter: 1 }),
+  block(Block.SnowBlock, "snow_block", "snow block", { top: "#f6fbfb" }, { textures: { all: "snow" } }),
+  block(Block.Clay, "clay", "clay", { top: "#a1a7b2" }),
+  block(Block.Obsidian, "obsidian", "obsidian", { top: "#14121e" }),
+  block(Block.StoneBricks, "stone_bricks", "stone bricks", { top: "#7a7a7a" }),
+  block(Block.CraftingTable, "crafting_table", "crafting table", { top: "#a07a48", side: "#7b5a35" }, { textures: { top: "crafting_table_top", side: "crafting_table_side", bottom: "oak_planks", front: "crafting_table_front" } }),
+  block(Block.Furnace, "furnace", "furnace", { top: "#6e6e6e", side: "#5a5a5a" }, { textures: { top: "furnace_top", side: "furnace_side", front: "furnace_front" }, properties: [FACING] }),
+  block(Block.Bookshelf, "bookshelf", "bookshelf", { top: "#b38d55", side: "#7a5a3a" }, { textures: { top: "oak_planks", side: "bookshelf" } }),
+  block(Block.Ladder, "ladder", "ladder", { top: "#8a6a3a" }, { shape: "ladder", opacity: "cutout", properties: [FACING] }),
+  block(Block.Lava, "lava", "lava", { top: "#d4600e" }, { shape: "fluid", breakable: false, emission: 15, lightFilter: 1, textures: { all: "lava_still" }, properties: [LEVEL, FALLING] }),
+  block(Block.OakDoor, "oak_door", "door", { top: "#8a6a3a" }, { shape: "door", opacity: "cutout", textures: { top: "oak_door_top", side: "oak_door_bottom" }, properties: [FACING, DOOR_HALF, OPEN, HINGE] }),
+  block(Block.OakTrapdoor, "oak_trapdoor", "trapdoor", { top: "#8a6a3a" }, { shape: "trapdoor", opacity: "cutout", properties: [FACING, HALF, OPEN] }),
+  block(Block.GlassPane, "glass_pane", "glass pane", { top: "#c0e0e8" }, { shape: "pane", opacity: "cutout", textures: { side: "glass", top: "glass_pane_top" }, properties: CONNECTIONS }),
+  block(Block.OakFence, "oak_fence", "fence", { top: "#b38d55" }, { shape: "fence", textures: { all: "oak_planks" }, properties: CONNECTIONS }),
+  block(Block.CobblestoneWall, "cobblestone_wall", "cobblestone wall", { top: "#6c6c6c" }, { shape: "wall", textures: { all: "cobblestone" }, properties: CONNECTIONS }),
+  block(Block.Dandelion, "dandelion", "dandelion", { top: "#f1d42c" }, PLANT),
+  block(Block.Poppy, "poppy", "poppy", { top: "#c8261a" }, PLANT),
+  block(Block.ShortGrass, "short_grass", "tall grass", { top: "#5d9b3a" }, { ...PLANT, replaceable: true }),
+  block(Block.OakSapling, "oak_sapling", "sapling", { top: "#3e7a2a" }, PLANT),
+  block(Block.Cactus, "cactus", "cactus", { top: "#5a8a2e", side: "#4a7a26" }, { shape: "cactus", opacity: "cutout", textures: { top: "cactus_top", side: "cactus_side", bottom: "cactus_bottom" } }),
+  block(Block.Snow, "snow", "snow", { top: "#f6fbfb" }, { shape: "snow", properties: [LAYERS] }),
+  slab(Block.OakSlab, "oak", "oak", "#b38d55", "oak_planks"),
+  slab(Block.StoneSlab, "stone", "stone", "#808080", "stone"),
+  slab(Block.CobblestoneSlab, "cobblestone", "cobblestone", "#6c6c6c", "cobblestone"),
+  slab(Block.BrickSlab, "brick", "brick", "#985040", "bricks"),
+  slab(Block.StoneBrickSlab, "stone_brick", "stone brick", "#7a7a7a", "stone_bricks"),
+  stairs(Block.OakStairs, "oak", "oak", "#b38d55", "oak_planks"),
+  stairs(Block.StoneStairs, "stone", "stone", "#808080", "stone"),
+  stairs(Block.CobblestoneStairs, "cobblestone", "cobblestone", "#6c6c6c", "cobblestone"),
+  stairs(Block.BrickStairs, "brick", "brick", "#985040", "bricks"),
+  stairs(Block.StoneBrickStairs, "stone_brick", "stone brick", "#7a7a7a", "stone_bricks"),
+  ...COLORS.map((c, i) => block(Block.WhiteWool + i, `${c}_wool`, `${c.replace("_", " ")} wool`, { top: DYES[i] })),
+  ...COLORS.map((c, i) => block(Block.WhiteCarpet + i, `${c}_carpet`, `${c.replace("_", " ")} carpet`, { top: DYES[i] }, { shape: "carpet", textures: { all: `${c}_wool` } })),
 ];
 
-/** Lookup tables for the hot loops: 1 where the flag is set. */
-export const SOLID: Uint8Array = Uint8Array.from(BLOCKS, (b) => (b.solid ? 1 : 0));
-export const OPAQUE: Uint8Array = Uint8Array.from(BLOCKS, (b) => (b.opaque ? 1 : 0));
+// States: the default ones take the blocks' own ids, the others the ids after them
+const stateBlock: number[] = BLOCKS.map((b) => b.id);
+const stateIndex: number[] = BLOCKS.map(() => 0);
+for (const b of BLOCKS) {
+  const count = b.properties.reduce((n, p) => n * p.values.length, 1);
+  const states = b.states as number[];
+  states.push(b.id);
+  for (let i = 1; i < count; i++) {
+    states.push(stateBlock.length);
+    stateBlock.push(b.id);
+    stateIndex.push(i);
+  }
+}
 
-/** What the hotbar slots 1-9 place. */
+/** How many block states there are; chunks store state ids below this. */
+export const STATE_COUNT = stateBlock.length;
+/** The block of every state. */
+export const STATE_BLOCK: Uint16Array = Uint16Array.from(stateBlock);
+const STATE_INDEX: Uint16Array = Uint16Array.from(stateIndex);
+
+/** The block a state belongs to. */
+export function blockOf(state: number): Block {
+  return STATE_BLOCK[state];
+}
+
+/** The value of one of the state's properties. */
+export function propertyOf(state: number, name: string): string {
+  const props = BLOCKS[STATE_BLOCK[state]].properties;
+  let index = STATE_INDEX[state];
+  for (let p = props.length - 1; p >= 0; p--) {
+    const n = props[p].values.length;
+    if (props[p].name === name) return props[p].values[index % n];
+    index = Math.floor(index / n);
+  }
+  throw new Error(`${BLOCKS[STATE_BLOCK[state]].name} has no property ${name}`);
+}
+
+/** The block's state with the given property values (the defaults for the rest). */
+export function stateOf(block: Block, values: Readonly<Record<string, string>> = {}): number {
+  const info = BLOCKS[block];
+  let index = 0;
+  for (const p of info.properties) {
+    const v = values[p.name] === undefined ? 0 : p.values.indexOf(values[p.name]);
+    if (v < 0) throw new Error(`${info.name}: ${p.name} can't be ${values[p.name]}`);
+    index = index * p.values.length + v;
+  }
+  return info.states[index];
+}
+
+/** The same block in a state with some properties changed. */
+export function withProperties(state: number, values: Readonly<Record<string, string>>): number {
+  const info = BLOCKS[STATE_BLOCK[state]];
+  const all: Record<string, string> = {};
+  for (const p of info.properties) all[p.name] = values[p.name] ?? propertyOf(state, p.name);
+  return stateOf(info.id, all);
+}
+
+/** The state as text, with every property: "oak_log[axis=x]". Saves store states this way. */
+export function stateName(state: number): string {
+  const info = BLOCKS[STATE_BLOCK[state]];
+  if (info.properties.length === 0) return info.name;
+  return `${info.name}[${info.properties.map((p) => `${p.name}=${propertyOf(state, p.name)}`).join(",")}]`;
+}
+
+const BY_NAME: Map<string, BlockInfo> = new Map(BLOCKS.map((b) => [b.name, b]));
+
+/** The block with a stable name ("oak_log"), or null. */
+export function blockByName(name: string): Block | null {
+  return BY_NAME.get(name)?.id ?? null;
+}
+
+/** The state a name stands for (see stateName), or null for a block or value that doesn't exist. */
+export function stateByName(text: string): number | null {
+  const match = /^([a-z0-9_]+)(?:\[(.*)\])?$/.exec(text);
+  const info = match ? BY_NAME.get(match[1]) : undefined;
+  if (!match || !info) return null;
+  const values: Record<string, string> = {};
+  for (const pair of match[2] ? match[2].split(",") : []) {
+    const [name, value] = pair.split("=");
+    const p = info.properties.find((q) => q.name === name);
+    if (!p || !p.values.includes(value)) return null;
+    values[name] = value;
+  }
+  return stateOf(info.id, values);
+}
+
+/** The shape every state is drawn with (per block). */
+export const SHAPE: readonly Shape[] = stateBlock.map((b) => BLOCKS[b].shape);
+const isFluid = (b: number): boolean => BLOCKS[b].shape === "fluid";
+const isCube = (s: number): boolean => SHAPE[s] === "cube" || (SHAPE[s] === "slab" && propertyOf(s, "type") === "double");
+
+/** Lookup tables by state id for the hot loops: 1 where the flag is set. */
+export const SOLID: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].solid ? 1 : 0));
+/** Full opaque cubes: they hide every face next to them and darken corners (ambient occlusion). */
+export const OPAQUE: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (BLOCKS[b].opacity === "opaque" && isCube(s) ? 1 : 0));
+/** Drawn with the see-through blocks, after everything else (water, ice). */
+export const TRANSLUCENT: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].opacity === "translucent" ? 1 : 0));
+/** Drawn as a full cube (with the fast path of face lists and smooth lighting), fluids included. */
+export const CUBE_SHAPED: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (isCube(s) || isFluid(b) ? 1 : 0));
+/**
+ * The light filter of blocks that light gets into but not through: slabs and stairs. Their own cell is lit
+ * (as from a neighbor a block away), so the faces drawn from it aren't black, but a slab roof keeps the
+ * house below dark, as Minecraft's light that is stopped by the solid sides of shapes.
+ */
+export const LIGHT_SINK = 16;
+/** Light each state gives off (0-15), and how much it dims light passing into it (15 stops it, see LIGHT_SINK). */
+export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b) => BLOCKS[b].emission);
+export const LIGHT_FILTER: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (BLOCKS[b].lightFilter >= 15 && !OPAQUE[s] ? LIGHT_SINK : BLOCKS[b].lightFilter));
+/** See BlockInfo. */
+export const CULL_SAME: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].cullSame ? 1 : 0));
+export const LEAFY: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].leafy ? 1 : 0));
+/** 1 for water, 2 for lava, 0 for everything else. */
+export const FLUID: Uint8Array = Uint8Array.from(stateBlock, (b) => (b === Block.Water ? 1 : b === Block.Lava ? 2 : 0));
+
+/** Every texture any block uses, in a fixed order: blocks refer to them by index. */
+export const TILE_NAMES: readonly string[] = [...new Set(BLOCKS.flatMap((b) => (b.id === Block.Air ? [] : b.textures)))];
+const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
+
+/** The index of a texture in TILE_NAMES. */
+export function tileIndex(name: string): number {
+  const i = TILE_INDEX.get(name);
+  if (i === undefined) throw new Error(`No texture ${name}`);
+  return i;
+}
+
+/** The direction (Dir) a facing value points to. */
+export const FACING_DIR: Readonly<Record<string, number>> = { north: Dir.NegZ, south: Dir.PosZ, east: Dir.PosX, west: Dir.NegX };
+
+/** The look (Face) each state shows in each direction, at (state * 6 + dir), for cubes. */
+export const FACE_LOOK: Uint8Array = new Uint8Array(STATE_COUNT * 6);
+/** The texture (TILE_NAMES index) of each cube face, at (state * 6 + dir). */
+export const FACE_TILE: Uint16Array = new Uint16Array(STATE_COUNT * 6);
+/**
+ * Quarter turns of the texture on each face, at (state * 6 + dir): a log lying on its side turns its bark
+ * so the grain runs along the log.
+ */
+export const FACE_TURN: Uint8Array = new Uint8Array(STATE_COUNT * 6);
+for (let state = 0; state < STATE_COUNT; state++) {
+  const info = BLOCKS[STATE_BLOCK[state]];
+  const axis = info.properties.includes(AXIS) ? propertyOf(state, "axis") : null;
+  const front = info.properties.includes(FACING) ? FACING_DIR[propertyOf(state, "facing")] : info.id === Block.CraftingTable ? Dir.NegZ : -1;
+  for (let d = 0; d < 6; d++) {
+    const i = state * 6 + d;
+    let look: number = d === Dir.Up ? Face.Top : d === Dir.Down ? Face.Bottom : Face.Side;
+    if (axis) {
+      // Both ends show the rings
+      const along = d < 2 ? "x" : d < 4 ? "y" : "z";
+      look = along === axis ? Face.Top : Face.Side;
+      FACE_TURN[i] = (axis === "x" && d >= 2) || (axis === "z" && d < 2) ? 1 : 0;
+    }
+    // A crafting table shows its front on two sides
+    if (d === front || (info.id === Block.CraftingTable && d === Dir.NegX)) look = Face.Front;
+    FACE_LOOK[i] = look;
+    FACE_TILE[i] = info.id === Block.Air ? 0 : tileIndex(info.textures[look]);
+  }
+}
+
+/** The canvas material of a state's look. */
+export function lookMaterial(state: number, look: number): Material {
+  return BLOCKS[STATE_BLOCK[state]].materials[look === Face.Front ? Face.Side : look];
+}
+
+/** The canvas material of a state's face in direction `dir`. */
+export function faceMaterial(state: number, dir: number): Material {
+  return lookMaterial(state, FACE_LOOK[state * 6 + dir]);
+}
+
+/** The blocks the hotbar starts with, slots 1-9. */
 export const HOTBAR: readonly Block[] = [
-  Block.Grass,
   Block.Dirt,
   Block.Stone,
   Block.Cobblestone,
   Block.Planks,
   Block.Log,
-  Block.Leaves,
-  Block.Sand,
-  Block.Bricks,
+  Block.Glass,
+  Block.OakStairs,
+  Block.Torch,
+  Block.OakDoor,
 ];
+
+/** Blocks the player can pick for the hotbar: everything but air and bedrock. */
+export const PLACEABLE: readonly Block[] = BLOCKS.filter((b) => b.id !== Block.Air && b.id !== Block.Bedrock).map((b) => b.id);

@@ -40,6 +40,22 @@ describe("moveAxis", () => {
     expect(moveAxis(world, pos, 0.3, 1.8, 0, 0.5)).toBe(false);
   });
 
+  it("stops at the boxes of a block shape, not its cell", () => {
+    // A bottom slab at (0, 10, 0) on otherwise empty ground
+    const slab = Float64Array.of(0, 0, 0, 1, 0.5, 1);
+    const shapes = { collisionBoxes: (x: number, y: number, z: number) => (x === 0 && y === 10 && z === 0 ? slab : new Float64Array(0)) };
+    const falling = { x: 0.5, y: 11.2, z: 0.5 };
+    expect(moveAxis(shapes, falling, 0.3, 1.8, 1, -0.9)).toBe(true);
+    expect(falling.y).toBeCloseTo(10.5, 3);
+    // Above the slab's top the cell is free to walk through
+    const above = { x: -0.5, y: 10.6, z: 0.5 };
+    expect(moveAxis(shapes, above, 0.3, 1.8, 0, 0.8)).toBe(false);
+    // Lower down, the slab's side stops the box
+    const beside = { x: -0.5, y: 10, z: 0.5 };
+    expect(moveAxis(shapes, beside, 0.3, 1.8, 0, 0.8)).toBe(true);
+    expect(beside.x).toBeCloseTo(-0.3, 3);
+  });
+
   it("knows which cells a box overlaps", () => {
     const pos = { x: 0.5, y: 10, z: 0.5 };
     expect(boxOverlapsCell(pos, 0.3, 1.8, 0, 10, 0)).toBe(true);
@@ -93,6 +109,16 @@ describe("Player", () => {
     expect(r.x).toBeCloseTo(Math.cos(0.7));
     expect(r.z).toBeCloseTo(-Math.sin(0.7));
     expect(sim.camera.position.y).toBeCloseTo(player.position.y + 1.62);
+  });
+
+  it("waits in the air while the chunk under it isn't loaded", () => {
+    const { sim, player, world } = setup();
+    player.position.x = 40.5;
+    for (let i = 0; i < 60; i++) sim.frame(1 / 60);
+    expect(player.position.y).toBe(12);
+    world.load(2, 0);
+    for (let i = 0; i < 120; i++) sim.frame(1 / 60);
+    expect(player.position.y).toBeCloseTo(10, 2);
   });
 
   it("can't be overlapped by its own box size constants", () => {

@@ -1,2 +1,4 @@
 node_modules
 dist
+# Imported by `npm run textures` from your own Minecraft: Mojang's, never committed
+textures/minecraft
