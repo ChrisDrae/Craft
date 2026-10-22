@@ -262,6 +262,34 @@ migrating from today's format.
 
 ### Phase 3: Block shapes, more blocks, fluids (L)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- Models are in `src/shapes.ts`: every state's quads (from boxes, or crossed planes) are built once at
+  startup, with its collision and selection boxes. Which sides a state covers (for culling) is rasterized
+  from its quads; which sides are sturdy (for torches, plants and fence connections) from its collision
+  boxes, so glass and leaves hold torches as in Minecraft while hiding nothing.
+- Block updates (`src/updates.ts`): a change updates the block and its six neighbors, as in Minecraft:
+  fences, panes and walls connect, stairs take their corner shapes (Minecraft's rule), blocks that lose
+  their support come off (a door's two halves together), and fluids and sand are scheduled to move. As in
+  Minecraft, a block only checks its support when a neighbor changes, not when it is put in place.
+- 82 blocks: the shapes in oak, stone, cobblestone, brick and stone brick, 16 colors of wool and carpet,
+  gravel, glass, ice, snow, clay, obsidian, crafting table, furnace, bookshelf, ladder, lava, flowers, short
+  grass, a sapling and cactus. The chest and the bed wait for what they're for (Phases 5 and 6); fence gates,
+  stained glass and farmland (Phase 9) for later.
+- Fluids follow Minecraft's spreading code closely, down to its quirks: a source in midair spreads a block to
+  each side before falling, so it makes a plus-shaped waterfall. Flowing water uses the still texture on its
+  sloped surface (no `water_flow` yet). Currents push the player; lava is slower to move in than water.
+- Sand and gravel fall by scheduled ticks (a block a tick, 20 a second) instead of as entities: no falling
+  animation yet, but nothing to save between ticks.
+- Light gets into slabs and stairs but not through them (Minecraft's light occlusion by shape, simplified),
+  so their faces and the faces next to them aren't black, and a slab roof keeps the house below dark.
+- Ladders came from Phase 8: climbing while pushing into them or holding Space, sliding down slowly otherwise.
+- E opens a list of all blocks to put one into the hotbar, and the middle button picks the block aimed at.
+  The hotbar is saved: save format 2, with a migration that gives older players the default hotbar and a
+  fixture of its own.
+- Measured in Chrome: meshing 0.47 ms per chunk (0.42 before); flying at 25 blocks/s at most 5.1 ms a frame,
+  at 50 blocks/s 5.6 ms; 60 fps throughout. Canvas 2D: 60 fps, 3.4 ms a frame, every shape drawn, fluids
+  flat per block.
+
 - **Models** (`src/models.ts`): a block model is a list of boxes with textures and UVs per face, plus culling
   rules (a face is hidden only by a neighbor that covers it completely). Shapes: cube, cross (flowers, tall
   grass, saplings), torch, slab (bottom, top, double), stairs (with corner shapes), fence and wall
@@ -383,7 +411,8 @@ Parts of this phase can come at any point; sound in particular depends on nothin
 - **Hand and held item:** the arm and the held block or item in view, swinging on use (R15).
 - **Camera:** view bobbing, a wider view while sprinting, a tilt when hurt; third person from behind and in
   front (F5) with a player model.
-- **Movement:** sneaking (slower, a lower camera, no walking off edges), climbing ladders and vines.
+- **Movement:** sneaking (slower, a lower camera, no walking off edges), climbing vines (ladders came in
+  Phase 3).
 - **F3 debug screen,** hidden until F3 (the removed info box, now on demand): fps and frame times, position,
   chunk, facing, biome, light levels, renderer stats.
 - **Chat and commands:** T opens the chat; `/gamemode`, `/time set`, `/tp`, `/give`, `/seed`, `/weather`,
@@ -457,4 +486,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0, 1 and 2 are done; next is Phase 3, block shapes, more blocks and fluids.
+Phases 0 to 3 are done; next is Phase 4, terrain 2.0: biomes, caves and structures.

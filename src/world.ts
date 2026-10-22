@@ -1,5 +1,7 @@
-import { Block, COLLISION, CUTOUT, DIR_X, DIR_Y, DIR_Z, MODELS, OPAQUE, SOLID, STATE_BLOCK } from "./blocks.js";
-import { CHUNK_SIZE, Chunk, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
+import { Block, CUBE_SHAPED, CULL_SAME, DIR_X, DIR_Y, DIR_Z, FLUID, LEAFY, SOLID, STATE_BLOCK } from "./blocks.js";
+import { CHUNK_SIZE, Chunk, MODEL_FACE, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
+import { ownHeight } from "./fluids.js";
+import { COLLISION, COVERS } from "./shapes.js";
 import { OPEN_SKY, joinChunk, lightChunk, relight, type LightWorld } from "./light.js";
 
 function grow(faces: Int32Array): Int32Array {
@@ -17,6 +19,8 @@ export class VoxelWorld implements LightWorld {
    * leaf textures. Off, they count as solid: fewer faces, for the untextured renderer.
    */
   fancyLeaves: boolean = false;
+  /** Called after every block change with its position (BlockUpdates.changed). */
+  onChanged: ((x: number, y: number, z: number) => void) | null = null;
 
   constructor(generator: ChunkGenerator) {
     this.generator = generator;
@@ -196,14 +200,16 @@ export class VoxelWorld implements LightWorld {
     if (lz === 0) this.markDirty(cx, cz - 1, s);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1, s);
     relight(this, x, y, z);
+    this.onChanged?.(x, y, z);
     return true;
   }
 
   /**
-   * Rebuilds the face lists of a chunk's dirty sections. A face is exposed when the block next to it
-   * doesn't hide it: air, or water next to anything but water (and leaves, with fancyLeaves). Faces
-   * toward a chunk that isn't loaded yet stay hidden until it is. Blocks drawn as a smaller model box
-   * (torches) show all their faces and hide none of their neighbors'.
+   * Rebuilds the face lists of a chunk's dirty sections. A cube's face shows unless the block next to it
+   * covers that side completely (COVERS), is the same see-through block (glass next to glass, water next
+   * to water, unless that water is lower), or is leaves drawn without see-through textures (fancyLeaves
+   * off). Faces toward a chunk that isn't loaded yet stay hidden until it is. A block drawn as a model
+   * gets one entry (MODEL_FACE) for all its quads, which the meshers cull one by one.
    */
   buildFaces(chunk: Chunk): void {
     for (let s = 0; s < SECTIONS; s++) {
@@ -236,22 +242,16 @@ export class VoxelWorld implements LightWorld {
         for (let x = 0; x < CHUNK_SIZE; x += step) {
           const b = blocks[sectionIndex(x, y, z)];
           if (b === Block.Air) continue;
-          const kind = STATE_BLOCK[b];
-          let lowered = false;
-          if (kind === Block.Water) {
-            const above = y < CHUNK_SIZE - 1 ? blocks[sectionIndex(x, y + 1, z)] : sy < SECTIONS - 1 ? chunk.get(x, sy * CHUNK_SIZE + CHUNK_SIZE, z) : Block.Air;
-            lowered = STATE_BLOCK[above] !== Block.Water;
+          if (CUBE_SHAPED[b] === 0) {
+            if (count === faces.length) faces = grow(faces);
+            faces[count++] = packFace(x, y, z, MODEL_FACE, b);
+            continue;
           }
-          const model = MODELS[b] !== null;
+          const kind = STATE_BLOCK[b];
           for (let d = 0; d < 6; d++) {
             const nx = x + DIR_X[d];
             const ny = y + DIR_Y[d];
             const nz = z + DIR_Z[d];
-            if (model) {
-              if (count === faces.length) faces = grow(faces);
-              faces[count++] = packFace(x, y, z, d, false, b);
-              continue;
-            }
             let n: number;
             if (nx >= 0 && nx < CHUNK_SIZE && ny >= 0 && ny < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE) {
               n = blocks[sectionIndex(nx, ny, nz)];
@@ -263,11 +263,17 @@ export class VoxelWorld implements LightWorld {
               if (!other) continue;
               n = wy >= WORLD_HEIGHT ? Block.Air : other.get(nx & 15, wy, nz & 15);
             }
-            const seeThrough = fancy && CUTOUT[n] === 1;
-            const hides = OPAQUE[n] === 1 || (CUTOUT[n] === 1 && MODELS[n] === null);
-            if (STATE_BLOCK[n] === kind ? !seeThrough : hides && !seeThrough) continue;
+            if (COVERS[n * 6 + (d ^ 1)] === 1 || (!fancy && LEAFY[n] === 1)) continue;
+            if (CULL_SAME[b] === 1 && STATE_BLOCK[n] === kind) {
+              // A fluid's side shows above a lower surface of the same fluid next to it
+              if (FLUID[b] === 0 || d === 2 || d === 3) continue;
+              const wy = sy * CHUNK_SIZE + y;
+              const own = FLUID[this.get(chunk.cx * 16 + x, wy + 1, chunk.cz * 16 + z)] === FLUID[b] ? 1 : ownHeight(b);
+              const theirs = FLUID[this.get(chunk.cx * 16 + nx, wy + 1, chunk.cz * 16 + nz)] === FLUID[b] ? 1 : ownHeight(n);
+              if (theirs >= own) continue;
+            }
             if (count === faces.length) faces = grow(faces);
-            faces[count++] = packFace(x, y, z, d, lowered, b);
+            faces[count++] = packFace(x, y, z, d, b);
           }
         }
       }

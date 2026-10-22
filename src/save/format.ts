@@ -1,9 +1,14 @@
+import { BLOCKS, HOTBAR } from "../blocks.js";
+
 /**
  * Version of the save format. Every record carries the version that wrote it: older records are migrated
  * as they're read, newer ones refused. tests/fixtures holds a world of every version, which must keep
  * opening.
+ *
+ * 1. The first.
+ * 2. The player's hotbar (block names).
  */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 
 export interface Position {
   x: number;
@@ -41,6 +46,8 @@ export interface PlayerRecord {
   pitch: number;
   /** Hotbar slot, 0-8. */
   selected: number;
+  /** The blocks in the hotbar's slots, by name. */
+  hotbar: string[];
 }
 
 /** A scheduled tick waiting in a chunk, with its block by name. */
@@ -75,8 +82,14 @@ export class NewerFormatError extends Error {
 }
 
 type Migration<T> = (record: T) => T;
-/** Migrations from each older format to the next, per kind of record. None yet: version 1 is the first. */
-const MIGRATIONS: Record<"world" | "player" | "chunk", Migration<{ format: number }>[]> = { world: [], player: [], chunk: [] };
+const next = (r: { format: number }): { format: number } => ({ ...r, format: r.format + 1 });
+/** Migrations from each older format to the next, per kind of record (index 0 upgrades format 1). */
+const MIGRATIONS: Record<"world" | "player" | "chunk", Migration<{ format: number }>[]> = {
+  world: [next],
+  // Players from before the hotbar could change get the hotbar it had
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) })],
+  chunk: [next],
+};
 
 /** Brings a record read from storage or a file up to FORMAT_VERSION. */
 export function upgrade<T extends { format: number }>(kind: "world" | "player" | "chunk", record: T): T {

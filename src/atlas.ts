@@ -43,6 +43,11 @@ export class Atlas {
     }
   }
 
+  /** Slot i's cell in pixels, gutter included: x, y, width, height. */
+  cell(i: number): [number, number, number, number] {
+    return [(i % this.columns) * CELL, Math.floor(i / this.columns) * CELL, CELL, CELL];
+  }
+
   /** Texture coordinates of slot i's tile: u0, v0 (top left), u1, v1 (bottom right). */
   rect(i: number): Float32Array {
     const x = (i % this.columns) * CELL + GUTTER;

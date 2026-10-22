@@ -11,7 +11,6 @@ interface Face {
   z: number;
   dir: number;
   block: number;
-  lowered: boolean;
 }
 
 function facesOf(world: VoxelWorld, chunk: Chunk): Face[] {
@@ -26,7 +25,6 @@ function facesOf(world: VoxelWorld, chunk: Chunk): Face[] {
         z: chunk.cz * CHUNK_SIZE + ((f >> 4) & 15),
         dir: (f >> 12) & 7,
         block: f >>> 16,
-        lowered: ((f >> 15) & 1) === 1,
       });
     }
   });
@@ -62,10 +60,10 @@ describe("VoxelWorld faces", () => {
     const faces = facesOf(world, world.chunk(0, 0)!);
     // The stone under the water keeps its top
     expect(at(faces, 4, 9, 4).map((f) => f.dir)).toEqual([Dir.Up]);
-    // Water shows its top (lowered, air above) and its sides toward air, not the side toward the other water
+    // Water shows its top (air above) and its sides toward air, not the side toward the other water
     const water = at(faces, 4, 10, 4);
     expect(water.map((f) => f.dir).sort()).toEqual([Dir.NegX, Dir.Up, Dir.PosZ, Dir.NegZ].sort());
-    expect(water.every((f) => f.block === Block.Water && f.lowered)).toBe(true);
+    expect(water.every((f) => f.block === Block.Water)).toBe(true);
   });
 });
 

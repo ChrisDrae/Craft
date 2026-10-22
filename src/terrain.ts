@@ -1,6 +1,6 @@
 import { LineSet, Material, MeshNode, SimObject, Transform, type Mesh, type Scene, type Texture, type Vec3 } from "projector";
 import { CHUNK_SIZE, FACE_CORNERS as CORNERS, type Chunk } from "./chunk.js";
-import { buildChunkMeshes, type FaceUVs } from "./chunkMesh.js";
+import { buildChunkMeshes, type TileUVs } from "./chunkMesh.js";
 import { DirectSupply, type ChunkSupply } from "./chunkSupply.js";
 import type { LightMap } from "./lightmap.js";
 import type { VoxelHit } from "./raycast.js";
@@ -10,7 +10,7 @@ import type { VoxelWorld } from "./world.js";
 /** Block textures for the meshed renderer: the atlas, each block face's place in it, and the light map. */
 export interface TerrainTextures {
   texture: Texture;
-  uvs: FaceUVs;
+  uvs: TileUVs;
   lightMap: Texture;
 }
 

@@ -30,7 +30,14 @@ export function newMeta(id: string, seed: string = "saves"): WorldMeta {
   };
 }
 
-export const standing: PlayerState = { position: { x: 1.5, y: 80, z: 2.5 }, velocity: { x: 0, y: 0, z: 0 }, yaw: 0.5, pitch: -0.2, selected: 3 };
+export const standing: PlayerState = {
+  position: { x: 1.5, y: 80, z: 2.5 },
+  velocity: { x: 0, y: 0, z: 0 },
+  yaw: 0.5,
+  pitch: -0.2,
+  selected: 3,
+  hotbar: ["stone", "oak_planks", "glass", "oak_stairs", "torch", "oak_door", "white_wool", "water", "lava"],
+};
 
 /** A world being played as the game does it: generated directly, with ticks and a save. */
 export async function openWorld(store: WorldStore, meta: WorldMeta): Promise<{ world: VoxelWorld; ticks: WorldTicks; save: WorldSave }> {

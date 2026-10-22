@@ -1,5 +1,5 @@
 import { SimObject, type Vec3 } from "projector";
-import { Block, blockOf } from "./blocks.js";
+import { FLUID } from "./blocks.js";
 import { moveAxis } from "./collision.js";
 import type { VoxelWorld } from "./world.js";
 
@@ -29,10 +29,15 @@ export class Entity extends SimObject {
     return this.world.isLoaded(this.position.x, this.position.z);
   }
 
-  /** Whether the block at a height above the feet is water. */
-  waterAt(dy: number): boolean {
+  /** The block at a height above the feet. */
+  blockAt(dy: number): number {
     const p = this.position;
-    return blockOf(this.world.get(Math.floor(p.x), Math.floor(p.y + dy), Math.floor(p.z))) === Block.Water;
+    return this.world.get(Math.floor(p.x), Math.floor(p.y + dy), Math.floor(p.z));
+  }
+
+  /** The fluid at a height above the feet: 0 none, 1 water, 2 lava. */
+  fluidAt(dy: number): number {
+    return FLUID[this.blockAt(dy)];
   }
 
   /**

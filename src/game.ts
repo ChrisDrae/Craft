@@ -1,5 +1,5 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
-import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
+import { BLOCKS, PLACEABLE, blockByName, type Block } from "./blocks.js";
 import { WORLD_HEIGHT } from "./chunk.js";
 import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
@@ -12,8 +12,10 @@ import { WorldSave } from "./save/worldSave.js";
 import { viewDistance, type Settings } from "./settings.js";
 import { Sky, css } from "./sky.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
-import { atlasTexture, blockAtlas, importedTextures, proceduralTiles, tileFor, tileImage } from "./textures.js";
-import { WorldTicks } from "./ticks.js";
+import { blockBehaviors } from "./fluids.js";
+import { AtlasTexture, animatedFrames, blockAtlas, iconTile, importedTextures, proceduralTiles, tileImage } from "./textures.js";
+import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
+import { BlockUpdates } from "./updates.js";
 import { formatWhen, h } from "./ui/dom.js";
 import { optionsScreen } from "./ui/options.js";
 import { VoxelWorld } from "./world.js";
@@ -95,9 +97,11 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Light levels to colors, redrawn through the day
   const lightMap = new LightMap();
   let textures: TerrainTextures | null = null;
+  let atlasTexture: AtlasTexture | null = null;
   if (tiles) {
     const { atlas, uvs } = blockAtlas(tiles);
-    textures = { texture: atlasTexture(atlas), uvs, lightMap: lightMap.texture };
+    atlasTexture = new AtlasTexture(atlas, imported?.frames ?? animatedFrames());
+    textures = { texture: atlasTexture.texture, uvs, lightMap: lightMap.texture };
   }
   const sim = new Simulation({
     canvas,
@@ -125,7 +129,14 @@ export async function startGame(options: GameOptions): Promise<void> {
     console.warn("Craft: no module workers, generating chunks on the main thread.", e);
   }
   sim.add(player);
-  const ticks = sim.add(new WorldTicks(world, new Map(), seed));
+  // Fluids flow and sand falls on scheduled ticks; every block change updates the blocks around it
+  const ticks = sim.add(new WorldTicks(world, blockBehaviors(), seed));
+  const updates = new BlockUpdates(world, ticks);
+  world.onChanged = (x, y, z) => updates.changed(x, y, z);
+  if (atlasTexture) {
+    const animated = atlasTexture;
+    sim.onUpdate(() => animated.animate((ticks.time + ticks.partial) / TICKS_PER_SECOND));
+  }
   const interaction = sim.add(new BlockInteraction(world, player, terrain));
   // After the player, so it follows the camera where the player put it; drawn on WebGL only
   const sky = sim.add(new Sky(ticks, lightMap, imported?.sky ?? null));
@@ -149,6 +160,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           yaw: player.yaw,
           pitch: player.pitch,
           selected: interaction.selected,
+          hotbar: interaction.hotbar.map((b) => BLOCKS[b].name),
         }),
       }),
     );
@@ -166,6 +178,10 @@ export async function startGame(options: GameOptions): Promise<void> {
     Object.assign(player.velocity, record.velocity);
     player.yaw = record.yaw;
     player.pitch = record.pitch;
+    record.hotbar.forEach((name, i) => {
+      const block = blockByName(name);
+      if (block !== null && i < interaction.hotbar.length) interaction.hotbar[i] = block;
+    });
     interaction.select(record.selected);
     await save!.loadNow(player.position.x, player.position.z, 1);
   } else {
@@ -240,8 +256,12 @@ export async function startGame(options: GameOptions): Promise<void> {
     crosshair.hidden = !on && !started;
     interaction.release(0);
     interaction.release(2);
-    if (on) return;
-    showPauseMenu();
+    if (on) {
+      blockList = false;
+      return;
+    }
+    if (blockList) showBlockList();
+    else showPauseMenu();
     if (started) void save?.save().catch(() => {});
   }
 
@@ -350,34 +370,78 @@ export async function startGame(options: GameOptions): Promise<void> {
     { passive: true },
   );
   window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyE" && blockList) {
+      play();
+      return;
+    }
     if (!player.controls) return;
     const digit = /^Digit([1-9])$/.exec(e.code);
     if (digit) interaction.select(Number(digit[1]) - 1);
+    if (e.code === "KeyE") openBlockList();
     if (e.code === "Escape" && dragMode) setPlaying(false);
   });
 
-  // Hotbar
-  const slots = HOTBAR.map((block, i) => {
+  // Icons: a block's side texture, or its colors without textures
+  const icons = new Map<Block, string>();
+  function paintIcon(el: HTMLElement, block: Block): void {
     const info = BLOCKS[block];
-    const tile = tiles?.get(tileFor(block, Dir.PosX));
-    const slot = h("div", { class: "slot", title: info.label }, h("span", {}, String(i + 1)));
-    slot.style.setProperty("--top", info.top);
-    slot.style.setProperty("--side", info.side);
-    if (tile) slot.style.setProperty("--icon", `url(${tileImage(tile)}) center / cover`);
+    el.title = info.label;
+    el.style.setProperty("--top", info.top);
+    el.style.setProperty("--side", info.side);
+    const tile = tiles?.get(iconTile(block));
+    if (!tile) return;
+    if (!icons.has(block)) icons.set(block, `url(${tileImage(tile)}) center / cover`);
+    el.style.setProperty("--icon", icons.get(block)!);
+  }
+
+  // Hotbar
+  const slots = interaction.hotbar.map((_, i) => {
+    const slot = h("div", { class: "slot" }, h("span", {}, String(i + 1)));
     hotbarEl.append(slot);
     return slot;
   });
   let nameTimer = 0;
-  const showSlot = (slot: number): void => slots.forEach((el, i) => el.classList.toggle("selected", i === slot));
+  const showHotbar = (selected: number): void =>
+    slots.forEach((el, i) => {
+      el.classList.toggle("selected", i === selected);
+      paintIcon(el, interaction.hotbar[i]);
+    });
   interaction.onSelect = (slot) => {
-    showSlot(slot);
-    blockName.textContent = BLOCKS[HOTBAR[slot]].label;
+    showHotbar(slot);
+    blockName.textContent = BLOCKS[interaction.hotbar[slot]].label;
     blockName.classList.add("shown");
     clearTimeout(nameTimer);
     nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
   };
-  showSlot(interaction.selected);
+  showHotbar(interaction.selected);
   hotbarEl.hidden = false;
+
+  // The block list (E): every block, one click puts it into the selected hotbar slot
+  let blockList = false;
+  function openBlockList(): void {
+    blockList = true;
+    if (locked()) document.exitPointerLock();
+    else setPlaying(false);
+  }
+  function showBlockList(): void {
+    menu.replaceChildren(
+      h(
+        "div",
+        { class: "screen wide" },
+        h("h2", {}, "Blocks"),
+        h(
+          "div",
+          { class: "blocks" },
+          ...PLACEABLE.map((block) => {
+            const el = h("button", { class: "slot", "aria-label": BLOCKS[block].label, onclick: () => (interaction.choose(block), play()) });
+            paintIcon(el, block);
+            return el;
+          }),
+        ),
+        h("p", { class: "muted" }, "Click a block to put it in the selected hotbar slot. E or Esc goes back."),
+      ),
+    );
+  }
 
   setPlaying(false);
   sim.start();

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TILE } from "../src/atlas.js";
+import { BLOCKS, Block } from "../src/blocks.js";
 import { TILES, minecraftTiles, overlay, proceduralTiles, tint } from "../src/textures.js";
 
 /** A tile of one color. */
@@ -12,15 +14,19 @@ function solid(r: number, g: number, b: number, a: number = 255): Uint8ClampedAr
 const first = (t: Uint8ClampedArray): number[] => Array.from(t.subarray(0, 4));
 
 describe("procedural textures", () => {
-  it("has pixels for every tile, cut out only in the leaves and the torch", () => {
+  it("has pixels for every tile, cut out only in textures of see-through blocks", () => {
     const tiles = proceduralTiles();
+    // Opaque blocks need every pixel; cut-out ones (leaves, glass, plants, doors) may have holes
+    const solid = new Set(BLOCKS.filter((b) => b.opacity === "opaque" && b.id !== Block.Air).flatMap((b) => b.textures));
     for (const name of TILES) {
       const t = tiles.get(name)!;
       expect(t).toHaveLength(TILE * TILE * 4);
       let holes = 0;
       for (let i = 3; i < t.length; i += 4) if (t[i] === 0) holes++;
-      if (name === "oak_leaves" || name === "torch") expect(holes).toBeGreaterThan(0);
-      else expect(holes).toBe(0);
+      if (solid.has(name)) expect(holes, name).toBe(0);
+    }
+    for (const name of ["oak_leaves", "torch", "glass", "ladder", "dandelion", "oak_door_top"]) {
+      expect(tiles.get(name)!.some((v, i) => i % 4 === 3 && v === 0), name).toBe(true);
     }
   });
 });
@@ -61,5 +67,14 @@ describe("Minecraft textures", () => {
     // Only what was there; the files themselves are left alone
     expect(tiles.has("dirt")).toBe(false);
     expect(first(gray)).toEqual([255, 255, 255, 255]);
+  });
+});
+
+describe("the texture importer", () => {
+  it("knows every texture Craft uses", () => {
+    const script = new TextDecoder().decode(readFileSync(new URL("../scripts/import-textures.mjs", import.meta.url)));
+    // Wool is listed by color
+    for (const name of TILES) if (!name.endsWith("_wool")) expect(script, name).toContain(`"${name}"`);
+    expect(script).toContain("_wool`");
   });
 });

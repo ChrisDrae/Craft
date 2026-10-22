@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Block, SELECTION } from "../src/blocks.js";
+import { Block } from "../src/blocks.js";
+import { SELECTION } from "../src/shapes.js";
 import { raycastVoxels } from "../src/raycast.js";
 import { flatWorld } from "./helpers.js";
 

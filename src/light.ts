@@ -1,11 +1,12 @@
-import { EMISSION, LIGHT_FILTER } from "./blocks.js";
+import { EMISSION, LIGHT_FILTER, LIGHT_SINK } from "./blocks.js";
 import { CHUNK_SIZE, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, type Chunk } from "./chunk.js";
 
 /**
  * Light levels as Minecraft has them, 0-15 per block in two channels: sky light, 15 wherever the sky is
  * straight above and one less per block away from there; and block light from torches and glowstone, one
  * less per block from the source. A block's light filter dims light entering it by that much more
- * (water, leaves); 15 stops it (opaque blocks). Light is packed as sky * 16 + block.
+ * (water, leaves); 15 stops it (opaque blocks); slabs and stairs let it in but not on (LIGHT_SINK). Light
+ * is packed as sky * 16 + block.
  */
 
 /** Full sky light and no block light: open air. */
@@ -40,6 +41,17 @@ function enqueue(n: number, i: number): number {
   return n + 1;
 }
 
+/**
+ * The level light comes into a block with, from a neighbor with `level` in direction d (3: from above),
+ * through the block's filter f; 0 or less where it doesn't.
+ */
+function entering(level: number, f: number, d: number, sky: boolean): number {
+  if (f === 15) return 0;
+  // Sky light falls straight down through clear blocks undimmed (into slabs and stairs too)
+  if (sky && d === 3 && level === 15 && (f === 0 || f === LIGHT_SINK)) return 15;
+  return level - 1 - (f === LIGHT_SINK ? 0 : f);
+}
+
 /** Spreads the levels from the queued cells through the chunk (not beyond it). */
 function spread(levels: Uint8Array, length: number, sky: boolean): void {
   let head = 0;
@@ -62,7 +74,7 @@ function spread(levels: Uint8Array, length: number, sky: boolean): void {
   while (head < tail) {
     const i = queue[head++];
     const level = levels[i];
-    if (level <= 1) continue;
+    if (level <= 1 || filter[i] === LIGHT_SINK) continue;
     const x = i & 15;
     const z = (i >> 4) & 15;
     const y = i >> 8;
@@ -87,10 +99,7 @@ function spread(levels: Uint8Array, length: number, sky: boolean): void {
         if (z === 0) continue;
         j = i - CHUNK_SIZE;
       }
-      const f = filter[j];
-      if (f >= 15) continue;
-      // Sky light falls straight down through clear blocks undimmed
-      const next = sky && d === 3 && level === 15 && f === 0 ? 15 : level - 1 - f;
+      const next = entering(level, filter[j], d, sky);
       if (next > levels[j]) {
         levels[j] = next;
         push(j);
@@ -213,15 +222,13 @@ function spreadWorld(world: LightWorld, cells: Cells, sky: boolean): void {
     const y = cells.y[i];
     const z = cells.z[i];
     const level = channelOf(world.getLight(x, y, z), sky);
-    if (level <= 1) continue;
+    if (level <= 1 || LIGHT_FILTER[world.get(x, y, z)] === LIGHT_SINK) continue;
     for (let d = 0; d < 6; d++) {
       const nx = x + DX[d];
       const ny = y + DY[d];
       const nz = z + DZ[d];
       if (ny < 0 || ny >= WORLD_HEIGHT) continue;
-      const f = LIGHT_FILTER[world.get(nx, ny, nz)];
-      if (f >= 15) continue;
-      const next = sky && d === 3 && level === 15 && f === 0 ? 15 : level - 1 - f;
+      const next = entering(level, LIGHT_FILTER[world.get(nx, ny, nz)], d, sky);
       const light = world.getLight(nx, ny, nz);
       if (next > channelOf(light, sky) && world.setLight(nx, ny, nz, withChannel(light, sky, next))) cells.push(nx, ny, nz);
     }

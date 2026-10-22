@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Block, SUPPORT, Dir, placementState, propertyOf, stateOf } from "../src/blocks.js";
+import { Block, Dir, propertyOf, stateOf } from "../src/blocks.js";
 import { Chunk, type ChunkGenerator } from "../src/chunk.js";
 import { buildChunkMeshes } from "../src/chunkMesh.js";
 import { assembleChunk, generateChunk } from "../src/generation.js";
@@ -7,7 +7,11 @@ import { TerrainGenerator } from "../src/generator.js";
 import { BlockInteraction } from "../src/interaction.js";
 import { levelBrightness, lightMapColors } from "../src/lightmap.js";
 import { lightChunk } from "../src/light.js";
+import { placementState } from "../src/placement.js";
 import { Player } from "../src/player.js";
+import { SUPPORT } from "../src/shapes.js";
+import { WorldTicks } from "../src/ticks.js";
+import { BlockUpdates } from "../src/updates.js";
 import { DAY, celestialAngle, daylightAt } from "../src/sky.js";
 import type { Terrain } from "../src/terrain.js";
 import { VoxelWorld } from "../src/world.js";
@@ -77,17 +81,20 @@ describe("smooth lighting", () => {
 
 describe("torches", () => {
   it("stand on floors and hang on walls, never on ceilings", () => {
-    expect(propertyOf(placementState(Block.Torch, 0, 1, 0)!, "facing")).toBe("up");
-    expect(propertyOf(placementState(Block.Torch, 1, 0, 0)!, "facing")).toBe("east");
-    expect(propertyOf(placementState(Block.Torch, 0, 0, -1)!, "facing")).toBe("north");
-    expect(placementState(Block.Torch, 0, -1, 0)).toBeNull();
+    const on = (nx: number, ny: number, nz: number): number | null => placementState(Block.Torch, { nx, ny, nz, hy: 0.5 }, 0);
+    expect(propertyOf(on(0, 1, 0)!, "facing")).toBe("up");
+    expect(propertyOf(on(1, 0, 0)!, "facing")).toBe("east");
+    expect(propertyOf(on(0, 0, -1)!, "facing")).toBe("north");
+    expect(on(0, -1, 0)).toBeNull();
     // Each hangs on the block it was placed against
-    expect(SUPPORT[placementState(Block.Torch, 1, 0, 0)!]).toBe(Dir.NegX);
-    expect(SUPPORT[placementState(Block.Torch, 0, 1, 0)!]).toBe(Dir.Down);
+    expect(SUPPORT[on(1, 0, 0)!]).toBe(Dir.NegX);
+    expect(SUPPORT[on(0, 1, 0)!]).toBe(Dir.Down);
   });
 
   it("are placed against a block, light up, and come off when it breaks", () => {
     const world = flatWorld(10, 1);
+    const updates = new BlockUpdates(world, new WorldTicks(world));
+    world.onChanged = (x, y, z) => updates.changed(x, y, z);
     world.set(4, 10, 4, Block.Stone);
     const player = new Player(world, { x: 0.5, y: 10, z: 0.5 });
     const interaction = new BlockInteraction(world, player, { target: null } as unknown as Terrain);

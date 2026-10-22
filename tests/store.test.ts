@@ -15,6 +15,7 @@ const player = (world: string) => ({
   yaw: 1,
   pitch: 0,
   selected: 2,
+  hotbar: ["stone"],
 });
 
 describe("WorldStore", () => {

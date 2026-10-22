@@ -80,11 +80,31 @@ describe("light", () => {
     expect(glow(world, 17, 5, 5)).toBe(11);
   });
 
+  it("gets into slabs and stairs but not through them", () => {
+    const world = flatWorld(40, 1);
+    for (let x = 2; x <= 12; x++) for (let z = 2; z <= 12; z++) for (let y = 20; y <= 24; y++) world.set(x, y, z, Block.Air);
+    // A slab in the open has full sky light; a slab roof over a room lets none in
+    world.set(5, 40, 5, Block.StoneSlab);
+    expect(sky(world, 5, 40, 5)).toBe(15);
+    expect(sky(world, 5, 39, 5)).toBe(0);
+    for (let x = 2; x <= 12; x++) for (let z = 2; z <= 12; z++) world.set(x, 25, z, stateOf(Block.StoneSlab, { type: "top" }));
+    expect(sky(world, 7, 24, 7)).toBe(0);
+    // A torch lights the stairs beside it, a level less, and nothing behind them: a wall of stairs and stone
+    world.set(7, 20, 7, stateOf(Block.Torch, { facing: "up" }));
+    for (let z = 2; z <= 12; z++) {
+      world.set(8, 20, z, Block.OakStairs);
+      for (let y = 21; y <= 24; y++) world.set(8, y, z, Block.Stone);
+    }
+    expect(glow(world, 8, 20, 7)).toBe(13);
+    expect(glow(world, 8, 20, 5)).toBe(11);
+    expect(glow(world, 9, 20, 7)).toBe(0);
+  });
+
   it("after any edits equals the light of the same blocks lit from scratch", () => {
     const world = flatWorld(30, 1);
     const rnd = new Random("edits");
     const pick = (n: number): number => Math.floor(rnd.next() * n);
-    const blocks = [Block.Air, Block.Air, Block.Air, Block.Stone, Block.Leaves, Block.Water, Block.Glowstone, stateOf(Block.Torch, { facing: "up" })];
+    const blocks = [Block.Air, Block.Air, Block.Air, Block.Stone, Block.Leaves, Block.Water, Block.Glowstone, stateOf(Block.Torch, { facing: "up" }), Block.StoneSlab, Block.OakStairs];
     for (let i = 0; i < 400; i++) world.set(pick(40) - 20, 20 + pick(16), pick(40) - 20, blocks[pick(blocks.length)]);
 
     // The same blocks, each chunk lit on its own and joined as chunks are when they arrive

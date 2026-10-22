@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { Block, stateOf } from "../src/blocks.js";
+import { BLOCKS, Block, HOTBAR, stateName, stateOf } from "../src/blocks.js";
 import { readWorldFile } from "../src/save/worldFile.js";
 import { loadSettings, saveSettings } from "../src/settings.js";
 import { freshStore, openWorld } from "./saveHelpers.js";
@@ -23,6 +23,25 @@ describe("saves from earlier versions", () => {
     expect(world.get(4, 100, 4)).toBe(Block.Bricks);
     expect(world.get(-5, 90, 20)).toBe(Block.GoldOre);
     expect(ticks.inChunk(0, 0)).toEqual([{ x: 5, y: 100, z: 5, block: Block.Sand, due: 540 }]);
+    // Format 1 had no hotbar to save: the player gets the default one
+    expect(data.player!.hotbar).toEqual(HOTBAR.map((b) => BLOCKS[b].name));
+  });
+
+  it("opens a world saved in format 2: block shapes, fluid levels and the hotbar", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-2.craftworld", import.meta.url))));
+    expect(data.player).toMatchObject({ selected: 3, hotbar: ["stone", "oak_planks", "glass", "oak_stairs", "torch", "oak_door", "white_wool", "water", "lava"] });
+
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const { world, ticks, save } = await openWorld(store, (await store.getWorld("fixture-world-2"))!);
+    await save.loadNow(8, 8, 1);
+    expect(stateName(world.get(3, 100, 3))).toBe("oak_stairs[facing=east,half=top,shape=inner_left]");
+    expect(stateName(world.get(4, 100, 4))).toBe("oak_door[facing=west,half=lower,open=true,hinge=right]");
+    expect(stateName(world.get(4, 101, 4))).toBe("oak_door[facing=west,half=upper,open=true,hinge=right]");
+    expect(stateName(world.get(5, 100, 3))).toBe("stone_slab[type=double]");
+    expect(stateName(world.get(-5, 90, 20))).toBe("red_wool");
+    expect(stateName(world.get(6, 100, 6))).toBe("water[level=3,falling=false]");
+    expect(ticks.inChunk(0, 0)).toEqual([{ x: 6, y: 100, z: 6, block: Block.Water, due: 505 }]);
   });
 });
 

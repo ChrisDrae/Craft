@@ -1,7 +1,8 @@
 import { Layer, Material, clipPolygonNear, clipSegmentNear, type CustomNode, type EmitContext, type Scene, type Vec3 } from "projector";
-import { DIR_X, DIR_Y, DIR_Z, MODELS, STATE_COUNT, faceMaterial } from "./blocks.js";
-import { CHUNK_SIZE, FACE_CORNERS as CORNERS, WATER_TOP } from "./chunk.js";
-import { faceCorners } from "./chunkMesh.js";
+import { DIR_X, DIR_Y, DIR_Z, Dir, FLUID, OPAQUE, STATE_COUNT, faceMaterial } from "./blocks.js";
+import { CHUNK_SIZE, FACE_CORNERS as CORNERS, MODEL_FACE } from "./chunk.js";
+import { ownHeight } from "./fluids.js";
+import { MODELS } from "./shapes.js";
 import type { LightMap } from "./lightmap.js";
 import type { VoxelHit } from "./raycast.js";
 import { css } from "./sky.js";
@@ -22,6 +23,14 @@ const SEAM = 0.4;
 export interface VoxelStats {
   chunks: number;
   faces: number;
+}
+
+/** What every quad of a frame is drawn against: the range (squared) and the camera's position. */
+interface Frame {
+  range2: number;
+  ex: number;
+  ey: number;
+  ez: number;
 }
 
 /**
@@ -79,11 +88,8 @@ export class VoxelNode implements CustomNode {
     const tanY = p.cy / p.sy;
     const normX = Math.sqrt(1 + tanX * tanX);
     const normY = Math.sqrt(1 + tanY * tanY);
-    const view = this.view;
-    const screen = this.screen;
-    const queue = ctx.queue;
-    const layer = this.layer;
     const half = CHUNK_SIZE / 2;
+    const frame: Frame = { range2, ex, ey, ez };
     let chunks = 0;
     let drawn = 0;
 
@@ -120,104 +126,32 @@ export class VoxelNode implements CustomNode {
           const y = s * CHUNK_SIZE + ((f >> 8) & 15);
           const d = (f >> 12) & 7;
           const state = f >>> 16;
-          const top = (f >> 15) & 1 ? WATER_TOP : 1;
-          const corners = faceCorners(state, d, top, this.corners);
-
-          // Only faces whose outer side the camera is on (the plane of a model's face is inside the cell)
-          let front: boolean;
-          switch (d) {
-            case 0:
-              front = ex > x + corners[0];
-              break;
-            case 1:
-              front = ex < x + corners[0];
-              break;
-            case 2:
-              front = ey > y + corners[1];
-              break;
-            case 3:
-              front = ey < y + corners[1];
-              break;
-            case 4:
-              front = ez > z + corners[2];
-              break;
-            default:
-              front = ez < z + corners[2];
-          }
-          if (!front) continue;
-
-          const cx = x + 0.5 - ex;
-          const cy = y + 0.5 - ey;
-          const cz = z + 0.5 - ez;
-          const dist2 = cx * cx + cy * cy + cz * cz;
-          if (dist2 > range2) continue;
-
-          let minZ = Infinity;
-          let maxZ = -Infinity;
-          for (let k = 0; k < 12; k += 3) {
-            const wx = x + corners[k];
-            const wy = y + corners[k + 1];
-            const wz = z + corners[k + 2];
-            const qz = v[2] * wx + v[6] * wy + v[10] * wz + v[14];
-            view[k] = v[0] * wx + v[4] * wy + v[8] * wz + v[12];
-            view[k + 1] = v[1] * wx + v[5] * wy + v[9] * wz + v[13];
-            view[k + 2] = qz;
-            if (qz < minZ) minZ = qz;
-            if (qz > maxZ) maxZ = qz;
-          }
-          if (maxZ < near) continue;
-          let src = view;
-          let n = 4;
-          if (minZ < near) {
-            n = clipPolygonNear(near, view, 4, this.clipped);
-            if (n < 3) continue;
-            src = this.clipped;
-          }
-
-          let minX = Infinity;
-          let maxX = -Infinity;
-          let minY = Infinity;
-          let maxY = -Infinity;
-          let mx = 0;
-          let my = 0;
-          for (let k = 0; k < n; k++) {
-            const qz = src[k * 3 + 2];
-            const px = p.cx + (p.sx * src[k * 3]) / qz;
-            const py = p.cy - (p.sy * src[k * 3 + 1]) / qz;
-            screen[k * 2] = px;
-            screen[k * 2 + 1] = py;
-            mx += px;
-            my += py;
-            if (px < minX) minX = px;
-            if (px > maxX) maxX = px;
-            if (py < minY) minY = py;
-            if (py > maxY) maxY = py;
-          }
-          if (maxX < 0 || minX > p.width || maxY < 0 || minY > p.height) continue;
-          mx /= n;
-          my /= n;
-          for (let k = 0; k < n; k++) {
-            const ux = screen[k * 2] - mx;
-            const uy = screen[k * 2 + 1] - my;
-            const len = Math.hypot(ux, uy);
-            if (len > 0) {
-              screen[k * 2] += (ux / len) * SEAM;
-              screen[k * 2 + 1] += (uy / len) * SEAM;
+          const corners = this.corners;
+          if (d === MODEL_FACE) {
+            for (const q of MODELS[state]!) {
+              corners.set(q.corners);
+              // Lit by the block it faces, unless that one is solid; plants by their own
+              let lx = x;
+              let ly = y;
+              let lz = z;
+              if (q.dir >= 0 && !OPAQUE[this.world.get(x + DIR_X[q.dir], y + DIR_Y[q.dir], z + DIR_Z[q.dir])]) {
+                lx += DIR_X[q.dir];
+                ly += DIR_Y[q.dir];
+                lz += DIR_Z[q.dir];
+              }
+              if (this.quad(ctx, frame, x, y, z, state, q.dir >= 0 ? q.dir : Dir.Up, lx, ly, lz)) drawn++;
             }
+            continue;
           }
-
-          const depth = Math.sqrt(dist2);
-          // Light from the block in front of the face (a model's from its own)
-          let step = LIGHT_STEPS - 1;
-          if (this.lightMap) {
-            const model = MODELS[state] !== null;
-            const light = this.world.getLight(model ? x : x + DIR_X[d], model ? y : y + DIR_Y[d], model ? z : z + DIR_Z[d]);
-            step = Math.round(this.lightMap.brightness(light) * (LIGHT_STEPS - 1));
-            // Steps past LIGHT_STEPS are torchlit
-            if ((light & 15) > light >> 4) step += LIGHT_STEPS;
+          // A cube's face; a fluid's top at its surface (full under more of the same fluid)
+          let top = 1;
+          if (FLUID[state] !== 0 && FLUID[this.world.get(x, y + 1, z)] !== FLUID[state]) top = ownHeight(state);
+          for (let k = 0; k < 12; k += 3) {
+            corners[k] = CORNERS[d * 12 + k];
+            corners[k + 1] = CORNERS[d * 12 + k + 1] * top;
+            corners[k + 2] = CORNERS[d * 12 + k + 2];
           }
-          queue.pushPolygon(layer, this.styleFor(ctx, state, d, depth, step), depth, screen, n);
-          drawn++;
+          if (this.quad(ctx, frame, x, y, z, state, d, x + DIR_X[d], y + DIR_Y[d], z + DIR_Z[d])) drawn++;
         }
       }
     }
@@ -225,6 +159,103 @@ export class VoxelNode implements CustomNode {
     if (this.target) this.emitOutline(ctx, this.target);
     this.stats.chunks = chunks;
     this.stats.faces = drawn;
+  }
+
+  /**
+   * Draws the quad in this.corners (relative to block (x, y, z)) if it faces the camera and is in range and
+   * on screen: projected, clipped at the near plane, grown by SEAM, styled by the state's look in direction
+   * d and the light at block (lx, ly, lz), and sorted at the distance of the block's center.
+   */
+  private quad(ctx: EmitContext, frame: Frame, x: number, y: number, z: number, state: number, d: number, lx: number, ly: number, lz: number): boolean {
+    const c = this.corners;
+    const v = ctx.camera.viewMatrix;
+    const p = ctx.proj;
+    const near = p.near;
+    // Only quads whose outer side the camera is on (Newell normal against the direction to the camera)
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    for (let k = 0; k < 4; k++) {
+      const a = k * 3;
+      const b = ((k + 1) % 4) * 3;
+      nx += (c[a + 1] - c[b + 1]) * (c[a + 2] + c[b + 2]);
+      ny += (c[a + 2] - c[b + 2]) * (c[a] + c[b]);
+      nz += (c[a] - c[b]) * (c[a + 1] + c[b + 1]);
+    }
+    if (nx * (frame.ex - x - c[0]) + ny * (frame.ey - y - c[1]) + nz * (frame.ez - z - c[2]) <= 0) return false;
+
+    const cx = x + 0.5 - frame.ex;
+    const cy = y + 0.5 - frame.ey;
+    const cz = z + 0.5 - frame.ez;
+    const dist2 = cx * cx + cy * cy + cz * cz;
+    if (dist2 > frame.range2) return false;
+
+    const view = this.view;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let k = 0; k < 12; k += 3) {
+      const wx = x + c[k];
+      const wy = y + c[k + 1];
+      const wz = z + c[k + 2];
+      const qz = v[2] * wx + v[6] * wy + v[10] * wz + v[14];
+      view[k] = v[0] * wx + v[4] * wy + v[8] * wz + v[12];
+      view[k + 1] = v[1] * wx + v[5] * wy + v[9] * wz + v[13];
+      view[k + 2] = qz;
+      if (qz < minZ) minZ = qz;
+      if (qz > maxZ) maxZ = qz;
+    }
+    if (maxZ < near) return false;
+    let src = view;
+    let n = 4;
+    if (minZ < near) {
+      n = clipPolygonNear(near, view, 4, this.clipped);
+      if (n < 3) return false;
+      src = this.clipped;
+    }
+
+    const screen = this.screen;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let mx = 0;
+    let my = 0;
+    for (let k = 0; k < n; k++) {
+      const qz = src[k * 3 + 2];
+      const px = p.cx + (p.sx * src[k * 3]) / qz;
+      const py = p.cy - (p.sy * src[k * 3 + 1]) / qz;
+      screen[k * 2] = px;
+      screen[k * 2 + 1] = py;
+      mx += px;
+      my += py;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+    if (maxX < 0 || minX > p.width || maxY < 0 || minY > p.height) return false;
+    mx /= n;
+    my /= n;
+    for (let k = 0; k < n; k++) {
+      const ux = screen[k * 2] - mx;
+      const uy = screen[k * 2 + 1] - my;
+      const len = Math.hypot(ux, uy);
+      if (len > 0) {
+        screen[k * 2] += (ux / len) * SEAM;
+        screen[k * 2 + 1] += (uy / len) * SEAM;
+      }
+    }
+
+    const depth = Math.sqrt(dist2);
+    let step = LIGHT_STEPS - 1;
+    if (this.lightMap) {
+      const light = this.world.getLight(lx, ly, lz);
+      step = Math.round(this.lightMap.brightness(light) * (LIGHT_STEPS - 1));
+      // Steps past LIGHT_STEPS are torchlit
+      if ((light & 15) > light >> 4) step += LIGHT_STEPS;
+    }
+    ctx.queue.pushPolygon(this.layer, this.styleFor(ctx, state, d, depth, step), depth, screen, n);
+    return true;
   }
 
   /**

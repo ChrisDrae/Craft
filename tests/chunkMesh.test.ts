@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Mesh } from "projector";
-import { Block, DIR_X, DIR_Y, DIR_Z } from "../src/blocks.js";
-import { WATER_TOP, type Chunk, type ChunkGenerator } from "../src/chunk.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, FACE_TILE, TILE_NAMES, stateOf } from "../src/blocks.js";
+import { type Chunk, type ChunkGenerator } from "../src/chunk.js";
 import { buildChunkMeshes } from "../src/chunkMesh.js";
 import { VoxelWorld } from "../src/world.js";
 
@@ -15,10 +15,10 @@ class BlocksGenerator implements ChunkGenerator {
   }
 }
 
-/** Every block face gets its own made-up rectangle, so tests can tell them apart. */
+/** Every texture gets its own made-up rectangle, so tests can tell them apart. */
 function testUVs(): Float32Array {
-  const uvs = new Float32Array(256 * 6 * 4);
-  for (let i = 0; i < 256 * 6; i++) uvs.set([i * 0.001, i * 0.002, i * 0.001 + 0.0005, i * 0.002 + 0.001], i * 4);
+  const uvs = new Float32Array(TILE_NAMES.length * 4);
+  for (let i = 0; i < TILE_NAMES.length; i++) uvs.set([i * 0.001, i * 0.002, i * 0.001 + 0.0005, i * 0.002 + 0.001], i * 4);
   return uvs;
 }
 
@@ -73,7 +73,7 @@ describe("chunk meshes", () => {
     const box = quads(Mesh.box(1));
     for (const q of quads(meshesOf([[0, 0, 0, Block.Grass]]).solid!)) {
       const d = dirOf(q.normal);
-      const r = (Block.Grass * 6 + d) * 4;
+      const r = FACE_TILE[Block.Grass * 6 + d] * 4;
       const reference = box.find((b) => dirOf(b.normal) === d)!;
       for (const { p, uv } of q.corners) {
         // Back to 0..1 within the tile, and the box corner at the same place (the box is centered)
@@ -86,23 +86,48 @@ describe("chunk meshes", () => {
     }
   });
 
-  it("puts water in a mesh of its own, the top layer lowered and its sides cut off rather than squeezed", () => {
-    const { solid, water } = meshesOf([
-      [0, 0, 0, Block.Stone],
-      [0, 1, 0, Block.Water],
-      [0, 2, 0, Block.Water],
-    ]);
+  it("puts water in a mesh of its own, its surface below the shore and its sides cut off rather than squeezed", () => {
+    // A 3 x 3 pool of sources on a stone floor
+    const blocks: Array<[number, number, number, number]> = [];
+    for (let x = 0; x < 3; x++) for (let z = 0; z < 3; z++) blocks.push([x, 0, z, Block.Stone], [x, 1, z, Block.Water]);
+    const { solid, water } = meshesOf(blocks);
     // Water doesn't count as solid: the stone's top (under the water) is in the solid mesh, not the water's
     expect(quads(solid!).every((q) => q.corners.every((k) => k.p[1] <= 1))).toBe(true);
     const qs = quads(water!);
-    const top = Math.max(...qs.flatMap((q) => q.corners.map((k) => k.p[1])));
-    expect(top).toBeCloseTo(2 + WATER_TOP, 5);
+    // In the middle the surface is a source's height, 8/9
+    const middle = qs.find((q) => dirOf(q.normal) === 2 && q.corners.every((k) => k.p[0] >= 1 && k.p[0] <= 2 && k.p[2] >= 1 && k.p[2] <= 2))!;
+    for (const k of middle.corners) expect(k.p[1]).toBeCloseTo(1 + 8 / 9, 5);
+    // At the edge it slopes down toward the air beside, and the side shows as much texture as it is high
     const uvs = testUVs();
-    const side = qs.find((q) => dirOf(q.normal) === 0 && q.corners.some((k) => k.p[1] > 2.5))!;
-    const r = (Block.Water * 6 + 0) * 4;
+    const side = qs.find((q) => dirOf(q.normal) === 0 && q.corners.every((k) => k.p[2] >= 1 && k.p[2] <= 2))!;
+    const height = Math.max(...side.corners.map((k) => k.p[1])) - 1;
+    expect(height).toBeLessThan(8 / 9);
+    expect(height).toBeGreaterThan(0.5);
+    const r = FACE_TILE[Block.Water * 6] * 4;
     const vs = side.corners.map((k) => (k.uv[1] - uvs[r + 1]) / (uvs[r + 3] - uvs[r + 1]));
-    expect(Math.min(...vs)).toBeCloseTo(1 - WATER_TOP, 5);
+    expect(Math.min(...vs)).toBeCloseTo(1 - height, 5);
     expect(Math.max(...vs)).toBeCloseTo(1, 5);
+  });
+
+  it("leaves out the faces a slab covers, and draws the ones it leaves open", () => {
+    const slab = stateOf(Block.StoneSlab, { type: "bottom" });
+    // A bottom slab on stone, and stone beside it
+    const { solid } = meshesOf([
+      [4, 3, 4, Block.Stone],
+      [4, 4, 4, slab],
+      [5, 4, 4, Block.Stone],
+    ]);
+    const qs = quads(solid!);
+    const at = (x: number, y: number, z: number, dir: number): number =>
+      qs.filter((q) => dirOf(q.normal) === dir && q.corners.every((k) => k.p[0] >= x && k.p[0] <= x + 1 && k.p[1] >= y && k.p[1] <= y + 1 && k.p[2] >= z && k.p[2] <= z + 1)).length;
+    // The stone under the slab: its top is covered by the slab's bottom, and the slab's bottom by the stone
+    expect(at(4, 3, 4, 2)).toBe(0);
+    expect(at(4, 4, 4, 3)).toBe(0);
+    // The slab's top, half way up its cell, shows, and so does the side of the stone beside it
+    expect(at(4, 4, 4, 2)).toBe(1);
+    expect(at(5, 4, 4, 1)).toBe(1);
+    // The slab's side against that stone is covered
+    expect(at(4, 4, 4, 0)).toBe(0);
   });
 
   it("keeps the faces between leaves with fancy leaves, for see-through textures", () => {

@@ -32,7 +32,8 @@ export function moveAxis(
 
   const x0 = Math.floor(pos.x - halfWidth + EDGE);
   const x1 = Math.floor(pos.x + halfWidth - EDGE);
-  const y0 = Math.floor(pos.y + EDGE);
+  // One cell lower too: fences and walls reach half a block above their own cell
+  const y0 = Math.floor(pos.y + EDGE) - 1;
   const y1 = Math.floor(pos.y + height - EDGE);
   const z0 = Math.floor(pos.z - halfWidth + EDGE);
   const z1 = Math.floor(pos.z + halfWidth - EDGE);

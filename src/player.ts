@@ -1,5 +1,7 @@
 import type { Vec3 } from "projector";
+import { DIR_X, DIR_Z, FLUID, SHAPE } from "./blocks.js";
 import { Entity } from "./entity.js";
+import { fluidLevel, isFalling } from "./fluids.js";
 import type { VoxelWorld } from "./world.js";
 
 export const PLAYER_HALF_WIDTH = 0.3;
@@ -20,6 +22,14 @@ const WATER_DRAG = 2;
  */
 const CLIMB_SPEED = 9;
 const MAX_FALL_SPEED = 50;
+/** Lava is thicker than water: slower to move in, harder to rise through. */
+const LAVA_SPEED = 1.2;
+const LAVA_DRAG = 5;
+/** Climbing a ladder, and the fastest sliding down one. */
+const LADDER_UP = 2.4;
+const LADDER_DOWN = 2.5;
+/** How hard flowing water pushes, in blocks per second squared. */
+const CURRENT = 5;
 /** How quickly the horizontal velocity follows the keys, per second (on the ground, in the air). */
 const GROUND_GRIP = 14;
 const AIR_GRIP = 3;
@@ -44,7 +54,11 @@ export class Player extends Entity {
   /** Radians; yaw 0 looks along +z and grows to the right, pitch grows looking up. */
   yaw: number = 0;
   pitch: number = 0;
+  /** In water or lava over the knees. */
   inWater: boolean = false;
+  inLava: boolean = false;
+  /** In a ladder's block. */
+  onLadder: boolean = false;
   eyeInWater: boolean = false;
   /** Keys move the player only while this is set (the pointer is locked). */
   controls: boolean = false;
@@ -82,10 +96,13 @@ export class Player extends Entity {
     const vel = this.velocity;
     const { forward: forwardInput, strafe: strafeInput, jump, sprint } = this.input;
 
-    // Swimming once the water reaches above the knees; wading while the feet are in it at all
-    this.inWater = this.waterAt(0.4);
-    const wading = this.inWater || this.waterAt(0.05);
-    const headOut = !this.waterAt(EYE_HEIGHT);
+    // Swimming once the water (or lava) reaches above the knees; wading while the feet are in it at all
+    const fluid = this.fluidAt(0.4);
+    this.inWater = fluid !== 0;
+    this.inLava = fluid === 2;
+    const wading = this.inWater || this.fluidAt(0.05) !== 0;
+    const headOut = this.fluidAt(EYE_HEIGHT) === 0;
+    this.onLadder = SHAPE[this.blockAt(0.1)] === "ladder" || SHAPE[this.blockAt(1)] === "ladder";
 
     // Forward is (sin yaw, cos yaw) and right is (cos yaw, -sin yaw) on the ground plane
     const sin = Math.sin(this.yaw);
@@ -97,7 +114,7 @@ export class Player extends Entity {
       wx /= len;
       wz /= len;
     }
-    const speed = this.inWater ? SWIM_SPEED : sprint && forwardInput > 0 ? SPRINT_SPEED : WALK_SPEED;
+    const speed = this.inLava ? LAVA_SPEED : this.inWater ? SWIM_SPEED : sprint && forwardInput > 0 ? SPRINT_SPEED : WALK_SPEED;
     const grip = this.onGround || this.inWater ? GROUND_GRIP : AIR_GRIP;
     const k = Math.min(1, grip * dt);
     vel.x += (wx * speed - vel.x) * k;
@@ -106,10 +123,17 @@ export class Player extends Entity {
     if (this.inWater) {
       // Sink slowly; Space swims up (without braking a faster jump or climb)
       vel.y -= GRAVITY * 0.3 * dt;
-      vel.y *= Math.exp(-WATER_DRAG * dt);
-      if (jump && vel.y < SWIM_UP_SPEED) vel.y = Math.min(vel.y + 20 * dt, SWIM_UP_SPEED);
+      vel.y *= Math.exp(-(this.inLava ? LAVA_DRAG : WATER_DRAG) * dt);
+      const up = this.inLava ? SWIM_UP_SPEED / 2 : SWIM_UP_SPEED;
+      if (jump && vel.y < up) vel.y = Math.min(vel.y + 20 * dt, up);
+      this.drift(dt);
     } else {
       vel.y -= GRAVITY * dt;
+    }
+    // On a ladder: up while pushing into it or holding Space, slowly down otherwise
+    if (this.onLadder) {
+      if (jump || this.pushingWall) vel.y = LADDER_UP;
+      else vel.y = Math.max(vel.y, -LADDER_DOWN);
     }
     // Jumping works from any ground, the bottom of shallow water too
     if (jump && this.onGround) vel.y = JUMP_SPEED;
@@ -127,6 +151,28 @@ export class Player extends Entity {
     camera.position.y = this.eyeY;
     camera.position.z = this.position.z;
     camera.setYawPitch(this.yaw, this.pitch);
-    this.eyeInWater = this.waterAt(EYE_HEIGHT);
+    this.eyeInWater = this.fluidAt(EYE_HEIGHT) !== 0;
+  }
+
+  /** Flowing water pushes downstream: toward neighbors whose surface is lower. */
+  private drift(dt: number): void {
+    const state = this.blockAt(0.4);
+    if (FLUID[state] !== 1) return;
+    const own = isFalling(state) ? 0 : fluidLevel(state);
+    const p = this.position;
+    const y = Math.floor(p.y + 0.4);
+    let fx = 0;
+    let fz = 0;
+    for (const d of [0, 1, 4, 5]) {
+      const n = this.world.get(Math.floor(p.x) + DIR_X[d], y, Math.floor(p.z) + DIR_Z[d]);
+      if (FLUID[n] !== 1 || isFalling(n)) continue;
+      const diff = fluidLevel(n) - own;
+      fx += DIR_X[d] * diff;
+      fz += DIR_Z[d] * diff;
+    }
+    const len = Math.hypot(fx, fz);
+    if (len === 0) return;
+    this.velocity.x += (fx / len) * CURRENT * dt;
+    this.velocity.z += (fz / len) * CURRENT * dt;
   }
 }

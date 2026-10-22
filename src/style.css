@@ -299,3 +299,33 @@ button.danger {
   color: var(--muted);
   font-weight: 600;
 }
+
+.screen.wide {
+  width: min(760px, 100%);
+}
+
+.blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 44px);
+  justify-content: center;
+  gap: 6px;
+  max-height: 60vh;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.blocks .slot {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: var(--icon, linear-gradient(var(--top) 0 38%, var(--side) 38% 100%));
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.blocks .slot:hover,
+.blocks .slot:focus-visible {
+  border-color: var(--accent);
+}

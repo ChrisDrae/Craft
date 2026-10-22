@@ -5,8 +5,6 @@ export const WORLD_HEIGHT = 256;
 /** Sections of 16 x 16 x 16 blocks stacked in a chunk. */
 export const SECTIONS = WORLD_HEIGHT / CHUNK_SIZE;
 export const SECTION_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
-/** Top of a water block with air above it, so the surface sits a little below the shore. */
-export const WATER_TOP = 0.875;
 
 /**
  * Corners of each face direction's quad (Dir order), as offsets from the block's minimum corner, wound
@@ -26,13 +24,15 @@ export function sectionIndex(x: number, y: number, z: number): number {
   return (y << 8) | (z << 4) | x;
 }
 
+/** The direction a face list entry has for a block drawn as a model: one entry stands for all its quads. */
+export const MODEL_FACE = 7;
+
 /**
- * A face in one int: x, y and z inside its section (4 bits each), direction (3), whether it belongs to a
- * water block with no water above, whose top sits a little lower (1), and the block state (16, read with
- * `>>> 16`).
+ * A face in one int: x, y and z inside its section (4 bits each), direction (3 bits; MODEL_FACE for a
+ * model), and the block state (16 bits, read with `>>> 16`).
  */
-export function packFace(x: number, y: number, z: number, dir: number, lowered: boolean, state: number): number {
-  return x | (z << 4) | (y << 8) | (dir << 12) | (lowered ? 1 << 15 : 0) | (state << 16);
+export function packFace(x: number, y: number, z: number, dir: number, state: number): number {
+  return x | (z << 4) | (y << 8) | (dir << 12) | (state << 16);
 }
 
 /** A chunk's blocks as saves store them: a palette of state names and the compressed blocks (see encodeBlocks). */

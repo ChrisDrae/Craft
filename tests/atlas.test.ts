@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Atlas, GUTTER, TILE } from "../src/atlas.js";
-import { Block, Dir, STATE_COUNT, stateOf } from "../src/blocks.js";
+import { Block, Dir, FACE_TILE, STATE_COUNT, stateOf } from "../src/blocks.js";
 import { TILES, blockAtlas, proceduralTiles, tileFor } from "../src/textures.js";
 
 /** A tile whose every pixel encodes its own position: (x, y, tile number, 255). */
@@ -36,9 +36,10 @@ describe("Atlas", () => {
     expect(pixel(atlas, x0 + TILE, y0 + TILE + GUTTER - 1)).toEqual([15, 15, 4, 255]);
   });
 
-  it("gives every face of every block state the rectangle of its tile", () => {
+  it("gives every texture its rectangle, which every block face finds by its texture", () => {
     const { atlas, uvs } = blockAtlas(proceduralTiles());
-    const rect = (state: number, dir: number): number[] => Array.from(uvs.subarray((state * 6 + dir) * 4, (state * 6 + dir) * 4 + 4));
+    TILES.forEach((_, i) => expect(Array.from(uvs.subarray(i * 4, i * 4 + 4))).toEqual(Array.from(atlas.rect(i))));
+    const rect = (state: number, dir: number): number[] => Array.from(uvs.subarray(FACE_TILE[state * 6 + dir] * 4, FACE_TILE[state * 6 + dir] * 4 + 4));
     for (let state = 1; state < STATE_COUNT; state++) {
       for (let dir = 0; dir < 6; dir++) expect(rect(state, dir)).toEqual(Array.from(atlas.rect(TILES.indexOf(tileFor(state, dir)))));
     }

@@ -9,12 +9,14 @@ import {
   SOLID,
   STATE_COUNT,
   blockOf,
-  placementState,
   propertyOf,
   stateByName,
   stateName,
   stateOf,
 } from "../src/blocks.js";
+import { placementState } from "../src/placement.js";
+
+const aim = (nx: number, ny: number, nz: number, hy: number = 0.5) => ({ nx, ny, nz, hy });
 
 describe("block states", () => {
   it("gives every block's default state the block's own id", () => {
@@ -51,10 +53,10 @@ describe("block states", () => {
   });
 
   it("lays logs along the face they are placed against", () => {
-    expect(propertyOf(placementState(Block.Log, 1, 0, 0)!, "axis")).toBe("x");
-    expect(propertyOf(placementState(Block.Log, 0, -1, 0)!, "axis")).toBe("y");
-    expect(propertyOf(placementState(Block.Log, 0, 0, -1)!, "axis")).toBe("z");
-    expect(placementState(Block.Stone, 1, 0, 0)).toBe(Block.Stone);
+    expect(propertyOf(placementState(Block.Log, aim(1, 0, 0), 0)!, "axis")).toBe("x");
+    expect(propertyOf(placementState(Block.Log, aim(0, -1, 0), 0)!, "axis")).toBe("y");
+    expect(propertyOf(placementState(Block.Log, aim(0, 0, -1), 0)!, "axis")).toBe("z");
+    expect(placementState(Block.Stone, aim(1, 0, 0), 0)).toBe(Block.Stone);
   });
 
   it("shows the rings at the ends of a log and turns its bark along it", () => {
