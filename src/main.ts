@@ -1,11 +1,11 @@
-import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, type Fog, type Vec3 } from "projector";
-import { BLOCKS, HOTBAR } from "./blocks.js";
+import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type Fog, type RenderBackend, type Vec3 } from "projector";
+import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
 import { WORLD_HEIGHT } from "./chunk.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
-import { Hud } from "./hud.js";
 import { BlockInteraction } from "./interaction.js";
 import { Player } from "./player.js";
-import { Terrain } from "./terrain.js";
+import { Terrain, type TerrainTextures } from "./terrain.js";
+import { atlasTexture, blockAtlas, importedTiles, proceduralTiles, tileFor, tileImage } from "./textures.js";
 import { VoxelWorld } from "./world.js";
 import "./style.css";
 
@@ -23,13 +23,38 @@ const overlay = element("play", HTMLElement);
 const hotbarEl = element("hotbar", HTMLElement);
 const blockName = element("block-name", HTMLElement);
 const underwaterEl = element("underwater", HTMLElement);
-const hudEl = element("hud", HTMLElement);
 
-const seed = new URLSearchParams(location.search).get("seed") ?? "craft";
+// ?seed=... picks another world, ?view=16..160 the view distance in blocks, ?renderer=canvas the flat-colored
+// Canvas 2D renderer instead of textured WebGL
+const params = new URLSearchParams(location.search);
+const seed = params.get("seed") ?? "craft";
 const generator = new TerrainGenerator(seed);
 const world = new VoxelWorld(generator);
 
-const backend = new Canvas2DBackend(canvas, { pixelRatio: Math.min(1, globalThis.devicePixelRatio || 1) });
+/** WebGL2 with textures where it works, Canvas 2D otherwise or when asked for. */
+function createBackend(): RenderBackend {
+  if (params.get("renderer") !== "canvas") {
+    try {
+      return new WebGLBackend(canvas, { pixelRatio: Math.min(2, globalThis.devicePixelRatio || 1) });
+    } catch (e) {
+      console.warn("Craft: no WebGL2, drawing with Canvas 2D.", e);
+    }
+  }
+  return new Canvas2DBackend(canvas, { pixelRatio: Math.min(1, globalThis.devicePixelRatio || 1) });
+}
+
+const backend = createBackend();
+const textured = backend instanceof WebGLBackend;
+const view = Math.min(160, Math.max(16, Number(params.get("view")) || (textured ? 96 : 48)));
+// Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
+const imported = textured ? await importedTiles() : null;
+if (imported) console.info(`Craft: block textures from Minecraft ${imported.version}`);
+const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
+let textures: TerrainTextures | null = null;
+if (tiles) {
+  const { atlas, uvs } = blockAtlas(tiles);
+  textures = { texture: atlasTexture(atlas), uvs };
+}
 const sim = new Simulation({
   canvas,
   backend,
@@ -60,9 +85,10 @@ function findLand(): { x: number; z: number } {
 const land = findLand();
 const spawn: Vec3 = { x: land.x + 0.5, y: WORLD_HEIGHT, z: land.z + 0.5 };
 const player = new Player(world, spawn);
-const terrain = sim.add(new Terrain(world, sim.scene, player.position));
+const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
+terrain.renderDistance = view;
 sim.add(player);
-const interaction = sim.add(new BlockInteraction(world, player, terrain.node));
+const interaction = sim.add(new BlockInteraction(world, player, terrain));
 terrain.loadAll();
 // Stand on the highest block of the spawn column (a tree, maybe)
 let ground = WORLD_HEIGHT - 1;
@@ -71,8 +97,8 @@ player.position.y = ground + 1;
 
 // Sky and fog, and the view under water
 function skyFog(): Fog {
-  const d = terrain.node.renderDistance;
-  return { color: SKY, near: d * 0.5, far: d };
+  const d = terrain.renderDistance;
+  return { color: SKY, near: d * 0.5, far: d, mode: "distance" };
 }
 sim.scene.fog = skyFog();
 let underwater = false;
@@ -80,7 +106,7 @@ sim.onUpdate(() => {
   if (player.eyeInWater === underwater) return;
   underwater = player.eyeInWater;
   sim.scene.background = underwater ? UNDERWATER : SKY;
-  sim.scene.fog = underwater ? { color: UNDERWATER, near: 1, far: 14 } : skyFog();
+  sim.scene.fog = underwater ? { color: UNDERWATER, near: 1, far: 14, mode: "distance" } : skyFog();
   underwaterEl.hidden = !underwater;
 });
 
@@ -132,10 +158,6 @@ window.addEventListener(
 window.addEventListener("keydown", (e) => {
   const digit = /^Digit([1-9])$/.exec(e.code);
   if (digit) interaction.select(Number(digit[1]) - 1);
-  if (e.code === "F3") {
-    e.preventDefault();
-    hudEl.hidden = !hudEl.hidden;
-  }
   if (e.code === "Escape" && dragMode) setPlaying(false);
 });
 
@@ -146,6 +168,8 @@ const slots = HOTBAR.map((block, i) => {
   const info = BLOCKS[block];
   slot.style.setProperty("--top", info.top);
   slot.style.setProperty("--side", info.side);
+  const tile = tiles?.get(tileFor(block, Dir.PosX));
+  if (tile) slot.style.setProperty("--icon", `url(${tileImage(tile)}) center / cover`);
   slot.title = info.name;
   const key = document.createElement("span");
   key.textContent = String(i + 1);
@@ -163,34 +187,6 @@ interaction.onSelect = (slot) => {
 };
 slots[0].classList.add("selected");
 
-// Stats and settings
-const hud = new Hud(
-  hudEl,
-  "Craft",
-  "WASD move · Space jump/swim · Shift sprint\nLeft click break · Right click place\n1-9 / wheel pick block · F3 hide this",
-);
-hud.slider("view distance", 16, 96, 8, terrain.node.renderDistance, (v) => {
-  terrain.node.renderDistance = v;
-  if (!underwater) sim.scene.fog = skyFog();
-});
-const ratios = ["0.5", "0.75", "1", "1.5", "2"] as const;
-hud.select("pixel ratio", ratios, String(backend.pixelRatio) as (typeof ratios)[number], (v) =>
-  backend.setSize(backend.width, backend.height, Number(v)),
-);
-sim.onAfterRender(() => {
-  const s = sim.stats;
-  const p = player.position;
-  const t = interaction.target;
-  hud.stat("fps", Math.round(s.fps));
-  hud.stat("render ms", s.renderMs);
-  hud.stat("faces", terrain.node.stats.faces);
-  hud.stat("draw batches", s.batches);
-  hud.stat("chunks", `${terrain.node.stats.chunks} / ${world.chunks.size}`);
-  hud.stat("position", `${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}`);
-  hud.stat("looking at", t ? BLOCKS[t.block].name : "-");
-  hud.flush();
-});
-
 sim.start();
 // For poking at the running game from the browser console
-Object.assign(globalThis, { craft: { sim, world, player, interaction, terrain } });
+Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain } });

@@ -1,5 +1,20 @@
 export const CHUNK_SIZE = 16;
 export const WORLD_HEIGHT = 64;
+/** Top of a water block with air above it, so the surface sits a little below the shore. */
+export const WATER_TOP = 0.875;
+
+/**
+ * Corners of each face direction's quad (Dir order), as offsets from the block's minimum corner, wound
+ * so the face's normal points out of the block.
+ */
+export const FACE_CORNERS: Float64Array = Float64Array.from([
+  [1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+  [0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0],
+  [0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0],
+  [0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1],
+  [0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1],
+  [0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0],
+].flat());
 
 /** Index of a block inside a chunk: x and z in [0, 16), y in [0, 64). */
 export function localIndex(x: number, y: number, z: number): number {

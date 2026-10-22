@@ -1,11 +1,9 @@
 import { Layer, clipPolygonNear, clipSegmentNear, type CustomNode, type EmitContext, type Scene, type Vec3 } from "projector";
 import { BLOCKS, DIR_X, DIR_Y, DIR_Z } from "./blocks.js";
-import { CHUNK_SIZE } from "./chunk.js";
+import { CHUNK_SIZE, FACE_CORNERS as CORNERS, WATER_TOP } from "./chunk.js";
 import type { VoxelHit } from "./raycast.js";
 import type { VoxelWorld } from "./world.js";
 
-/** Top of a water block with air above it, so the surface sits a little below the shore. */
-export const WATER_TOP = 0.875;
 /** Fog shades per face style; each is one fill style, so this bounds the batch count. */
 const FOG_LEVELS = 24;
 /**
@@ -13,16 +11,6 @@ const FOG_LEVELS = 24;
  * would otherwise leave anti-aliased hairlines between them where the sky shows through.
  */
 const SEAM = 0.4;
-
-/** Corners of each face direction's quad (Dir order), as offsets from the block's minimum corner. */
-const CORNERS: Float64Array = Float64Array.from([
-  [1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1],
-  [0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0],
-  [0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0],
-  [0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1],
-  [0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1],
-  [0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0],
-].flat());
 
 export interface VoxelStats {
   chunks: number;

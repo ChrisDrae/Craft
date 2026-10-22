@@ -3,7 +3,7 @@ import { BLOCKS, Block, HOTBAR } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT, type Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
-import type { VoxelNode } from "./voxelNode.js";
+import type { Terrain } from "./terrain.js";
 import type { VoxelWorld } from "./world.js";
 
 /** How far away blocks can be broken or placed, in blocks. */
@@ -16,7 +16,7 @@ const targetable = (block: number): boolean => block !== Block.Air && block !== 
 
 /**
  * Breaking and placing blocks: finds the block under the crosshair every frame (outlined by the
- * VoxelNode), breaks it with the left button and places the selected hotbar block against it with the
+ * terrain), breaks it with the left button and places the selected hotbar block against it with the
  * right one, repeating while the button is held.
  */
 export class BlockInteraction extends SimObject {
@@ -27,17 +27,17 @@ export class BlockInteraction extends SimObject {
   onSelect: ((slot: number) => void) | null = null;
   private readonly world: VoxelWorld;
   private readonly player: Player;
-  private readonly node: VoxelNode;
+  private readonly terrain: Terrain;
   private readonly dir: Vec3 = { x: 0, y: 0, z: 1 };
   private readonly blockAt: (x: number, y: number, z: number) => number;
   private held: "break" | "place" | null = null;
   private timer: number = 0;
 
-  constructor(world: VoxelWorld, player: Player, node: VoxelNode) {
+  constructor(world: VoxelWorld, player: Player, terrain: Terrain) {
     super();
     this.world = world;
     this.player = player;
-    this.node = node;
+    this.terrain = terrain;
     this.blockAt = (x, y, z) => world.get(x, y, z);
   }
 
@@ -106,7 +106,7 @@ export class BlockInteraction extends SimObject {
     const d = camera.getForward(this.dir);
     const e = camera.position;
     this.target = raycastVoxels(this.blockAt, targetable, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
-    this.node.target = this.target;
+    this.terrain.target = this.target;
   }
 
   private act(action: "break" | "place"): void {

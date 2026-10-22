@@ -5,6 +5,11 @@ import { CHUNK_SIZE, Chunk, WORLD_HEIGHT, localIndex, packFace, type ChunkGenera
 export class VoxelWorld {
   readonly chunks: Map<number, Chunk> = new Map();
   readonly generator: ChunkGenerator;
+  /**
+   * Leaves hide nothing behind them and keep the faces between each other, for see-through (cut out)
+   * leaf textures. Off, they count as solid: fewer faces, for the untextured renderer.
+   */
+  fancyLeaves: boolean = false;
 
   constructor(generator: ChunkGenerator) {
     this.generator = generator;
@@ -91,9 +96,11 @@ export class VoxelWorld {
 
   /**
    * Rebuilds a chunk's face list. A face is exposed when the block next to it doesn't hide it: air, or
-   * water next to anything but water. Faces toward a chunk that isn't loaded yet stay hidden until it is.
+   * water next to anything but water (and leaves, with fancyLeaves). Faces toward a chunk that isn't
+   * loaded yet stay hidden until it is.
    */
   buildFaces(chunk: Chunk): void {
+    const fancy = this.fancyLeaves;
     const blocks = chunk.blocks;
     const neighbors = [
       this.chunk(chunk.cx + 1, chunk.cz),
@@ -129,7 +136,8 @@ export class VoxelWorld {
                 n = other.blocks[localIndex(nx & 15, ny, nz & 15)];
               }
             }
-            if (OPAQUE[n] === 1 || n === b) continue;
+            const seeThrough = fancy && n === Block.Leaves;
+            if (n === b ? !seeThrough : OPAQUE[n] === 1 && !seeThrough) continue;
             if (count === faces.length) {
               const grown = new Int32Array(faces.length * 2);
               grown.set(faces);
