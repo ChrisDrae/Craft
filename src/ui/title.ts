@@ -1,4 +1,5 @@
 import { GENERATOR_VERSION } from "../generator.js";
+import { codeFrom } from "../net/rtc.js";
 import { FORMAT_VERSION, type WorldMeta } from "../save/format.js";
 import type { WorldStore } from "../save/store.js";
 import { readWorldFile, writeWorldFile } from "../save/worldFile.js";
@@ -83,11 +84,12 @@ export class TitleScreen {
   private async render(): Promise<void> {
     const store = this.store;
     const quick = h("button", { onclick: () => (location.href = `?seed=${Math.floor(Math.random() * 2 ** 31)}`) }, "Quick play");
+    const joinButton = h("button", { onclick: () => this.join() }, "Join a friend…");
     if (!store) {
       this.screen(
         h("h1", {}, "Craft"),
         h("p", { class: "error" }, "This browser doesn't let Craft keep worlds here (IndexedDB is blocked), so nothing can be saved."),
-        h("div", { class: "buttons" }, quick),
+        h("div", { class: "buttons" }, quick, joinButton),
       );
       return;
     }
@@ -134,6 +136,7 @@ export class TitleScreen {
         { class: "buttons" },
         h("button", { class: "primary", disabled: none, onclick: () => selected && (location.href = worldUrl(selected.id)) }, "Play"),
         h("button", { onclick: () => this.create() }, "Create new world"),
+        joinButton,
       ),
       h(
         "div",
@@ -149,6 +152,32 @@ export class TitleScreen {
       this.message && h("p", { class: "error", role: "alert" }, this.message),
       h("p", { class: "muted" }, `Worlds are kept in this browser.${usage} Export one to keep a copy elsewhere.`),
       h("p", { class: "muted" }, quick, " a fresh world that isn't saved"),
+    );
+  }
+
+  /** Asks for the code (or the invite link) of a friend's world open to friends, and joins it. */
+  private join(): void {
+    const code = h("input", { placeholder: "ABC234, or the link your friend sent", maxLength: 200, autofocus: true });
+    const error = h("p", { class: "error", hidden: true });
+    const go = (): void => {
+      const c = codeFrom(code.value);
+      if (!c) {
+        error.textContent = "That isn't a world code: six letters and digits.";
+        error.hidden = false;
+        return;
+      }
+      location.href = `?join=${c}`;
+    };
+    this.screen(
+      h("h2", {}, "Join a friend"),
+      h("p", { class: "muted" }, "Your friend opens their world to friends from its game menu, and sends you the code or the link."),
+      h(
+        "form",
+        { onsubmit: (e: Event) => (e.preventDefault(), go()) },
+        h("label", { class: "field" }, h("span", {}, "World code"), code),
+        error,
+        h("div", { class: "buttons" }, h("button", { class: "primary", type: "submit" }, "Join"), h("button", { type: "button", onclick: () => void this.show() }, "Cancel")),
+      ),
     );
   }
 

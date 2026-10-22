@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { FORMAT_VERSION, NewerFormatError, type ChunkRecord } from "../src/save/format.js";
+import { WorldStore } from "../src/save/store.js";
 import { readWorldFile, writeWorldFile } from "../src/save/worldFile.js";
 import { freshStore, newMeta } from "./saveHelpers.js";
 
 function chunk(world: string, cx: number, cz: number, fill: number): ChunkRecord {
   return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), biomes: "plains 256", ticks: [] };
 }
+
+const guest = (world: string, id: string) => ({
+  format: FORMAT_VERSION,
+  world,
+  id,
+  name: `Guest ${id}`,
+  position: { x: 4, y: 70, z: -2 },
+  yaw: 0.5,
+  pitch: 0,
+  selected: 1,
+  hotbar: ["glass", "torch"],
+});
 
 const player = (world: string) => ({
   format: FORMAT_VERSION,
@@ -54,6 +67,39 @@ describe("WorldStore", () => {
     expect((await store.getChunk("c", 3, 4))!.blocks).toEqual(new Uint8Array([7, 7, 7]));
   });
 
+  it("keeps a world's guests by their ids, and lets them go with the world", async () => {
+    const store = await freshStore();
+    for (const id of ["a", "b"]) await store.save({ meta: newMeta(id), chunks: [], guests: [guest(id, "g-1111"), guest(id, "g-2222")] });
+    expect(await store.getGuest("a", "g-2222")).toEqual(guest("a", "g-2222"));
+    expect(await store.getGuest("a", "g-3333")).toBeNull();
+    expect((await store.readWorld("a"))!.guests).toHaveLength(2);
+    await store.deleteWorld("a");
+    expect(await store.getGuest("a", "g-1111")).toBeNull();
+    expect(await store.getGuest("b", "g-1111")).toEqual(guest("b", "g-1111"));
+  });
+
+  it("opens a database from before guests and adds a place for them", async () => {
+    const name = `craft-test-v1-${Math.random()}`;
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open(name, 1);
+      open.onupgradeneeded = () => {
+        open.result.createObjectStore("worlds", { keyPath: "id" });
+        open.result.createObjectStore("players", { keyPath: "world" });
+        open.result.createObjectStore("chunks", { keyPath: ["world", "cx", "cz"] });
+        open.transaction!.objectStore("worlds").put({ ...newMeta("old"), format: 3 });
+      };
+      open.onsuccess = () => {
+        open.result.close();
+        resolve();
+      };
+      open.onerror = () => reject(open.error);
+    });
+    const store = await WorldStore.open(name);
+    expect((await store.getWorld("old"))!.id).toBe("old");
+    await store.save({ meta: newMeta("old"), chunks: [], guests: [guest("old", "g-1111")] });
+    expect(await store.getGuest("old", "g-1111")).toEqual(guest("old", "g-1111"));
+  });
+
   it("refuses records from a newer Craft", async () => {
     const store = await freshStore();
     await store.putWorld({ ...newMeta("a"), format: FORMAT_VERSION + 1 });
@@ -69,6 +115,10 @@ describe("world files", () => {
     const back = readWorldFile(file);
     expect(back.meta).toEqual(newMeta("a"));
     expect(back.player).toEqual(player("a"));
+    expect(back.guests).toEqual([]);
+    // Guests travel with the world
+    await store.save({ meta: newMeta("a"), chunks: [], guests: [guest("a", "g-1111")] });
+    expect(readWorldFile(writeWorldFile((await store.readWorld("a"))!)).guests).toEqual([guest("a", "g-1111")]);
     expect(back.chunks.map((c) => [c.cx, c.cz, Array.from(c.blocks)])).toEqual([
       [0, 0, [1, 1, 1]],
       [0, 1, [9, 9, 9]],

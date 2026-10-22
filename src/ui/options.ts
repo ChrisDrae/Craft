@@ -1,4 +1,4 @@
-import { FOV_RANGE, SENSITIVITY_RANGE, VIEW_RANGE, saveSettings, viewDistance, type Settings } from "../settings.js";
+import { FOV_RANGE, NAME_LENGTH, SENSITIVITY_RANGE, VIEW_RANGE, saveSettings, viewDistance, type Settings } from "../settings.js";
 import { h } from "./dom.js";
 
 /** A labelled slider whose label shows its value. */
@@ -36,6 +36,7 @@ export function optionsScreen(settings: Settings, textured: boolean, onChange: (
     h("option", { value: "canvas" }, "Flat colors (Canvas 2D)"),
   );
   renderer.value = settings.renderer;
+  const name = h("input", { type: "text", maxlength: NAME_LENGTH, placeholder: "Your name", value: settings.name, onchange: () => change({ name: name.value.trim().slice(0, NAME_LENGTH) }) });
   return h(
     "div",
     { class: "screen options" },
@@ -44,6 +45,7 @@ export function optionsScreen(settings: Settings, textured: boolean, onChange: (
     slider((v) => `Field of view: ${v}°`, settings.fov, FOV_RANGE, 1, (v) => change({ fov: v })),
     slider((v) => `Mouse sensitivity: ${Math.round(v * 100)}%`, settings.sensitivity, SENSITIVITY_RANGE, 0.05, (v) => change({ sensitivity: v })),
     h("label", { class: "field" }, h("span", {}, "Renderer"), renderer),
+    h("label", { class: "field" }, h("span", {}, "Name (other players see it)"), name),
     h("p", { class: "muted" }, "A different renderer takes effect when a world is opened."),
     h("div", { class: "buttons" }, h("button", { onclick: onDone, autofocus: true }, "Done")),
   );

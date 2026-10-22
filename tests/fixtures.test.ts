@@ -63,6 +63,23 @@ describe("saves from earlier versions", () => {
     expect(Array.from(chunk.biomes.subarray(98, 102))).toEqual([Biome.Jungle, Biome.Jungle, Biome.Desert, Biome.Desert]);
     // And they are written back the same
     expect(encodeBiomes(chunk.biomes)).toBe("jungle 100,desert 156");
+    // Format 3 had no guests
+    expect(data.guests).toEqual([]);
+  });
+
+  it("opens a world saved in format 4: the guests who played in it", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-4.craftworld", import.meta.url))));
+    const store = await freshStore();
+    await store.writeWorld(data);
+    expect(await store.getGuest("fixture-world-4", "p-0123456789abcdef")).toMatchObject({
+      name: "Alex",
+      position: { x: 20.5, y: 70, z: -3.5 },
+      selected: 4,
+      hotbar: ["glass", "oak_door", "birch_log"],
+    });
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-4"))!);
+    await save.loadNow(8, 8, 0);
+    expect(world.get(8, 120, 8)).toBe(Block.Glowstone);
   });
 });
 
@@ -70,11 +87,11 @@ describe("settings", () => {
   it("come back as saved, with defaults for anything missing, damaged or out of range", () => {
     const kept = new Map<string, string>();
     const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) };
-    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: null, fov: 70, sensitivity: 1 });
-    saveSettings({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5 }, storage);
-    expect(loadSettings(storage)).toEqual({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5 });
+    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: null, fov: 70, sensitivity: 1, name: "" });
+    saveSettings({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "  Alex  " }, storage);
+    expect(loadSettings(storage)).toEqual({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "Alex" });
     kept.set("craft.settings", JSON.stringify({ renderer: "vulkan", view: 9999, fov: "wide", sensitivity: -1 }));
-    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: 160, fov: 70, sensitivity: 0.25 });
+    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: 160, fov: 70, sensitivity: 0.25, name: "" });
     kept.set("craft.settings", "{not json");
     expect(loadSettings(storage).fov).toBe(70);
     expect(loadSettings(null).renderer).toBe("webgl");

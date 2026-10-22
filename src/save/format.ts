@@ -8,8 +8,9 @@ import { BLOCKS, HOTBAR } from "../blocks.js";
  * 1. The first.
  * 2. The player's hotbar (block names).
  * 3. Chunks keep their biomes.
+ * 4. Guests: the players who joined the world from elsewhere, each by their id.
  */
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 
 export interface Position {
   x: number;
@@ -51,6 +52,21 @@ export interface PlayerRecord {
   hotbar: string[];
 }
 
+/** A player who joined the world from another browser, kept for when they come back. */
+export interface GuestRecord {
+  format: number;
+  /** The world's id. */
+  world: string;
+  /** The guest's id, kept in their browser. */
+  id: string;
+  name: string;
+  position: Position;
+  yaw: number;
+  pitch: number;
+  selected: number;
+  hotbar: string[];
+}
+
 /** A scheduled tick waiting in a chunk, with its block by name. */
 export interface SavedTick {
   x: number;
@@ -87,16 +103,20 @@ export class NewerFormatError extends Error {
 type Migration<T> = (record: T) => T;
 const next = (r: { format: number }): { format: number } => ({ ...r, format: r.format + 1 });
 /** Migrations from each older format to the next, per kind of record (index 0 upgrades format 1). */
-const MIGRATIONS: Record<"world" | "player" | "chunk", Migration<{ format: number }>[]> = {
-  world: [next, next],
+const MIGRATIONS: Record<RecordKind, Migration<{ format: number }>[]> = {
+  world: [next, next, next],
   // Players from before the hotbar could change get the hotbar it had
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next],
   // Chunks from before biomes were all made like plains
-  chunk: [next, (r) => ({ ...next(r), biomes: "" })],
+  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next],
+  // Guests came with format 4
+  guest: [next, next, next],
 };
 
+export type RecordKind = "world" | "player" | "chunk" | "guest";
+
 /** Brings a record read from storage or a file up to FORMAT_VERSION. */
-export function upgrade<T extends { format: number }>(kind: "world" | "player" | "chunk", record: T): T {
+export function upgrade<T extends { format: number }>(kind: RecordKind, record: T): T {
   if (record.format > FORMAT_VERSION) throw new NewerFormatError(record.format);
   let r: { format: number } = record;
   while (r.format < FORMAT_VERSION) {

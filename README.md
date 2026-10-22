@@ -13,7 +13,7 @@ npm run dev      # http://localhost:5173
 npm run check    # typecheck, tests, build
 ```
 
-The title screen lists your worlds: create one and play. WASD moves, Space jumps (and swims up), Shift
+The title screen lists your worlds: create one and play, or join a friend's. WASD moves, Space jumps (and swims up), Shift
 sprints, the left button breaks and the right one places (or opens and shuts doors and trapdoors), 1–9 or
 the wheel pick a hotbar slot, the middle button picks the block you aim at, E lists every block to put one in
 the hotbar, Esc opens the game menu (options, save and quit).
@@ -26,6 +26,39 @@ A world open in one tab can't be opened in a second one. From the title screen y
 delete worlds, and export one to a `.craftworld` file (or import such a file), to keep it elsewhere or move
 it to another browser. Options (render distance, field of view, mouse sensitivity, renderer) are kept in
 the browser too.
+
+## Playing with friends
+
+Any world can be opened to friends from its game menu ("Open to friends…"): Craft shows a six-letter code
+and a link to send. Friends open the link (or "Join a friend…" on the title screen and type the code), pick
+a name, and play in the same world: they see each other, build and break together, and water flows for all.
+
+The browser that opened the world hosts it. Everything happens there as in a single-player game: the
+world is made, ticked and saved in that browser, guests' places and hotbars included. Guests' browsers
+connect to it directly (WebRTC), so the game's traffic goes nowhere else; the world stays open while the
+host's tab is open.
+
+Players are introduced to each other by two small endpoints next to the game, `/api/signal` and
+`/api/ice` (in `api/`). `npm run dev` and `npm run preview` serve them too: started with
+`npm run dev -- --host`, friends on the same network can join a world played from
+`http://<your computer's address>:5173`.
+
+### On Vercel
+
+Deploying the repository to Vercel serves the game (a static Vite build) and the endpoints (as Vercel
+Functions) on your domain. The functions need somewhere to keep the introductions between calls:
+
+1. Add **Upstash Redis** to the project from the Vercel Marketplace (the free plan is plenty). It sets
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`),
+   which the functions read.
+2. Optionally, for players on networks that block direct connections (some mobile and office networks):
+   create a TURN key in Cloudflare's dashboard (Realtime, TURN; 1,000 GB a month are free) and set
+   `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_KEY_API_TOKEN`. Without them, connections use STUN only,
+   which works for most home networks.
+
+A join takes one offer and one answer through the functions; the host's open world polls them every 1.5
+seconds while it is open. A deployed Craft uses its own textures: Minecraft's stay on the computer they
+were imported on.
 
 ## Renderers
 

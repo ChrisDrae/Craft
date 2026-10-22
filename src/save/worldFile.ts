@@ -1,4 +1,4 @@
-import { upgrade, type ChunkRecord, type PlayerRecord, type WorldMeta } from "./format.js";
+import { upgrade, type ChunkRecord, type GuestRecord, type PlayerRecord, type WorldMeta } from "./format.js";
 import type { WorldData } from "./store.js";
 
 /** The first bytes of a .craftworld file. */
@@ -13,6 +13,8 @@ interface Header {
   meta: WorldMeta;
   player: Omit<PlayerRecord, "world"> | null;
   chunks: ChunkEntry[];
+  /** Missing in files from before guests (format 4). */
+  guests?: Array<Omit<GuestRecord, "world">>;
 }
 
 /**
@@ -30,6 +32,7 @@ export function writeWorldFile(data: WorldData): Uint8Array {
     meta: data.meta,
     player,
     chunks: data.chunks.map(({ blocks, world: _, ...rest }) => ({ ...rest, length: blocks.length })),
+    guests: (data.guests ?? []).map(({ world: _, ...rest }) => rest),
   };
   const json = new TextEncoder().encode(JSON.stringify(header));
   const body = data.chunks.reduce((n, c) => n + c.blocks.length, 0);
@@ -74,5 +77,6 @@ export function readWorldFile(bytes: Uint8Array): WorldData {
     return upgrade("chunk", { ...entry, world: meta.id, blocks });
   });
   const player = header.player ? upgrade("player", { ...header.player, world: meta.id }) : null;
-  return { meta, player, chunks };
+  const guests = (header.guests ?? []).map((g) => upgrade("guest", { ...g, world: meta.id }));
+  return { meta, player, chunks, guests };
 }

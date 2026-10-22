@@ -98,8 +98,8 @@ export class VoxelWorld implements LightWorld {
     return made;
   }
 
-  /** Drops the chunks farther than `radius` chunks from block (x, z) and returns them. */
-  unloadOutside(x: number, z: number, radius: number): Chunk[] {
+  /** Drops the chunks farther than `radius` chunks from block (x, z), except those `keep` holds on to, and returns them. */
+  unloadOutside(x: number, z: number, radius: number, keep?: (cx: number, cz: number) => boolean): Chunk[] {
     const ccx = Math.floor(x / CHUNK_SIZE);
     const ccz = Math.floor(z / CHUNK_SIZE);
     const r2 = (radius + 0.5) * (radius + 0.5);
@@ -107,7 +107,7 @@ export class VoxelWorld implements LightWorld {
     for (const [key, chunk] of this.chunks) {
       const dx = chunk.cx - ccx;
       const dz = chunk.cz - ccz;
-      if (dx * dx + dz * dz <= r2) continue;
+      if (dx * dx + dz * dz <= r2 || keep?.(chunk.cx, chunk.cz)) continue;
       this.chunks.delete(key);
       dropped.push(chunk);
     }

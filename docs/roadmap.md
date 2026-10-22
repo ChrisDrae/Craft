@@ -112,7 +112,7 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | 2 | Light, day and night, sky | L | 0; Projector R12–R14 |
 | 3 | Block shapes, more blocks, fluids | L | 0, 2 |
 | 4 | Terrain 2.0: biomes, caves, structures | L | 3 |
-| M | Multiplayer: friends join a host's session | L | 4; proposed next |
+| M | Multiplayer: friends join a host's session | L | 4 |
 | 5 | Items, inventory, crafting, tools | L | 3 |
 | 6 | Survival and game modes | M | 5 |
 | 7 | Mobs and combat | L | 6 |
@@ -362,6 +362,32 @@ migrating from today's format.
 
 ### Phase M: Multiplayer (L)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- Guests do their own actions at once with the same rules as the host (`src/actions.ts`, shared with
+  single player) and send them; the host does them again after checking reach, the block and that the
+  face is real, and sends what really is there to every guest, the actor included, putting right a guess
+  it refused. Movement is the guest's own (not checked beyond being numbers), as Minecraft's servers do
+  only loosely.
+- The host sends chunks in the packed form saves use, nearest first, a few per frame and only while the
+  data channel's buffer is low; a guest tells the host which chunks it let go of. Block changes in the
+  chunks a guest has go out once a frame, after any chunk still being compressed for them.
+- Host and guest check they run the same Craft: the protocol version and a fingerprint of all block states
+  (states travel as ids).
+- Signaling: `/api/signal` (mailboxes per world code, one offer and one answer per join, no trickle ICE)
+  and `/api/ice` (STUN, and Cloudflare TURN credentials when a key is set), one module run by Vercel
+  Functions with Upstash Redis and by the Vite dev and preview servers in memory.
+- Guests are saved by the host: save format 4 and a `guests` store (IndexedDB version 2, created on
+  upgrade); `.craftworld` files carry them. Quick-play worlds keep returning guests' places until the page
+  closes.
+- Other players are figures of boxes in a shirt color of their own, lit by the light where they stand,
+  with name tags; joins and leaves are noticed. The player's name is in Options, asked for on the first
+  join; a random id kept in the browser says who comes back.
+- Not done: copy-and-paste invites without any server (a deployment needs its functions), and importing
+  Minecraft's textures in the browser (guests on a deployed game see Craft's own).
+- Measured in Chrome, two browsers on one computer over WebRTC: a guest joined and had 151 chunks in 3.2
+  s; while it flew at 20 blocks/s for 10 s it never missed a chunk within 4, and the host's frames stayed
+  at a median of 1 ms and at most 3.3 ms.
+
 Asked for after Phase 4 was planned: friends play in one world, hosted by one of them, with nothing to run
 but the game. Proposed to come right after Phase 4, so items, mobs and survival are built for it from the
 start rather than fitted to it later.
@@ -542,4 +568,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 4 are done; next is Phase M, multiplayer, if it is to come before Phase 5.
+Phases 0 to 4 and M are done; next is Phase 5, items, inventory, crafting and tools.

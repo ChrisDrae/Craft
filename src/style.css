@@ -329,3 +329,59 @@ button.danger {
 .blocks .slot:focus-visible {
   border-color: var(--accent);
 }
+
+/* Multiplayer: names over the other players, who comes and goes, the invite */
+#nametags {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.nametag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font: 13px/1.4 ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+#notice {
+  position: fixed;
+  left: 12px;
+  bottom: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+#notice div {
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font: 13px/1.4 ui-monospace, monospace;
+  transition: opacity 0.6s;
+}
+
+.invite {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.invite input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.code {
+  font: 600 28px/1.2 ui-monospace, monospace;
+  letter-spacing: 0.15em;
+}
