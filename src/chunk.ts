@@ -1,5 +1,10 @@
+import { OPAQUE } from "./blocks.js";
+
 export const CHUNK_SIZE = 16;
-export const WORLD_HEIGHT = 64;
+export const WORLD_HEIGHT = 256;
+/** Sections of 16 x 16 x 16 blocks stacked in a chunk. */
+export const SECTIONS = WORLD_HEIGHT / CHUNK_SIZE;
+export const SECTION_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 /** Top of a water block with air above it, so the surface sits a little below the shore. */
 export const WATER_TOP = 0.875;
 
@@ -16,30 +21,38 @@ export const FACE_CORNERS: Float64Array = Float64Array.from([
   [0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0],
 ].flat());
 
-/** Index of a block inside a chunk: x and z in [0, 16), y in [0, 64). */
-export function localIndex(x: number, y: number, z: number): number {
-  return (y * CHUNK_SIZE + z) * CHUNK_SIZE + x;
+/** Index of a block inside a section: x, y and z in [0, 16). */
+export function sectionIndex(x: number, y: number, z: number): number {
+  return (y << 8) | (z << 4) | x;
 }
 
 /**
- * A face in one int: local x (4 bits), local z (4), y (6), direction (3), block (8), and whether it belongs
- * to a water block with air above, whose top sits a little lower (1).
+ * A face in one int: x, y and z inside its section (4 bits each), direction (3), whether it belongs to a
+ * water block with no water above, whose top sits a little lower (1), and the block state (16, read with
+ * `>>> 16`).
  */
-export function packFace(x: number, y: number, z: number, dir: number, block: number, lowered: boolean): number {
-  return x | (z << 4) | (y << 8) | (dir << 14) | (block << 17) | (lowered ? 1 << 25 : 0);
+export function packFace(x: number, y: number, z: number, dir: number, lowered: boolean, state: number): number {
+  return x | (z << 4) | (y << 8) | (dir << 12) | (lowered ? 1 << 15 : 0) | (state << 16);
 }
 
-/** A 16 x 64 x 16 column of blocks and the faces of it that can be seen. */
-export class Chunk {
-  readonly blocks: Uint8Array = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
-  /** Exposed faces (see packFace); valid while the chunk is not dirty. */
-  faces: Int32Array = new Int32Array(1024);
+/** 16 x 16 x 16 blocks of a chunk, and the faces of them that can be seen. */
+export class Section {
+  /** Block states, or null while the section is all air. */
+  blocks: Uint16Array | null = null;
+  /** Blocks that aren't air. */
+  count: number = 0;
+  /** Opaque blocks: when all are, only the section's outer layer can have faces. */
+  opaque: number = 0;
+  /** Exposed faces (see packFace); valid while the section is not dirty. */
+  faces: Int32Array = new Int32Array(0);
   faceCount: number = 0;
-  /** Lowest and highest y of any face, for culling. */
-  minY: number = 0;
-  maxY: number = 0;
   /** The faces need rebuilding: a block changed here or next door. */
   dirty: boolean = true;
+}
+
+/** A 16 x 256 x 16 column of blocks in 16 sections. */
+export class Chunk {
+  readonly sections: Section[] = Array.from({ length: SECTIONS }, () => new Section());
 
   constructor(
     readonly cx: number,
@@ -47,11 +60,40 @@ export class Chunk {
   ) {}
 
   get(x: number, y: number, z: number): number {
-    return this.blocks[localIndex(x, y, z)];
+    const blocks = this.sections[y >> 4].blocks;
+    return blocks ? blocks[sectionIndex(x, y & 15, z)] : 0;
   }
 
-  set(x: number, y: number, z: number, block: number): void {
-    this.blocks[localIndex(x, y, z)] = block;
+  set(x: number, y: number, z: number, state: number): void {
+    const s = this.sections[y >> 4];
+    if (!s.blocks) {
+      if (state === 0) return;
+      s.blocks = new Uint16Array(SECTION_VOLUME);
+    }
+    const i = sectionIndex(x, y & 15, z);
+    const before = s.blocks[i];
+    if (before === state) return;
+    s.blocks[i] = state;
+    s.opaque += OPAQUE[state] - OPAQUE[before];
+    if (before === 0) s.count++;
+    else if (state === 0 && --s.count === 0) s.blocks = null;
+  }
+
+  /** Some section's faces need rebuilding. */
+  get dirty(): boolean {
+    return this.sections.some((s) => s.dirty);
+  }
+
+  /** Lowest and highest y of any face, for culling (0, -1 without faces). */
+  faceBounds(): [number, number] {
+    let lo = -1;
+    let hi = -1;
+    for (let i = 0; i < SECTIONS; i++) {
+      if (this.sections[i].faceCount === 0) continue;
+      if (lo < 0) lo = i;
+      hi = i;
+    }
+    return lo < 0 ? [0, -1] : [lo * CHUNK_SIZE, hi * CHUNK_SIZE + CHUNK_SIZE - 1];
   }
 }
 

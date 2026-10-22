@@ -1,6 +1,6 @@
 import { Random, Texture } from "projector";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
-import { BLOCKS, Block, Dir } from "./blocks.js";
+import { Block, FACE_LOOK, Face, STATE_COUNT, blockOf } from "./blocks.js";
 import type { FaceUVs } from "./chunkMesh.js";
 
 /** The textures Craft uses, named after Minecraft's block texture files. */
@@ -24,11 +24,12 @@ export const TILES = [
 ] as const;
 export type TileName = (typeof TILES)[number];
 
-/** The texture on a block's face in direction `dir` (Dir). */
-export function tileFor(block: number, dir: number): TileName {
-  const top = dir === Dir.Up;
-  const bottom = dir === Dir.Down;
-  switch (block) {
+/** The texture on a block state's face in direction `dir` (Dir). */
+export function tileFor(state: number, dir: number): TileName {
+  const look = FACE_LOOK[state * 6 + dir];
+  const top = look === Face.Top;
+  const bottom = look === Face.Bottom;
+  switch (blockOf(state)) {
     case Block.Grass:
       return top ? "grass_block_top" : bottom ? "dirt" : "grass_block_side";
     case Block.Dirt:
@@ -278,7 +279,7 @@ function firstFrame(image: ImageBitmap): TilePixels {
   return g.getImageData(0, 0, TILE, TILE).data;
 }
 
-/** Every tile in one atlas (slot i holds TILES[i]), and where each block face finds its tile in it. */
+/** Every tile in one atlas (slot i holds TILES[i]), and where each block state's faces find their tile in it. */
 export function blockAtlas(tiles: ReadonlyMap<TileName, TilePixels>): { atlas: Atlas; uvs: FaceUVs } {
   const atlas = new Atlas(TILES.length);
   TILES.forEach((name, i) => {
@@ -286,9 +287,9 @@ export function blockAtlas(tiles: ReadonlyMap<TileName, TilePixels>): { atlas: A
     if (!tile) throw new Error(`Missing texture ${name}`);
     atlas.put(i, tile);
   });
-  const uvs = new Float32Array(BLOCKS.length * 6 * 4);
-  for (let block = 0; block < BLOCKS.length; block++) {
-    for (let dir = 0; dir < 6; dir++) uvs.set(atlas.rect(TILES.indexOf(tileFor(block, dir))), (block * 6 + dir) * 4);
+  const uvs = new Float32Array(STATE_COUNT * 6 * 4);
+  for (let state = 0; state < STATE_COUNT; state++) {
+    for (let dir = 0; dir < 6; dir++) uvs.set(atlas.rect(TILES.indexOf(tileFor(state, dir))), (state * 6 + dir) * 4);
   }
   return { atlas, uvs };
 }

@@ -1,5 +1,5 @@
 import { SimObject, type Vec3 } from "projector";
-import { BLOCKS, Block, HOTBAR } from "./blocks.js";
+import { BLOCKS, Block, HOTBAR, SELECTION, blockOf, placementState } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT, type Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
@@ -11,8 +11,8 @@ const REACH = 6;
 /** Seconds between repeated breaks or placements while a button is held. */
 const REPEAT = 0.25;
 
-/** Water can't be aimed at: the ray goes through it. */
-const targetable = (block: number): boolean => block !== Block.Air && block !== Block.Water;
+/** What the crosshair can hit in a block: water has no boxes, so the ray goes through it. */
+const selectionOf = (state: number): Float64Array => SELECTION[state];
 
 /**
  * Breaking and placing blocks: finds the block under the crosshair every frame (outlined by the
@@ -67,28 +67,25 @@ export class BlockInteraction extends SimObject {
   /** Breaks the target block. Water flows into the hole if it borders water. */
   breakTarget(): boolean {
     const t = this.target;
-    if (!t || !BLOCKS[t.block].breakable) return false;
+    if (!t || !BLOCKS[blockOf(t.block)].breakable) return false;
     const w = this.world;
+    const water = (x: number, y: number, z: number): boolean => blockOf(w.get(x, y, z)) === Block.Water;
     const wet =
-      w.get(t.x, t.y + 1, t.z) === Block.Water ||
-      w.get(t.x + 1, t.y, t.z) === Block.Water ||
-      w.get(t.x - 1, t.y, t.z) === Block.Water ||
-      w.get(t.x, t.y, t.z + 1) === Block.Water ||
-      w.get(t.x, t.y, t.z - 1) === Block.Water;
+      water(t.x, t.y + 1, t.z) || water(t.x + 1, t.y, t.z) || water(t.x - 1, t.y, t.z) || water(t.x, t.y, t.z + 1) || water(t.x, t.y, t.z - 1);
     return w.set(t.x, t.y, t.z, wet ? Block.Water : Block.Air);
   }
 
-  /** Places the selected block against the face of the target, unless the player stands there. */
+  /** Places the selected block against the face of the target (logs along it), unless the player stands there. */
   placeAtTarget(): boolean {
     const t = this.target;
     if (!t) return false;
     const x = t.x + t.nx;
     const y = t.y + t.ny;
     const z = t.z + t.nz;
-    const there = this.world.get(x, y, z);
+    const there = blockOf(this.world.get(x, y, z));
     if (there !== Block.Air && there !== Block.Water) return false;
     if (boxOverlapsCell(this.player.position, PLAYER_HALF_WIDTH, PLAYER_HEIGHT, x, y, z)) return false;
-    return this.world.set(x, y, z, this.selectedBlock);
+    return this.world.set(x, y, z, placementState(this.selectedBlock, t.nx, t.ny, t.nz));
   }
 
   override update(dt: number): void {
@@ -105,7 +102,7 @@ export class BlockInteraction extends SimObject {
     if (!camera) return;
     const d = camera.getForward(this.dir);
     const e = camera.position;
-    this.target = raycastVoxels(this.blockAt, targetable, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
+    this.target = raycastVoxels(this.blockAt, selectionOf, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
     this.terrain.target = this.target;
   }
 

@@ -1,9 +1,9 @@
 import { PerlinNoise, Random } from "projector";
 import { Block } from "./blocks.js";
-import { CHUNK_SIZE, WORLD_HEIGHT, localIndex, type Chunk, type ChunkGenerator } from "./chunk.js";
+import { CHUNK_SIZE, WORLD_HEIGHT, type Chunk, type ChunkGenerator } from "./chunk.js";
 
 /** y of the highest water block. */
-export const SEA_LEVEL = 20;
+export const SEA_LEVEL = 63;
 /** Chance of a tree on a grass column. */
 const TREE_CHANCE = 0.012;
 /** Trees reach this far from their trunk, so chunks look at columns this far outside themselves. */
@@ -63,10 +63,10 @@ export class TerrainGenerator implements ChunkGenerator {
     return Block.Grass;
   }
 
-  /** Stone, or an ore where its noise is high enough (rarer ores only deep down). */
+  /** Stone, or an ore where its noise is high enough (rarer ores only deeper down). */
   stoneAt(x: number, y: number, z: number): Block {
-    if (y < 16 && this.ores.noise3D(x * 0.2 + 0.5, y * 0.2 + 40.5, z * 0.2) > 0.46) return Block.GoldOre;
-    if (y < 34 && this.ores.noise3D(x * 0.18 + 70.5, y * 0.18, z * 0.18 + 0.5) > 0.42) return Block.IronOre;
+    if (y < SEA_LEVEL - 4 && this.ores.noise3D(x * 0.2 + 0.5, y * 0.2 + 40.5, z * 0.2) > 0.46) return Block.GoldOre;
+    if (y < SEA_LEVEL + 14 && this.ores.noise3D(x * 0.18 + 70.5, y * 0.18, z * 0.18 + 0.5) > 0.42) return Block.IronOre;
     if (this.ores.noise3D(x * 0.15 + 0.5, y * 0.15 + 0.5, z * 0.15 + 140.5) > 0.36) return Block.CoalOre;
     return Block.Stone;
   }
@@ -147,8 +147,7 @@ export class TerrainGenerator implements ChunkGenerator {
     const lx = x - chunk.cx * CHUNK_SIZE;
     const lz = z - chunk.cz * CHUNK_SIZE;
     if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || y < 0 || y >= WORLD_HEIGHT) return;
-    const i = localIndex(lx, y, lz);
-    if (onlyAir && chunk.blocks[i] !== Block.Air) return;
-    chunk.blocks[i] = block;
+    if (onlyAir && chunk.get(lx, y, lz) !== Block.Air) return;
+    chunk.set(lx, y, lz, block);
   }
 }

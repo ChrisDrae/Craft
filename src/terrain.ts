@@ -1,6 +1,7 @@
 import { LineSet, Material, MeshNode, SimObject, Transform, type Mesh, type Scene, type Texture, type Vec3 } from "projector";
 import { CHUNK_SIZE, FACE_CORNERS as CORNERS, type Chunk } from "./chunk.js";
 import { buildChunkMeshes, type FaceUVs } from "./chunkMesh.js";
+import { DirectSupply, type ChunkSupply } from "./chunkSupply.js";
 import type { VoxelHit } from "./raycast.js";
 import { VoxelNode } from "./voxelNode.js";
 import type { VoxelWorld } from "./world.js";
@@ -21,17 +22,21 @@ interface ChunkNodes {
 
 /** How far outside the render distance chunk meshes are kept, in chunks, so turning back is free. */
 const KEEP_MARGIN = 2;
+/** Chunks this many chunks beyond the load radius are unloaded; between the two they stay as they are. */
+const UNLOAD_MARGIN = 2;
 
 /**
- * The voxel world in the simulation: generates chunks around a point as it moves and draws them, in one
- * of two ways. Without textures, one VoxelNode emits flat-colored faces into the software pipeline (for
+ * The voxel world in the simulation: loads chunks around a point as it moves (from a ChunkSupply),
+ * unloads those left far behind, and draws them, in one of two ways. Without textures, one VoxelNode emits flat-colored faces into the software pipeline (for
  * Canvas 2D). With textures, every chunk is a textured mesh of its own, solid and water apart (for WebGL,
  * whose depth buffer needs no sorting).
  */
 export class Terrain extends SimObject {
   readonly world: VoxelWorld;
-  /** Chunks generated per frame at most, so walking into new land doesn't stall a frame. */
-  budget: number = 2;
+  /** Where missing chunks come from: generated on the spot unless a worker is set. */
+  supply: ChunkSupply = new DirectSupply();
+  /** Called with every chunk as it is unloaded. */
+  onUnload: ((chunk: Chunk) => void) | null = null;
   /** Chunk meshes built per frame at most, nearest first, so the chunk being edited updates at once. */
   meshBudget: number = 4;
   /** Faces farther than this (in blocks) are not drawn. */
@@ -91,13 +96,19 @@ export class Terrain extends SimObject {
     return Math.ceil(this.renderDistance / CHUNK_SIZE) + 1;
   }
 
-  /** Generates everything within the radius at once (before the first frame). */
-  loadAll(): void {
-    this.world.loadAround(this.focus.x, this.focus.z, this.radius, Infinity);
+  /** Generates the chunks within `radius` at once, right here (the ground to start on). */
+  loadNow(radius: number = this.radius): void {
+    this.world.loadAround(this.focus.x, this.focus.z, radius, Infinity);
   }
 
   override update(): void {
-    this.world.loadAround(this.focus.x, this.focus.z, this.radius, this.budget);
+    const f = this.focus;
+    this.supply.requestAround(this.world, f.x, f.z, this.radius);
+    for (const chunk of this.world.unloadOutside(f.x, f.z, this.radius + UNLOAD_MARGIN)) {
+      const nodes = this.chunkNodes.get(chunk);
+      if (nodes) this.dropNodes(chunk, nodes);
+      this.onUnload?.(chunk);
+    }
   }
 
   /** After everything that edits blocks this frame: bring the chunk meshes up to date. */

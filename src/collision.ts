@@ -1,7 +1,9 @@
 import type { Vec3 } from "projector";
 
-export interface SolidQuery {
-  isSolid(x: number, y: number, z: number): boolean;
+/** Blocks with boxes that stop entities (see COLLISION), such as the VoxelWorld. */
+export interface ShapeQuery {
+  /** The boxes of the block at (x, y, z): min x, y, z, max x, y, z each, in the block's own coordinates. */
+  collisionBoxes(x: number, y: number, z: number): ArrayLike<number>;
 }
 
 /** Gap left between a box and the block it was stopped by, so it doesn't count as touching it next step. */
@@ -10,12 +12,13 @@ const SKIN = 1e-4;
 const EDGE = 1e-6;
 
 /**
- * Moves an upright box by `delta` along one axis (0 x, 1 y, 2 z) and stops it against solid blocks.
- * The box is centered on `pos` in x and z, `halfWidth` to each side, and reaches from `pos.y` up to
- * `pos.y + height`. Moves must be shorter than a block so nothing is skipped. Returns true on a hit.
+ * Moves an upright box by `delta` along one axis (0 x, 1 y, 2 z) and stops it against the blocks'
+ * collision boxes. The box is centered on `pos` in x and z, `halfWidth` to each side, and reaches from
+ * `pos.y` up to `pos.y + height`. Moves must be shorter than a block so nothing is skipped. Returns true on
+ * a hit.
  */
 export function moveAxis(
-  world: SolidQuery,
+  world: ShapeQuery,
   pos: Vec3,
   halfWidth: number,
   height: number,
@@ -33,15 +36,25 @@ export function moveAxis(
   const y1 = Math.floor(pos.y + height - EDGE);
   const z0 = Math.floor(pos.z - halfWidth + EDGE);
   const z1 = Math.floor(pos.z + halfWidth - EDGE);
-  // The block face nearest to where the box came from
+  // The box face nearest to where the moving box came from
   let limit = delta > 0 ? Infinity : -Infinity;
   for (let y = y0; y <= y1; y++) {
     for (let z = z0; z <= z1; z++) {
       for (let x = x0; x <= x1; x++) {
-        if (!world.isSolid(x, y, z)) continue;
-        const cell = axis === 0 ? x : axis === 1 ? y : z;
-        if (delta > 0) limit = Math.min(limit, cell);
-        else limit = Math.max(limit, cell + 1);
+        const boxes = world.collisionBoxes(x, y, z);
+        for (let i = 0; i < boxes.length; i += 6) {
+          const bx0 = x + boxes[i];
+          const by0 = y + boxes[i + 1];
+          const bz0 = z + boxes[i + 2];
+          const bx1 = x + boxes[i + 3];
+          const by1 = y + boxes[i + 4];
+          const bz1 = z + boxes[i + 5];
+          if (bx1 <= pos.x - halfWidth + EDGE || bx0 >= pos.x + halfWidth - EDGE) continue;
+          if (by1 <= pos.y + EDGE || by0 >= pos.y + height - EDGE) continue;
+          if (bz1 <= pos.z - halfWidth + EDGE || bz0 >= pos.z + halfWidth - EDGE) continue;
+          if (delta > 0) limit = Math.min(limit, axis === 0 ? bx0 : axis === 1 ? by0 : bz0);
+          else limit = Math.max(limit, axis === 0 ? bx1 : axis === 1 ? by1 : bz1);
+        }
       }
     }
   }

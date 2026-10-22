@@ -1,11 +1,13 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type Fog, type RenderBackend, type Vec3 } from "projector";
 import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
 import { WORLD_HEIGHT } from "./chunk.js";
+import { WorkerSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
 import { Player } from "./player.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { atlasTexture, blockAtlas, importedTiles, proceduralTiles, tileFor, tileImage } from "./textures.js";
+import { WorldTicks } from "./ticks.js";
 import { VoxelWorld } from "./world.js";
 import "./style.css";
 
@@ -87,9 +89,18 @@ const spawn: Vec3 = { x: land.x + 0.5, y: WORLD_HEIGHT, z: land.z + 0.5 };
 const player = new Player(world, spawn);
 const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
 terrain.renderDistance = view;
+try {
+  terrain.supply = new WorkerSupply(seed);
+} catch (e) {
+  console.warn("Craft: no module workers, generating chunks on the main thread.", e);
+}
 sim.add(player);
+const ticks = sim.add(new WorldTicks(world, new Map(), seed));
+// Scheduled ticks leave with their chunk (saves will keep them)
+terrain.onUnload = (chunk) => ticks.takeChunk(chunk.cx, chunk.cz);
 const interaction = sim.add(new BlockInteraction(world, player, terrain));
-terrain.loadAll();
+// The ground to start on right away; the rest of the view arrives from the worker
+terrain.loadNow(1);
 // Stand on the highest block of the spawn column (a tree, maybe)
 let ground = WORLD_HEIGHT - 1;
 while (ground > 0 && !world.isSolid(land.x, ground, land.z)) ground--;
@@ -170,7 +181,7 @@ const slots = HOTBAR.map((block, i) => {
   slot.style.setProperty("--side", info.side);
   const tile = tiles?.get(tileFor(block, Dir.PosX));
   if (tile) slot.style.setProperty("--icon", `url(${tileImage(tile)}) center / cover`);
-  slot.title = info.name;
+  slot.title = info.label;
   const key = document.createElement("span");
   key.textContent = String(i + 1);
   slot.append(key);
@@ -180,7 +191,7 @@ const slots = HOTBAR.map((block, i) => {
 let nameTimer = 0;
 interaction.onSelect = (slot) => {
   slots.forEach((el, i) => el.classList.toggle("selected", i === slot));
-  blockName.textContent = BLOCKS[HOTBAR[slot]].name;
+  blockName.textContent = BLOCKS[HOTBAR[slot]].label;
   blockName.classList.add("shown");
   clearTimeout(nameTimer);
   nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
@@ -189,4 +200,4 @@ slots[0].classList.add("selected");
 
 sim.start();
 // For poking at the running game from the browser console
-Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain } });
+Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain, ticks } });
