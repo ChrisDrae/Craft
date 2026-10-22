@@ -1,0 +1,364 @@
+import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type Fog, type RenderBackend } from "projector";
+import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
+import { WORLD_HEIGHT } from "./chunk.js";
+import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
+import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
+import { BlockInteraction } from "./interaction.js";
+import { Player } from "./player.js";
+import type { PlayerRecord, WorldMeta } from "./save/format.js";
+import type { WorldStore } from "./save/store.js";
+import { WorldSave } from "./save/worldSave.js";
+import { viewDistance, type Settings } from "./settings.js";
+import { Terrain, type TerrainTextures } from "./terrain.js";
+import { atlasTexture, blockAtlas, importedTiles, proceduralTiles, tileFor, tileImage } from "./textures.js";
+import { WorldTicks } from "./ticks.js";
+import { formatWhen, h } from "./ui/dom.js";
+import { optionsScreen } from "./ui/options.js";
+import { VoxelWorld } from "./world.js";
+
+const SKY = "#8fbcf0";
+const UNDERWATER = "#21467f";
+/** Radians per pixel of mouse movement at 100% sensitivity. */
+const LOOK_SPEED = 0.0025;
+
+/** A saved world to play: its store, metadata, player (null before the first save) and saved chunks. */
+export interface SavedWorld {
+  store: WorldStore;
+  meta: WorldMeta;
+  player: PlayerRecord | null;
+  chunks: Array<[number, number]>;
+}
+
+export interface GameOptions {
+  canvas: HTMLCanvasElement;
+  /** Where the menus go. */
+  menu: HTMLElement;
+  /** The options, changed in place by the Options screen. */
+  settings: Settings;
+  /** The renderer for this page: the option's, unless the address says otherwise. */
+  renderer: Settings["renderer"];
+  /** The world to play, or a seed for quick play (nothing saved). */
+  world: SavedWorld | { seed: string };
+}
+
+function element<T extends HTMLElement>(id: string, type: new () => T): T {
+  const el = document.getElementById(id);
+  if (!(el instanceof type)) throw new Error(`Missing #${id}`);
+  return el;
+}
+
+/** WebGL2 with textures where it works and is wanted, Canvas 2D otherwise. */
+function createBackend(canvas: HTMLCanvasElement, renderer: Settings["renderer"]): RenderBackend {
+  if (renderer !== "canvas") {
+    try {
+      return new WebGLBackend(canvas, { pixelRatio: Math.min(2, globalThis.devicePixelRatio || 1) });
+    } catch (e) {
+      console.warn("Craft: no WebGL2, drawing with Canvas 2D.", e);
+    }
+  }
+  return new Canvas2DBackend(canvas, { pixelRatio: Math.min(1, globalThis.devicePixelRatio || 1) });
+}
+
+/** Nearest dry land to the origin, searched outward in a square spiral. */
+function findLand(generator: TerrainGenerator): { x: number; z: number } {
+  for (let r = 0; r < 64; r++) {
+    for (let i = -r; i <= r; i++) {
+      for (const [x, z] of [[i, -r], [i, r], [-r, i], [r, i]]) {
+        if (generator.surfaceHeight(x * 8, z * 8) - 1 >= SEA_LEVEL + 2) return { x: x * 8, z: z * 8 };
+      }
+    }
+  }
+  return { x: 0, z: 0 };
+}
+
+/** Plays a world in the page until the player quits to the title (a page load). */
+export async function startGame(options: GameOptions): Promise<void> {
+  const { canvas, menu, settings } = options;
+  const saved = "store" in options.world ? options.world : null;
+  const seed = saved ? saved.meta.seed : (options.world as { seed: string }).seed;
+  const hotbarEl = element("hotbar", HTMLElement);
+  const blockName = element("block-name", HTMLElement);
+  const underwaterEl = element("underwater", HTMLElement);
+  const crosshair = element("crosshair", HTMLElement);
+
+  const backend = createBackend(canvas, options.renderer);
+  const textured = backend instanceof WebGLBackend;
+  // ?view=16..160 overrides the setting for this page
+  const urlView = Number(new URLSearchParams(location.search).get("view"));
+  const view = (): number => (urlView >= 16 ? Math.min(160, urlView) : viewDistance(settings, textured));
+  // Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
+  const imported = textured ? await importedTiles() : null;
+  if (imported) console.info(`Craft: block textures from Minecraft ${imported.version}`);
+  const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
+  let textures: TerrainTextures | null = null;
+  if (tiles) {
+    const { atlas, uvs } = blockAtlas(tiles);
+    textures = { texture: atlasTexture(atlas), uvs };
+  }
+  const sim = new Simulation({
+    canvas,
+    backend,
+    orbit: false,
+    keyboard: ["Space"],
+    camera: { fov: (settings.fov * Math.PI) / 180, near: 0.05 },
+    scene: { background: SKY },
+  });
+  // Tops in full light, sides a step or two darker depending on the sun, bottoms darkest
+  sim.scene.ambient.intensity = 0.3;
+  sim.scene.lights = [new HemisphereLight("#d6e6ff", "#8a7a66", 0.4), new DirectionalLight({ x: -0.5, y: -1, z: -0.35 }, 0.45)];
+
+  const generator = new TerrainGenerator(seed);
+  const world = new VoxelWorld(generator);
+  const player = new Player(world, { x: 0.5, y: WORLD_HEIGHT, z: 0.5 });
+  player.sensitivity = LOOK_SPEED * settings.sensitivity;
+  const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
+  terrain.renderDistance = view();
+  let chunks: ChunkSupply = new DirectSupply();
+  try {
+    chunks = new WorkerSupply(seed);
+  } catch (e) {
+    console.warn("Craft: no module workers, generating chunks on the main thread.", e);
+  }
+  sim.add(player);
+  const ticks = sim.add(new WorldTicks(world, new Map(), seed));
+  const interaction = sim.add(new BlockInteraction(world, player, terrain));
+
+  // The save, if this world is kept: it supplies saved chunks and takes unloaded ones
+  let save: WorldSave | null = null;
+  if (saved) {
+    ticks.time = saved.meta.time;
+    save = sim.add(
+      new WorldSave({
+        store: saved.store,
+        meta: saved.meta,
+        world,
+        ticks,
+        generator: chunks,
+        savedChunks: saved.chunks,
+        player: () => ({
+          position: { ...player.position },
+          velocity: { ...player.velocity },
+          yaw: player.yaw,
+          pitch: player.pitch,
+          selected: interaction.selected,
+        }),
+      }),
+    );
+    terrain.supply = save;
+    terrain.onUnload = (chunk) => save!.unload(chunk);
+  } else {
+    terrain.supply = chunks;
+    terrain.onUnload = (chunk) => ticks.takeChunk(chunk.cx, chunk.cz);
+  }
+
+  // Where the player stands: as saved, or on the highest block at the world's spawn (a tree, maybe)
+  const record = saved?.player ?? null;
+  if (record) {
+    Object.assign(player.position, record.position);
+    Object.assign(player.velocity, record.velocity);
+    player.yaw = record.yaw;
+    player.pitch = record.pitch;
+    interaction.select(record.selected);
+    await save!.loadNow(player.position.x, player.position.z, 1);
+  } else {
+    const land = saved?.meta.spawn ?? findLand(generator);
+    player.position.x = Math.floor(land.x) + 0.5;
+    player.position.z = Math.floor(land.z) + 0.5;
+    if (save) await save.loadNow(player.position.x, player.position.z, 1);
+    else terrain.loadNow(1);
+    let ground = WORLD_HEIGHT - 1;
+    while (ground > 0 && !world.isSolid(Math.floor(land.x), ground, Math.floor(land.z))) ground--;
+    player.position.y = ground + 1;
+    if (save) {
+      save.meta = { ...save.meta, spawn: { x: player.position.x, y: player.position.y, z: player.position.z } };
+      await save.save();
+    }
+  }
+
+  // Sky and fog, and the view under water
+  function skyFog(): Fog {
+    const d = terrain.renderDistance;
+    return { color: SKY, near: d * 0.5, far: d, mode: "distance" };
+  }
+  sim.scene.fog = skyFog();
+  let underwater = false;
+  sim.onUpdate(() => {
+    if (player.eyeInWater === underwater) return;
+    underwater = player.eyeInWater;
+    sim.scene.background = underwater ? UNDERWATER : SKY;
+    sim.scene.fog = underwater ? { color: UNDERWATER, near: 1, far: 14, mode: "distance" } : skyFog();
+    underwaterEl.hidden = !underwater;
+  });
+
+  // Saving: when the tab is hidden (switched away from, or about to close) and before quitting
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void save?.save().catch(() => {});
+  });
+  let saveError: string | null = null;
+  /** The game menu's line about saving, while the menu is up. */
+  let statusLine: HTMLElement | null = null;
+  if (save) {
+    save.onSaved = (ok, e) => {
+      saveError = ok ? null : String((e as Error)?.message ?? e);
+      if (statusLine?.isConnected) {
+        statusLine.textContent = status();
+        statusLine.className = saveError ? "error" : "muted";
+      }
+    };
+  }
+
+  // The game menu over the paused game, and the options from it
+  const locked = (): boolean => document.pointerLockElement === canvas;
+  let dragMode = false;
+  let drag: { x: number; y: number; button: number; moved: boolean } | null = null;
+  let started = false;
+
+  function setPlaying(on: boolean): void {
+    player.controls = on;
+    menu.hidden = on;
+    crosshair.hidden = !on && !started;
+    interaction.release(0);
+    interaction.release(2);
+    if (on) return;
+    showPauseMenu();
+    if (started) void save?.save().catch(() => {});
+  }
+
+  function play(): void {
+    started = true;
+    Promise.resolve(canvas.requestPointerLock()).catch(() => {
+      // Where the browser refuses pointer lock (some embedded or automated browsers), dragging looks around
+      // and a click without dragging acts instead
+      dragMode = true;
+      setPlaying(true);
+    });
+  }
+
+  async function quit(): Promise<void> {
+    if (save) {
+      menu.replaceChildren(h("div", { class: "screen" }, h("h2", {}, "Saving world…")));
+      try {
+        await save.save();
+      } catch {
+        showPauseMenu();
+        return;
+      }
+    }
+    location.href = location.pathname;
+  }
+
+  function status(): string {
+    if (!save) return "Quick play: this world isn't saved.";
+    if (saveError) return `Saving failed: ${saveError}`;
+    return save.lastSaved === null ? "Not saved yet." : `Saved ${formatWhen(Date.now() - (performance.now() - save.lastSaved))}.`;
+  }
+
+  function showPauseMenu(): void {
+    menu.replaceChildren(
+      h(
+        "div",
+        { class: "screen" },
+        h("h1", {}, saved ? saved.meta.name : "Craft"),
+        h(
+          "div",
+          { class: "buttons column" },
+          h("button", { class: "primary", autofocus: true, onclick: play }, started ? "Back to game" : "Play"),
+          h("button", { onclick: showOptions }, "Options…"),
+          h("button", { onclick: () => void quit() }, save ? "Save and quit to title" : "Quit to title"),
+        ),
+        (statusLine = h("p", { class: saveError ? "error" : "muted" }, status())),
+        h(
+          "ul",
+          { class: "keys" },
+          ...[
+            ["WASD", "move"],
+            ["Space", "jump, swim up"],
+            ["Shift", "sprint"],
+            ["Left click", "break"],
+            ["Right click", "place"],
+            ["1–9, wheel", "pick a block"],
+            ["Esc", "this menu"],
+          ].map(([key, what]) => h("li", {}, h("b", {}, key), what)),
+        ),
+      ),
+    );
+    menu.querySelector<HTMLElement>("[autofocus]")?.focus();
+  }
+
+  function showOptions(): void {
+    menu.replaceChildren(
+      optionsScreen(
+        settings,
+        textured,
+        (s) => {
+          terrain.renderDistance = view();
+          if (!underwater) sim.scene.fog = skyFog();
+          sim.camera.fov = (s.fov * Math.PI) / 180;
+          player.sensitivity = LOOK_SPEED * s.sensitivity;
+        },
+        showPauseMenu,
+      ),
+    );
+  }
+
+  document.addEventListener("pointerlockchange", () => setPlaying(locked()));
+  document.addEventListener("mousemove", (e) => {
+    if (locked()) {
+      player.look(e.movementX, e.movementY);
+    } else if (drag) {
+      player.look(e.movementX, e.movementY);
+      if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
+    }
+  });
+  canvas.addEventListener("mousedown", (e) => {
+    if (locked()) interaction.press(e.button);
+    else if (dragMode && player.controls) drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (drag && !drag.moved) interaction.press(drag.button);
+    drag = null;
+    interaction.release(e.button);
+  });
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (player.controls && e.deltaY !== 0) interaction.select(interaction.selected + Math.sign(e.deltaY));
+    },
+    { passive: true },
+  );
+  window.addEventListener("keydown", (e) => {
+    if (!player.controls) return;
+    const digit = /^Digit([1-9])$/.exec(e.code);
+    if (digit) interaction.select(Number(digit[1]) - 1);
+    if (e.code === "Escape" && dragMode) setPlaying(false);
+  });
+
+  // Hotbar
+  const slots = HOTBAR.map((block, i) => {
+    const info = BLOCKS[block];
+    const tile = tiles?.get(tileFor(block, Dir.PosX));
+    const slot = h("div", { class: "slot", title: info.label }, h("span", {}, String(i + 1)));
+    slot.style.setProperty("--top", info.top);
+    slot.style.setProperty("--side", info.side);
+    if (tile) slot.style.setProperty("--icon", `url(${tileImage(tile)}) center / cover`);
+    hotbarEl.append(slot);
+    return slot;
+  });
+  let nameTimer = 0;
+  const showSlot = (slot: number): void => slots.forEach((el, i) => el.classList.toggle("selected", i === slot));
+  interaction.onSelect = (slot) => {
+    showSlot(slot);
+    blockName.textContent = BLOCKS[HOTBAR[slot]].label;
+    blockName.classList.add("shown");
+    clearTimeout(nameTimer);
+    nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
+  };
+  showSlot(interaction.selected);
+  hotbarEl.hidden = false;
+
+  setPlaying(false);
+  sim.start();
+  // For poking at the running game from the browser console
+  Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain, ticks, save } });
+}

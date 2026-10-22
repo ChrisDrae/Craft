@@ -173,12 +173,25 @@ migrating from today's format.
 
 ### Phase 1: Worlds and save games (M)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- Each world plays in a page of its own (`?world=<id>`); quitting loads the title page. That frees the WebGL
+  context, the worker and every listener without teardown code, for about a second of loading.
+- New chunks come from the worker already encoded and compressed for saving, so a save only encodes chunks
+  the player changed on the main thread. Before that, the first save of a new world blocked for 45 ms (168
+  chunks); now 0.2 ms, 8 ms in all, and no frame runs long.
+- A saved chunk takes about 0.9 KB (the estimate was 10 KB): a world explored for a while is a few MB.
+- Chunk records don't hold entities yet. The first entity that must be saved (falling blocks, Phase 3) adds
+  them, with a format bump, a migration and a fixture.
+- Game mode, difficulty and weather join the world's record with the phases that add them.
+- The store is tested on IndexedDB itself (`fake-indexeddb` in Node), and `tests/fixtures/format-1.craftworld`
+  is the first saved-world fixture.
+
 - **Menus** (DOM, `src/ui/`): a title screen and a world list showing name, seed, last played and size.
   Create a world (name and seed; game mode from Phase 6), play, rename, duplicate, delete (with a
   confirmation), export to a file and import one. Esc opens a pause menu: back to game, options, save and quit
   to title. `?seed=` stays as a quick way into a fresh world.
 - **Entities in chunks:** an entity is saved and unloaded with the chunk it stands in (moved here from
-  Phase 0); the player is saved apart.
+  Phase 0, then on to Phase 3: see above); the player is saved apart.
 - **Store** (`src/save/`): a `WorldStore` interface, implemented on IndexedDB for the browser and in memory
   for tests. The IndexedDB database `craft` holds:
   - `worlds`: id, name, seed, format version, generator version, created and last played, game mode,
@@ -427,4 +440,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phase 0 is done; next is Phase 1, so that nothing built from then on is lost on a reload.
+Phases 0 and 1 are done; next is Phase 2, light, day and night.

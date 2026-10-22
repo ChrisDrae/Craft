@@ -2,6 +2,8 @@ import { PerlinNoise, Random } from "projector";
 import { Block } from "./blocks.js";
 import { CHUNK_SIZE, WORLD_HEIGHT, type Chunk, type ChunkGenerator } from "./chunk.js";
 
+/** Bumped whenever the generator makes different terrain from the same seed; saves record it. */
+export const GENERATOR_VERSION = 1;
 /** y of the highest water block. */
 export const SEA_LEVEL = 63;
 /** Chance of a tree on a grass column. */

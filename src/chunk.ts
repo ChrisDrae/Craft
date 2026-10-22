@@ -35,6 +35,12 @@ export function packFace(x: number, y: number, z: number, dir: number, lowered: 
   return x | (z << 4) | (y << 8) | (dir << 12) | (lowered ? 1 << 15 : 0) | (state << 16);
 }
 
+/** A chunk's blocks as saves store them: a palette of state names and the compressed blocks (see encodeBlocks). */
+export interface PackedBlocks {
+  palette: string[];
+  blocks: Uint8Array;
+}
+
 /** 16 x 16 x 16 blocks of a chunk, and the faces of them that can be seen. */
 export class Section {
   /** Block states, or null while the section is all air. */
@@ -53,6 +59,13 @@ export class Section {
 /** A 16 x 256 x 16 column of blocks in 16 sections. */
 export class Chunk {
   readonly sections: Section[] = Array.from({ length: SECTIONS }, () => new Section());
+  /** Changed since it was last saved, or never saved (as every new chunk). */
+  unsaved: boolean = true;
+  /**
+   * The blocks already encoded for saving (by the worker that generated the chunk), until a block changes:
+   * saving then needn't encode them on the main thread.
+   */
+  packed: PackedBlocks | null = null;
 
   constructor(
     readonly cx: number,

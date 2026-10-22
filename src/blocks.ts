@@ -191,6 +191,11 @@ export function stateName(state: number): string {
 
 const BY_NAME: Map<string, BlockInfo> = new Map(BLOCKS.map((b) => [b.name, b]));
 
+/** The block with a stable name ("oak_log"), or null. */
+export function blockByName(name: string): Block | null {
+  return BY_NAME.get(name)?.id ?? null;
+}
+
 /** The state a name stands for (see stateName), or null for a block or value that doesn't exist. */
 export function stateByName(text: string): number | null {
   const match = /^([a-z0-9_]+)(?:\[(.*)\])?$/.exec(text);

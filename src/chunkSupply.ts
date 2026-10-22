@@ -4,18 +4,30 @@ import { VoxelWorld } from "./world.js";
 /** Chunks being generated at once at most: few, so the nearest missing ones are always next. */
 const IN_FLIGHT = 4;
 
-/** Where new chunks come from: the world's generator right away, or a worker. */
+/** Chunks a supply should leave alone (they come from elsewhere, such as a save). */
+export type SkipChunk = (cx: number, cz: number) => boolean;
+
+/** Where new chunks come from: the world's generator right away, a worker, or a save. */
 export interface ChunkSupply {
-  /** Asks for the missing chunks within `radius` chunks of block (x, z); they enter the world when ready. */
-  requestAround(world: VoxelWorld, x: number, z: number, radius: number): void;
+  /**
+   * Asks for the missing chunks within `radius` chunks of block (x, z), nearest first, except those `skip`
+   * leaves out; they enter the world when ready.
+   */
+  requestAround(world: VoxelWorld, x: number, z: number, radius: number, skip?: SkipChunk): void;
 }
 
 /** Generates on the spot, up to a few chunks per frame (tests, and browsers without module workers). */
 export class DirectSupply implements ChunkSupply {
   constructor(private readonly budget: number = 2) {}
 
-  requestAround(world: VoxelWorld, x: number, z: number, radius: number): void {
-    world.loadAround(x, z, radius, this.budget);
+  requestAround(world: VoxelWorld, x: number, z: number, radius: number, skip?: SkipChunk): void {
+    let made = 0;
+    for (const [cx, cz] of world.missingAround(x, z, radius)) {
+      if (made >= this.budget) return;
+      if (skip?.(cx, cz)) continue;
+      world.load(cx, cz);
+      made++;
+    }
   }
 }
 
@@ -40,12 +52,12 @@ export class WorkerSupply implements ChunkSupply {
     };
   }
 
-  requestAround(world: VoxelWorld, x: number, z: number, radius: number): void {
+  requestAround(world: VoxelWorld, x: number, z: number, radius: number, skip?: SkipChunk): void {
     this.world = world;
     if (this.waiting.size >= IN_FLIGHT) return;
     for (const [cx, cz] of world.missingAround(x, z, radius)) {
       const key = VoxelWorld.key(cx, cz);
-      if (this.waiting.has(key)) continue;
+      if (this.waiting.has(key) || skip?.(cx, cz)) continue;
       this.waiting.add(key);
       this.worker.postMessage({ seed: this.seed, cx, cz } satisfies GenerateRequest);
       if (this.waiting.size >= IN_FLIGHT) return;

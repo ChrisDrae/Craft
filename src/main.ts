@@ -1,18 +1,9 @@
-import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type Fog, type RenderBackend, type Vec3 } from "projector";
-import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
-import { WORLD_HEIGHT } from "./chunk.js";
-import { WorkerSupply } from "./chunkSupply.js";
-import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
-import { BlockInteraction } from "./interaction.js";
-import { Player } from "./player.js";
-import { Terrain, type TerrainTextures } from "./terrain.js";
-import { atlasTexture, blockAtlas, importedTiles, proceduralTiles, tileFor, tileImage } from "./textures.js";
-import { WorldTicks } from "./ticks.js";
-import { VoxelWorld } from "./world.js";
+import { startGame } from "./game.js";
+import { WorldStore } from "./save/store.js";
+import { loadSettings } from "./settings.js";
+import { h } from "./ui/dom.js";
+import { TitleScreen } from "./ui/title.js";
 import "./style.css";
-
-const SKY = "#8fbcf0";
-const UNDERWATER = "#21467f";
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
   const el = document.getElementById(id);
@@ -21,183 +12,69 @@ function element<T extends HTMLElement>(id: string, type: new () => T): T {
 }
 
 const canvas = element("canvas", HTMLCanvasElement);
-const overlay = element("play", HTMLElement);
-const hotbarEl = element("hotbar", HTMLElement);
-const blockName = element("block-name", HTMLElement);
-const underwaterEl = element("underwater", HTMLElement);
-
-// ?seed=... picks another world, ?view=16..160 the view distance in blocks, ?renderer=canvas the flat-colored
-// Canvas 2D renderer instead of textured WebGL
+const menu = element("menu", HTMLElement);
+const settings = loadSettings();
+// ?world=<id> plays a saved world, ?seed=... a fresh one that isn't saved, nothing the title screen.
+// ?renderer=canvas|webgl and ?view=16..160 override the options for one page.
 const params = new URLSearchParams(location.search);
-const seed = params.get("seed") ?? "craft";
-const generator = new TerrainGenerator(seed);
-const world = new VoxelWorld(generator);
+const renderer = params.get("renderer");
+const pageRenderer = renderer === "canvas" || renderer === "webgl" ? renderer : settings.renderer;
 
-/** WebGL2 with textures where it works, Canvas 2D otherwise or when asked for. */
-function createBackend(): RenderBackend {
-  if (params.get("renderer") !== "canvas") {
-    try {
-      return new WebGLBackend(canvas, { pixelRatio: Math.min(2, globalThis.devicePixelRatio || 1) });
-    } catch (e) {
-      console.warn("Craft: no WebGL2, drawing with Canvas 2D.", e);
-    }
+async function openStore(): Promise<WorldStore | null> {
+  try {
+    return await WorldStore.open();
+  } catch (e) {
+    console.warn("Craft: no IndexedDB, worlds can't be kept.", e);
+    return null;
   }
-  return new Canvas2DBackend(canvas, { pixelRatio: Math.min(1, globalThis.devicePixelRatio || 1) });
 }
 
-const backend = createBackend();
-const textured = backend instanceof WebGLBackend;
-const view = Math.min(160, Math.max(16, Number(params.get("view")) || (textured ? 96 : 48)));
-// Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
-const imported = textured ? await importedTiles() : null;
-if (imported) console.info(`Craft: block textures from Minecraft ${imported.version}`);
-const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
-let textures: TerrainTextures | null = null;
-if (tiles) {
-  const { atlas, uvs } = blockAtlas(tiles);
-  textures = { texture: atlasTexture(atlas), uvs };
-}
-const sim = new Simulation({
-  canvas,
-  backend,
-  orbit: false,
-  keyboard: ["Space"],
-  camera: { fov: (70 * Math.PI) / 180, near: 0.05 },
-  scene: { background: SKY },
-});
-// Tops in full light, sides a step or two darker depending on the sun, bottoms darkest
-sim.scene.ambient.intensity = 0.3;
-sim.scene.lights = [
-  new HemisphereLight("#d6e6ff", "#8a7a66", 0.4),
-  new DirectionalLight({ x: -0.5, y: -1, z: -0.35 }, 0.45),
-];
-
-/** Nearest dry land to the origin, searched outward in a square spiral. */
-function findLand(): { x: number; z: number } {
-  for (let r = 0; r < 64; r++) {
-    for (let i = -r; i <= r; i++) {
-      for (const [x, z] of [[i, -r], [i, r], [-r, i], [r, i]]) {
-        if (generator.surfaceHeight(x * 8, z * 8) - 1 >= SEA_LEVEL + 2) return { x: x * 8, z: z * 8 };
-      }
-    }
-  }
-  return { x: 0, z: 0 };
-}
-
-const land = findLand();
-const spawn: Vec3 = { x: land.x + 0.5, y: WORLD_HEIGHT, z: land.z + 0.5 };
-const player = new Player(world, spawn);
-const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
-terrain.renderDistance = view;
-try {
-  terrain.supply = new WorkerSupply(seed);
-} catch (e) {
-  console.warn("Craft: no module workers, generating chunks on the main thread.", e);
-}
-sim.add(player);
-const ticks = sim.add(new WorldTicks(world, new Map(), seed));
-// Scheduled ticks leave with their chunk (saves will keep them)
-terrain.onUnload = (chunk) => ticks.takeChunk(chunk.cx, chunk.cz);
-const interaction = sim.add(new BlockInteraction(world, player, terrain));
-// The ground to start on right away; the rest of the view arrives from the worker
-terrain.loadNow(1);
-// Stand on the highest block of the spawn column (a tree, maybe)
-let ground = WORLD_HEIGHT - 1;
-while (ground > 0 && !world.isSolid(land.x, ground, land.z)) ground--;
-player.position.y = ground + 1;
-
-// Sky and fog, and the view under water
-function skyFog(): Fog {
-  const d = terrain.renderDistance;
-  return { color: SKY, near: d * 0.5, far: d, mode: "distance" };
-}
-sim.scene.fog = skyFog();
-let underwater = false;
-sim.onUpdate(() => {
-  if (player.eyeInWater === underwater) return;
-  underwater = player.eyeInWater;
-  sim.scene.background = underwater ? UNDERWATER : SKY;
-  sim.scene.fog = underwater ? { color: UNDERWATER, near: 1, far: 14, mode: "distance" } : skyFog();
-  underwaterEl.hidden = !underwater;
-});
-
-// Pointer lock: click to play, Esc to get the mouse back. Where the browser refuses pointer lock (some
-// embedded or automated browsers), dragging looks around and a click without dragging acts instead.
-const locked = (): boolean => document.pointerLockElement === canvas;
-let dragMode = false;
-let drag: { x: number; y: number; button: number; moved: boolean } | null = null;
-
-function setPlaying(on: boolean): void {
-  player.controls = on;
-  overlay.hidden = on;
-  interaction.release(0);
-  interaction.release(2);
-}
-
-overlay.addEventListener("click", () => {
-  Promise.resolve(canvas.requestPointerLock()).catch(() => {
-    dragMode = true;
-    setPlaying(true);
+/** Holds a lock on the world while the page is open, so two tabs can't write it. False if another tab has it. */
+function lockWorld(id: string): Promise<boolean> {
+  const locks = globalThis.navigator?.locks;
+  if (!locks) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    void locks.request(`craft-world-${id}`, { ifAvailable: true }, (lock) => {
+      resolve(lock !== null);
+      // Never released: the lock goes with the page
+      return lock ? new Promise<void>(() => {}) : undefined;
+    });
   });
-});
-document.addEventListener("pointerlockchange", () => setPlaying(locked()));
-document.addEventListener("mousemove", (e) => {
-  if (locked()) {
-    player.look(e.movementX, e.movementY);
-  } else if (drag) {
-    player.look(e.movementX, e.movementY);
-    if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
+}
+
+function message(text: string): void {
+  menu.replaceChildren(
+    h(
+      "div",
+      { class: "screen" },
+      h("h2", {}, text),
+      h("div", { class: "buttons" }, h("button", { autofocus: true, onclick: () => (location.href = location.pathname) }, "Back to title")),
+    ),
+  );
+}
+
+async function playSaved(id: string): Promise<void> {
+  menu.replaceChildren(h("div", { class: "screen" }, h("h2", {}, "Loading world…")));
+  const store = await openStore();
+  if (!store) return message("This browser doesn't let Craft keep worlds here, so saved worlds can't be opened.");
+  let meta;
+  try {
+    meta = await store.getWorld(id);
+  } catch (e) {
+    return message(`This world can't be opened. ${(e as Error).message}`);
   }
-});
-canvas.addEventListener("mousedown", (e) => {
-  if (locked()) interaction.press(e.button);
-  else if (dragMode && player.controls) drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
-});
-window.addEventListener("mouseup", (e) => {
-  if (drag && !drag.moved) interaction.press(drag.button);
-  drag = null;
-  interaction.release(e.button);
-});
-canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-window.addEventListener(
-  "wheel",
-  (e) => {
-    if (player.controls && e.deltaY !== 0) interaction.select(interaction.selected + Math.sign(e.deltaY));
-  },
-  { passive: true },
-);
-window.addEventListener("keydown", (e) => {
-  const digit = /^Digit([1-9])$/.exec(e.code);
-  if (digit) interaction.select(Number(digit[1]) - 1);
-  if (e.code === "Escape" && dragMode) setPlaying(false);
-});
+  if (!meta) return message("This world doesn't exist anymore.");
+  if (!(await lockWorld(id))) return message(`“${meta.name}” is open in another tab.`);
+  const [player, chunks] = await Promise.all([store.getPlayer(id), store.chunkKeys(id)]);
+  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { store, meta, player, chunks } });
+}
 
-// Hotbar
-const slots = HOTBAR.map((block, i) => {
-  const slot = document.createElement("div");
-  slot.className = "slot";
-  const info = BLOCKS[block];
-  slot.style.setProperty("--top", info.top);
-  slot.style.setProperty("--side", info.side);
-  const tile = tiles?.get(tileFor(block, Dir.PosX));
-  if (tile) slot.style.setProperty("--icon", `url(${tileImage(tile)}) center / cover`);
-  slot.title = info.label;
-  const key = document.createElement("span");
-  key.textContent = String(i + 1);
-  slot.append(key);
-  hotbarEl.append(slot);
-  return slot;
-});
-let nameTimer = 0;
-interaction.onSelect = (slot) => {
-  slots.forEach((el, i) => el.classList.toggle("selected", i === slot));
-  blockName.textContent = BLOCKS[HOTBAR[slot]].label;
-  blockName.classList.add("shown");
-  clearTimeout(nameTimer);
-  nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
-};
-slots[0].classList.add("selected");
-
-sim.start();
-// For poking at the running game from the browser console
-Object.assign(globalThis, { craft: { sim, backend, world, player, interaction, terrain, ticks } });
+const worldId = params.get("world");
+const seed = params.get("seed");
+if (worldId) {
+  await playSaved(worldId);
+} else if (seed !== null) {
+  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { seed: seed || "craft" } });
+} else {
+  await new TitleScreen(menu, await openStore(), settings).show();
+}

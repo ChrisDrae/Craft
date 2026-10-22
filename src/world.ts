@@ -129,6 +129,8 @@ export class VoxelWorld {
     const lz = z & 15;
     const s = y >> 4;
     chunk.set(lx, y, lz, state);
+    chunk.unsaved = true;
+    chunk.packed = null;
     chunk.sections[s].dirty = true;
     if (ly === 0 && s > 0) chunk.sections[s - 1].dirty = true;
     if (ly === CHUNK_SIZE - 1 && s < SECTIONS - 1) chunk.sections[s + 1].dirty = true;

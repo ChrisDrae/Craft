@@ -1,5 +1,5 @@
 import { TerrainGenerator } from "./generator.js";
-import { generateChunk, type GenerateRequest, type GeneratedChunk } from "./generation.js";
+import { generatePackedChunk, type GenerateRequest, type GeneratedChunk } from "./generation.js";
 
 /** The worker's side of WorkerSupply: generates the chunks it's asked for and posts their blocks back. */
 const scope = self as unknown as {
@@ -8,14 +8,14 @@ const scope = self as unknown as {
 };
 const generators: Map<string, TerrainGenerator> = new Map();
 
-scope.onmessage = (e) => {
+scope.onmessage = async (e) => {
   const { seed, cx, cz } = e.data;
   let generator = generators.get(seed);
   if (!generator) {
     generator = new TerrainGenerator(seed);
     generators.set(seed, generator);
   }
-  const data = generateChunk(generator, cx, cz);
+  const data = await generatePackedChunk(generator, cx, cz);
   // The blocks move to the main thread instead of being copied
-  scope.postMessage(data, data.sections.flatMap((s) => (s ? [s.buffer] : [])));
+  scope.postMessage(data, [...data.sections.flatMap((s) => (s ? [s.buffer] : [])), data.packed!.blocks.buffer]);
 };

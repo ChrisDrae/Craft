@@ -78,18 +78,30 @@ export class WorldTicks extends SimObject {
     this.push({ x, y, z, block, due: this.time + Math.max(1, delay), order: this.order++ });
   }
 
-  /** Takes out the scheduled ticks of a chunk that is being unloaded (to be saved with it). */
-  takeChunk(cx: number, cz: number): ScheduledTick[] {
-    const taken: ScheduledTick[] = [];
-    const kept: Entry[] = [];
-    for (const e of this.queue) {
-      if (e.x >> 4 === cx && e.z >> 4 === cz) {
-        taken.push({ x: e.x, y: e.y, z: e.z, block: e.block, due: e.due });
-        this.pending.delete(positionKey(e.x, e.y, e.z));
-      } else {
-        kept.push(e);
-      }
+  /** The scheduled ticks waiting in a chunk, left in place (for saving a loaded chunk). */
+  inChunk(cx: number, cz: number): ScheduledTick[] {
+    return this.queue
+      .filter((e) => e.x >> 4 === cx && e.z >> 4 === cz)
+      .sort((a, b) => (this.before(a, b) ? -1 : 1))
+      .map((e) => ({ x: e.x, y: e.y, z: e.z, block: e.block, due: e.due }));
+  }
+
+  /** Puts back scheduled ticks that were saved (or unloaded) with their chunk, in their order. */
+  restore(ticks: readonly ScheduledTick[]): void {
+    for (const t of ticks) {
+      const key = positionKey(t.x, t.y, t.z);
+      if (this.pending.has(key)) continue;
+      this.pending.add(key);
+      this.push({ x: t.x, y: t.y, z: t.z, block: t.block, due: t.due, order: this.order++ });
     }
+  }
+
+  /** Takes out the scheduled ticks of a chunk that is being unloaded (to be saved with it), in their order. */
+  takeChunk(cx: number, cz: number): ScheduledTick[] {
+    const taken = this.inChunk(cx, cz);
+    if (taken.length === 0) return taken;
+    const kept = this.queue.filter((e) => e.x >> 4 !== cx || e.z >> 4 !== cz);
+    for (const t of taken) this.pending.delete(positionKey(t.x, t.y, t.z));
     this.queue.length = 0;
     for (const e of kept) this.push(e);
     return taken;
