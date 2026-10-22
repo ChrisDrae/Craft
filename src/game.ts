@@ -1,23 +1,25 @@
-import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type Fog, type RenderBackend } from "projector";
+import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
 import { BLOCKS, Dir, HOTBAR } from "./blocks.js";
 import { WORLD_HEIGHT } from "./chunk.js";
 import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
+import { LightMap } from "./lightmap.js";
 import { Player } from "./player.js";
 import type { PlayerRecord, WorldMeta } from "./save/format.js";
 import type { WorldStore } from "./save/store.js";
 import { WorldSave } from "./save/worldSave.js";
 import { viewDistance, type Settings } from "./settings.js";
+import { Sky, css } from "./sky.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
-import { atlasTexture, blockAtlas, importedTiles, proceduralTiles, tileFor, tileImage } from "./textures.js";
+import { atlasTexture, blockAtlas, importedTextures, proceduralTiles, tileFor, tileImage } from "./textures.js";
 import { WorldTicks } from "./ticks.js";
 import { formatWhen, h } from "./ui/dom.js";
 import { optionsScreen } from "./ui/options.js";
 import { VoxelWorld } from "./world.js";
 
-const SKY = "#8fbcf0";
-const UNDERWATER = "#21467f";
+/** The color of water seen from inside, in full light. */
+const UNDERWATER: [number, number, number] = [0x21 / 255, 0x46 / 255, 0x7f / 255];
 /** Radians per pixel of mouse movement at 100% sensitivity. */
 const LOOK_SPEED = 0.0025;
 
@@ -87,13 +89,15 @@ export async function startGame(options: GameOptions): Promise<void> {
   const urlView = Number(new URLSearchParams(location.search).get("view"));
   const view = (): number => (urlView >= 16 ? Math.min(160, urlView) : viewDistance(settings, textured));
   // Minecraft's own textures when they were imported (npm run textures), Craft's procedural ones otherwise
-  const imported = textured ? await importedTiles() : null;
-  if (imported) console.info(`Craft: block textures from Minecraft ${imported.version}`);
+  const imported = textured ? await importedTextures() : null;
+  if (imported) console.info(`Craft: textures from Minecraft ${imported.version}`);
   const tiles = textured ? (imported?.tiles ?? proceduralTiles()) : null;
+  // Light levels to colors, redrawn through the day
+  const lightMap = new LightMap();
   let textures: TerrainTextures | null = null;
   if (tiles) {
     const { atlas, uvs } = blockAtlas(tiles);
-    textures = { texture: atlasTexture(atlas), uvs };
+    textures = { texture: atlasTexture(atlas), uvs, lightMap: lightMap.texture };
   }
   const sim = new Simulation({
     canvas,
@@ -101,7 +105,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     orbit: false,
     keyboard: ["Space"],
     camera: { fov: (settings.fov * Math.PI) / 180, near: 0.05 },
-    scene: { background: SKY },
+    scene: { background: css(UNDERWATER) },
   });
   // Tops in full light, sides a step or two darker depending on the sun, bottoms darkest
   sim.scene.ambient.intensity = 0.3;
@@ -113,6 +117,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   player.sensitivity = LOOK_SPEED * settings.sensitivity;
   const terrain = sim.add(new Terrain(world, sim.scene, player.position, textures));
   terrain.renderDistance = view();
+  terrain.lightMap = lightMap;
   let chunks: ChunkSupply = new DirectSupply();
   try {
     chunks = new WorkerSupply(seed);
@@ -122,6 +127,9 @@ export async function startGame(options: GameOptions): Promise<void> {
   sim.add(player);
   const ticks = sim.add(new WorldTicks(world, new Map(), seed));
   const interaction = sim.add(new BlockInteraction(world, player, terrain));
+  // After the player, so it follows the camera where the player put it; drawn on WebGL only
+  const sky = sim.add(new Sky(ticks, lightMap, imported?.sky ?? null));
+  sky.visible = textured;
 
   // The save, if this world is kept: it supplies saved chunks and takes unloaded ones
   let save: WorldSave | null = null;
@@ -175,20 +183,33 @@ export async function startGame(options: GameOptions): Promise<void> {
     }
   }
 
-  // Sky and fog, and the view under water
-  function skyFog(): Fog {
+  // Fog and the background: the sky's horizon color, darker the less sky light reaches the eyes (black in
+  // caves); under water a short blue fog as bright as the light around
+  let fogKey = "";
+  function updateFog(): void {
+    const e = sim.camera.position;
+    const light = world.getLight(Math.floor(e.x), Math.floor(e.y), Math.floor(e.z));
+    const underwater = player.eyeInWater;
+    let color: [number, number, number];
+    if (underwater) {
+      const k = Math.max(0.12, lightMap.brightness(light));
+      color = [UNDERWATER[0] * k, UNDERWATER[1] * k, UNDERWATER[2] * k];
+    } else {
+      const k = 0.04 + 0.96 * ((light >> 4) / 15) ** 2;
+      color = [sky.horizon[0] * k, sky.horizon[1] * k, sky.horizon[2] * k];
+    }
     const d = terrain.renderDistance;
-    return { color: SKY, near: d * 0.5, far: d, mode: "distance" };
-  }
-  sim.scene.fog = skyFog();
-  let underwater = false;
-  sim.onUpdate(() => {
-    if (player.eyeInWater === underwater) return;
-    underwater = player.eyeInWater;
-    sim.scene.background = underwater ? UNDERWATER : SKY;
-    sim.scene.fog = underwater ? { color: UNDERWATER, near: 1, far: 14, mode: "distance" } : skyFog();
+    const near = underwater ? 1 : d * 0.5;
+    const far = underwater ? 14 : d;
+    // Only when it changes visibly: the canvas renderer makes new styles for every fog color
+    const key = `${css(color)}|${near}|${far}`;
+    if (key === fogKey) return;
+    fogKey = key;
+    sim.scene.fog = { color: css(color), near, far, mode: "distance" };
+    sim.scene.background = css(color);
     underwaterEl.hidden = !underwater;
-  });
+  }
+  sim.onUpdate(updateFog);
 
   // Saving: when the tab is hidden (switched away from, or about to close) and before quitting
   document.addEventListener("visibilitychange", () => {
@@ -292,7 +313,8 @@ export async function startGame(options: GameOptions): Promise<void> {
         textured,
         (s) => {
           terrain.renderDistance = view();
-          if (!underwater) sim.scene.fog = skyFog();
+          fogKey = "";
+          updateFog();
           sim.camera.fov = (s.fov * Math.PI) / 180;
           player.sensitivity = LOOK_SPEED * s.sensitivity;
         },

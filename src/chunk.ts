@@ -49,6 +49,12 @@ export class Section {
   count: number = 0;
   /** Opaque blocks: when all are, only the section's outer layer can have faces. */
   opaque: number = 0;
+  /**
+   * Light per block, sky light in the high 4 bits and block light in the low ones (see light.ts), or null
+   * while the whole section has the same light, `lightFill`.
+   */
+  light: Uint8Array | null = null;
+  lightFill: number = 0xf0;
   /** Exposed faces (see packFace); valid while the section is not dirty. */
   faces: Int32Array = new Int32Array(0);
   faceCount: number = 0;

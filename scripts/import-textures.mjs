@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copies the block textures Craft uses out of your own Minecraft installation (or a resource pack zip) into
+// Copies the block and sky textures Craft uses out of your own Minecraft installation (or a resource pack zip) into
 // textures/minecraft/, which git ignores and builds leave out: the textures are Mojang's, so they stay on
 // your machine.
 //
@@ -12,8 +12,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-/** The textures Craft draws (src/textures.ts TILES), plus the overlay tinted onto grass sides. */
-const NAMES = [
+/** The block textures Craft draws (src/textures.ts TILES), plus the overlay tinted onto grass sides. */
+const BLOCKS = [
   "grass_block_top",
   "grass_block_side",
   "grass_block_side_overlay",
@@ -31,8 +31,21 @@ const NAMES = [
   "iron_ore",
   "gold_ore",
   "bedrock",
+  "torch",
+  "glowstone",
 ];
-const PREFIX = "assets/minecraft/textures/block/";
+const PHASES = ["full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"];
+const TEXTURES = "assets/minecraft/textures/";
+/** Every texture by the name it's saved under, with the paths it may have in the jar (newer versions first). */
+const WANTED = new Map([
+  ...BLOCKS.map((n) => [n, [`block/${n}.png`]]),
+  ["sun", ["environment/celestial/sun.png", "environment/sun.png"]],
+  ["clouds", ["environment/clouds.png"]],
+  ...PHASES.map((p) => [`moon_${p}`, [`environment/celestial/moon/${p}.png`]]),
+  // Before the moon came in separate files: all phases on one sheet
+  ["moon_phases", ["environment/moon_phases.png"]],
+]);
+const PATHS = new Set([...WANTED.values()].flat().map((p) => TEXTURES + p));
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "textures", "minecraft");
 
 /** The .minecraft folder of this platform. */
@@ -112,17 +125,19 @@ if (!existsSync(source.jar)) {
   process.exit(1);
 }
 
-const files = readZip(source.jar, (name) => name.startsWith(PREFIX) && NAMES.includes(name.slice(PREFIX.length, -4)) && name.endsWith(".png"));
+const files = readZip(source.jar, (name) => PATHS.has(name));
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 const found = [];
-for (const name of NAMES) {
-  const png = files.get(`${PREFIX}${name}.png`);
+for (const [name, paths] of WANTED) {
+  const png = paths.map((p) => files.get(TEXTURES + p)).find((f) => f);
   if (!png) continue;
   writeFileSync(join(OUT, `${name}.png`), png);
   found.push(name);
 }
-const missing = NAMES.filter((n) => !found.includes(n));
+// Separate moon phases make the old sheet unnecessary
+const phases = PHASES.every((p) => found.includes(`moon_${p}`));
+const missing = [...WANTED.keys()].filter((n) => !found.includes(n) && !(n === "moon_phases" && phases) && !(n.startsWith("moon_") && n !== "moon_phases" && found.includes("moon_phases")));
 writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify({ source: basename(source.jar), version: source.version, textures: found }, null, 2)}\n`);
-console.log(`Imported ${found.length} of ${NAMES.length} textures from ${source.jar} into ${OUT}.`);
+console.log(`Imported ${found.length} textures from ${source.jar} into ${OUT}.`);
 if (missing.length > 0) console.log(`Not in it (Craft draws its own instead): ${missing.join(", ")}`);

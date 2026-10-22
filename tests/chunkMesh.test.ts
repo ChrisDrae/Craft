@@ -27,7 +27,7 @@ function meshesOf(blocks: Array<[number, number, number, number]>, fancyLeaves =
   world.fancyLeaves = fancyLeaves;
   const chunk = world.load(0, 0);
   world.buildFaces(chunk);
-  return buildChunkMeshes(chunk, testUVs());
+  return buildChunkMeshes(world, chunk, testUVs());
 }
 
 interface Quad {

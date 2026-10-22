@@ -17,6 +17,8 @@ export const Block = {
   IronOre: 12,
   GoldOre: 13,
   Bedrock: 14,
+  Torch: 15,
+  Glowstone: 16,
 } as const;
 export type Block = (typeof Block)[keyof typeof Block];
 
@@ -52,6 +54,10 @@ export interface BlockInfo {
   readonly solid: boolean;
   readonly opacity: Opacity;
   readonly breakable: boolean;
+  /** Light level the block gives off, 0-15. */
+  readonly emission: number;
+  /** How much more light dims passing into the block than through air: 15 stops it (opaque blocks). */
+  readonly lightFilter: number;
   /** Fill colors of the top, the sides and the bottom (Canvas 2D, the hotbar without textures). */
   readonly top: string;
   readonly side: string;
@@ -74,6 +80,8 @@ interface BlockOptions {
   opacity?: Opacity;
   breakable?: boolean;
   properties?: Property[];
+  emission?: number;
+  lightFilter?: number;
 }
 
 /** Faces of the same color share one material, so they share the renderer's styles too. */
@@ -102,6 +110,8 @@ function block(id: Block, name: string, label: string, colors: Colors, options: 
     solid: options.solid ?? true,
     opacity,
     breakable: options.breakable ?? true,
+    emission: options.emission ?? 0,
+    lightFilter: options.lightFilter ?? (opacity === "opaque" ? 15 : 0),
     top,
     side,
     bottom,
@@ -112,6 +122,8 @@ function block(id: Block, name: string, label: string, colors: Colors, options: 
 }
 
 const AXIS: Property = { name: "axis", values: ["y", "x", "z"] };
+/** Where a torch points: up on the floor, or away from the wall it hangs on. */
+const FACING: Property = { name: "facing", values: ["up", "north", "south", "east", "west"] };
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 
 /** Everything about a block, indexed by its id. */
@@ -121,9 +133,9 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Dirt, "dirt", "dirt", { top: "#86603f" }),
   block(Block.Stone, "stone", "stone", { top: "#808080" }),
   block(Block.Sand, "sand", "sand", { top: "#dcd29c" }),
-  block(Block.Water, "water", "water", { top: "#3d6fdc" }, { solid: false, opacity: "translucent", breakable: false }),
+  block(Block.Water, "water", "water", { top: "#3d6fdc" }, { solid: false, opacity: "translucent", breakable: false, lightFilter: 2 }),
   block(Block.Log, "oak_log", "log", { top: "#a8895a", side: "#664f31" }, { properties: [AXIS] }),
-  block(Block.Leaves, "oak_leaves", "leaves", { top: "#3e8a2a" }, { opacity: "cutout" }),
+  block(Block.Leaves, "oak_leaves", "leaves", { top: "#3e8a2a" }, { opacity: "cutout", lightFilter: 1 }),
   block(Block.Planks, "oak_planks", "planks", { top: "#b38d55" }),
   block(Block.Cobblestone, "cobblestone", "cobblestone", { top: "#6c6c6c" }),
   block(Block.Bricks, "bricks", "bricks", { top: "#985040" }),
@@ -131,6 +143,8 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.IronOre, "iron_ore", "iron ore", { top: "#b8987c" }),
   block(Block.GoldOre, "gold_ore", "gold ore", { top: "#e6c53e" }),
   block(Block.Bedrock, "bedrock", "bedrock", { top: "#4d4950" }, { breakable: false }),
+  block(Block.Torch, "torch", "torch", { top: "#ffd86a", side: "#8a6a3a" }, { solid: false, opacity: "cutout", properties: [FACING], emission: 14 }),
+  block(Block.Glowstone, "glowstone", "glowstone", { top: "#e8c06a" }, { emission: 15 }),
 ];
 
 // States: the default ones take the blocks' own ids, the others the ids after them
@@ -212,12 +226,18 @@ export function stateByName(text: string): number | null {
 }
 
 /**
- * The state of a block placed against a face with normal (nx, ny, nz): blocks with an axis (logs) lie
- * along it, everything else takes its default state.
+ * The state of a block placed against a face with normal (nx, ny, nz), or null where it can't go: blocks
+ * with an axis (logs) lie along the normal, torches stand on floors and hang on walls (not ceilings),
+ * everything else takes its default state.
  */
-export function placementState(block: Block, nx: number, ny: number, nz: number): number {
-  if (!BLOCKS[block].properties.includes(AXIS)) return block;
-  return stateOf(block, { axis: nx !== 0 ? "x" : nz !== 0 ? "z" : "y" });
+export function placementState(block: Block, nx: number, ny: number, nz: number): number | null {
+  const props = BLOCKS[block].properties;
+  if (props.includes(AXIS)) return stateOf(block, { axis: nx !== 0 ? "x" : nz !== 0 ? "z" : "y" });
+  if (props.includes(FACING)) {
+    if (ny < 0) return null;
+    return stateOf(block, { facing: ny > 0 ? "up" : nx > 0 ? "east" : nx < 0 ? "west" : nz > 0 ? "south" : "north" });
+  }
+  return block;
 }
 
 /** Lookup tables by state id for the hot loops: 1 where the flag is set. */
@@ -225,6 +245,9 @@ export const SOLID: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].s
 export const OPAQUE: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].opacity === "opaque" ? 1 : 0));
 export const CUTOUT: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].opacity === "cutout" ? 1 : 0));
 export const TRANSLUCENT: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].opacity === "translucent" ? 1 : 0));
+/** Light each state gives off (0-15), and how much it dims light passing into it (15 stops it). */
+export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b) => BLOCKS[b].emission);
+export const LIGHT_FILTER: Uint8Array = Uint8Array.from(stateBlock, (b) => BLOCKS[b].lightFilter);
 
 /** The look (Face) each state shows in each direction, at (state * 6 + dir). */
 export const FACE_LOOK: Uint8Array = new Uint8Array(STATE_COUNT * 6);
@@ -256,20 +279,58 @@ export function faceMaterial(state: number, dir: number): Material {
 /** A unit cube, as the boxes of a shape (min x, y, z, max x, y, z per box, in the block's own coordinates). */
 const CUBE: Float64Array = Float64Array.of(0, 0, 0, 1, 1, 1);
 const NOTHING: Float64Array = new Float64Array(0);
+const px = (v: number): number => v / 16;
+
+/** A block drawn as a box smaller than its cell: the box, and the box whose position picks the texture. */
+export interface Model {
+  box: Float64Array;
+  uv: Float64Array;
+}
+
+/** A torch on the floor: a stick 2 pixels thick and 10 high in the middle of the cell, as on its texture. */
+const STANDING = Float64Array.of(px(7), 0, px(7), px(9), px(10), px(9));
+
+function torchModel(facing: string): Model {
+  if (facing === "up") return { box: STANDING, uv: STANDING };
+  // On a wall: the same stick a little raised, its back a pixel from the wall
+  const lo = px(1);
+  const hi = px(3);
+  const [x0, x1] = facing === "east" ? [lo, hi] : facing === "west" ? [1 - hi, 1 - lo] : [px(7), px(9)];
+  const [z0, z1] = facing === "south" ? [lo, hi] : facing === "north" ? [1 - hi, 1 - lo] : [px(7), px(9)];
+  return { box: Float64Array.of(x0, px(3.5), z0, x1, px(13.5), z1), uv: STANDING };
+}
+
+/** The model of every state that isn't a full cube (null for cubes). */
+export const MODELS: readonly (Model | null)[] = Array.from({ length: STATE_COUNT }, (_, s) =>
+  STATE_BLOCK[s] === Block.Torch ? torchModel(propertyOf(s, "facing")) : null,
+);
+
+const SUPPORT_DIR: Readonly<Record<string, number>> = { up: Dir.Down, north: Dir.PosZ, south: Dir.NegZ, east: Dir.NegX, west: Dir.PosX };
+
+/**
+ * The direction (Dir) of the block a state hangs on and can't stay without (torches), or -1. A standing
+ * torch needs the block below it, one on a wall the wall behind it.
+ */
+export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s) =>
+  STATE_BLOCK[s] === Block.Torch ? SUPPORT_DIR[propertyOf(s, "facing")] : -1,
+);
+
 /** Boxes that stop entities, per state. */
 export const COLLISION: readonly Float64Array[] = stateBlock.map((b) => (BLOCKS[b].solid ? CUBE : NOTHING));
-/** Boxes the crosshair can hit, per state: everything but air and water. */
-export const SELECTION: readonly Float64Array[] = stateBlock.map((b) => (b === Block.Air || b === Block.Water ? NOTHING : CUBE));
+/** Boxes the crosshair can hit, per state: everything but air and water (a model's box for models). */
+export const SELECTION: readonly Float64Array[] = stateBlock.map((b, s) =>
+  b === Block.Air || b === Block.Water ? NOTHING : (MODELS[s]?.box ?? CUBE),
+);
 
 /** What the hotbar slots 1-9 place. */
 export const HOTBAR: readonly Block[] = [
-  Block.Grass,
   Block.Dirt,
   Block.Stone,
   Block.Cobblestone,
   Block.Planks,
   Block.Log,
   Block.Leaves,
-  Block.Sand,
   Block.Bricks,
+  Block.Torch,
+  Block.Glowstone,
 ];

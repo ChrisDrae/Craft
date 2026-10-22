@@ -28,7 +28,7 @@ describe("block states", () => {
   it("has a state per value of a log's axis, after the defaults", () => {
     const log = BLOCKS[Block.Log];
     expect(log.states).toHaveLength(3);
-    expect(STATE_COUNT).toBe(BLOCKS.length + 2);
+    expect(STATE_COUNT).toBe(BLOCKS.reduce((n, b) => n + b.states.length, 0));
     for (const axis of ["x", "y", "z"]) {
       const s = stateOf(Block.Log, { axis });
       expect(blockOf(s)).toBe(Block.Log);
@@ -51,9 +51,9 @@ describe("block states", () => {
   });
 
   it("lays logs along the face they are placed against", () => {
-    expect(propertyOf(placementState(Block.Log, 1, 0, 0), "axis")).toBe("x");
-    expect(propertyOf(placementState(Block.Log, 0, -1, 0), "axis")).toBe("y");
-    expect(propertyOf(placementState(Block.Log, 0, 0, -1), "axis")).toBe("z");
+    expect(propertyOf(placementState(Block.Log, 1, 0, 0)!, "axis")).toBe("x");
+    expect(propertyOf(placementState(Block.Log, 0, -1, 0)!, "axis")).toBe("y");
+    expect(propertyOf(placementState(Block.Log, 0, 0, -1)!, "axis")).toBe("z");
     expect(placementState(Block.Stone, 1, 0, 0)).toBe(Block.Stone);
   });
 

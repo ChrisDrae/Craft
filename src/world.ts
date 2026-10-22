@@ -1,8 +1,15 @@
-import { Block, COLLISION, CUTOUT, DIR_X, DIR_Y, DIR_Z, OPAQUE, SOLID, STATE_BLOCK } from "./blocks.js";
+import { Block, COLLISION, CUTOUT, DIR_X, DIR_Y, DIR_Z, MODELS, OPAQUE, SOLID, STATE_BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
+import { OPEN_SKY, joinChunk, lightChunk, relight, type LightWorld } from "./light.js";
 
-/** Chunks by position, generated on demand, with block access in world coordinates. */
-export class VoxelWorld {
+function grow(faces: Int32Array): Int32Array {
+  const grown = new Int32Array(Math.max(256, faces.length * 2));
+  grown.set(faces);
+  return grown;
+}
+
+/** Chunks by position, generated on demand, with block and light access in world coordinates. */
+export class VoxelWorld implements LightWorld {
   readonly chunks: Map<number, Chunk> = new Map();
   readonly generator: ChunkGenerator;
   /**
@@ -28,17 +35,21 @@ export class VoxelWorld {
     return this.chunks.has(VoxelWorld.key(Math.floor(x) >> 4, Math.floor(z) >> 4));
   }
 
-  /** The chunk, generated first if it doesn't exist yet. */
+  /** The chunk, generated (and lit) first if it doesn't exist yet. */
   load(cx: number, cz: number): Chunk {
     const existing = this.chunk(cx, cz);
     if (existing) return existing;
     const chunk = new Chunk(cx, cz);
     this.generator.generate(chunk);
+    lightChunk(chunk);
     this.insert(chunk);
     return chunk;
   }
 
-  /** Adds a chunk made elsewhere (by a worker), replacing any chunk at its place. */
+  /**
+   * Adds a chunk made elsewhere (by a worker, lit on its own by lightChunk), replacing any chunk at its
+   * place, and joins its light with the neighbors'.
+   */
   insert(chunk: Chunk): void {
     this.chunks.set(VoxelWorld.key(chunk.cx, chunk.cz), chunk);
     // Their border faces were hidden while this chunk was missing
@@ -46,6 +57,7 @@ export class VoxelWorld {
     this.markColumnDirty(chunk.cx + 1, chunk.cz);
     this.markColumnDirty(chunk.cx, chunk.cz - 1);
     this.markColumnDirty(chunk.cx, chunk.cz + 1);
+    joinChunk(this, chunk);
   }
 
   /**
@@ -108,6 +120,51 @@ export class VoxelWorld {
     return blocks ? blocks[sectionIndex(x & 15, y & 15, z & 15)] : Block.Air;
   }
 
+  /**
+   * Light at a block (see light.ts): open sky above the world, darkness below it and in missing chunks (no
+   * light comes from a chunk that isn't there; it joins in when it arrives).
+   */
+  getLight(x: number, y: number, z: number): number {
+    if (y < 0) return 0;
+    if (y >= WORLD_HEIGHT) return OPEN_SKY;
+    const chunk = this.chunks.get(VoxelWorld.key(x >> 4, z >> 4));
+    if (!chunk) return 0;
+    const s = chunk.sections[y >> 4];
+    return s.light ? s.light[sectionIndex(x & 15, y & 15, z & 15)] : s.lightFill;
+  }
+
+  /**
+   * Sets the light at a block of a loaded chunk, and marks the sections whose meshes show it: faces take
+   * their light from the blocks in front of them and around their corners, up to two blocks away.
+   */
+  setLight(x: number, y: number, z: number, light: number): boolean {
+    if (y < 0 || y >= WORLD_HEIGHT) return false;
+    const cx = x >> 4;
+    const cz = z >> 4;
+    const chunk = this.chunk(cx, cz);
+    if (!chunk) return false;
+    const s = y >> 4;
+    const section = chunk.sections[s];
+    const i = sectionIndex(x & 15, y & 15, z & 15);
+    if (!section.light) {
+      if (section.lightFill === light) return true;
+      section.light = new Uint8Array(SECTION_VOLUME).fill(section.lightFill);
+    }
+    if (section.light[i] === light) return true;
+    section.light[i] = light;
+    section.dirty = true;
+    const lx = x & 15;
+    const ly = y & 15;
+    const lz = z & 15;
+    if (ly <= 1 && s > 0) chunk.sections[s - 1].dirty = true;
+    if (ly >= 14 && s < SECTIONS - 1) chunk.sections[s + 1].dirty = true;
+    if (lx <= 1) this.markDirty(cx - 1, cz, s);
+    if (lx >= 14) this.markDirty(cx + 1, cz, s);
+    if (lz <= 1) this.markDirty(cx, cz - 1, s);
+    if (lz >= 14) this.markDirty(cx, cz + 1, s);
+    return true;
+  }
+
   isSolid(x: number, y: number, z: number): boolean {
     return SOLID[this.get(x, y, z)] === 1;
   }
@@ -138,13 +195,15 @@ export class VoxelWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz, s);
     if (lz === 0) this.markDirty(cx, cz - 1, s);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1, s);
+    relight(this, x, y, z);
     return true;
   }
 
   /**
    * Rebuilds the face lists of a chunk's dirty sections. A face is exposed when the block next to it
    * doesn't hide it: air, or water next to anything but water (and leaves, with fancyLeaves). Faces
-   * toward a chunk that isn't loaded yet stay hidden until it is.
+   * toward a chunk that isn't loaded yet stay hidden until it is. Blocks drawn as a smaller model box
+   * (torches) show all their faces and hide none of their neighbors'.
    */
   buildFaces(chunk: Chunk): void {
     for (let s = 0; s < SECTIONS; s++) {
@@ -183,10 +242,16 @@ export class VoxelWorld {
             const above = y < CHUNK_SIZE - 1 ? blocks[sectionIndex(x, y + 1, z)] : sy < SECTIONS - 1 ? chunk.get(x, sy * CHUNK_SIZE + CHUNK_SIZE, z) : Block.Air;
             lowered = STATE_BLOCK[above] !== Block.Water;
           }
+          const model = MODELS[b] !== null;
           for (let d = 0; d < 6; d++) {
             const nx = x + DIR_X[d];
             const ny = y + DIR_Y[d];
             const nz = z + DIR_Z[d];
+            if (model) {
+              if (count === faces.length) faces = grow(faces);
+              faces[count++] = packFace(x, y, z, d, false, b);
+              continue;
+            }
             let n: number;
             if (nx >= 0 && nx < CHUNK_SIZE && ny >= 0 && ny < CHUNK_SIZE && nz >= 0 && nz < CHUNK_SIZE) {
               n = blocks[sectionIndex(nx, ny, nz)];
@@ -199,12 +264,9 @@ export class VoxelWorld {
               n = wy >= WORLD_HEIGHT ? Block.Air : other.get(nx & 15, wy, nz & 15);
             }
             const seeThrough = fancy && CUTOUT[n] === 1;
-            if (STATE_BLOCK[n] === kind ? !seeThrough : (OPAQUE[n] === 1 || CUTOUT[n] === 1) && !seeThrough) continue;
-            if (count === faces.length) {
-              const grown = new Int32Array(Math.max(256, faces.length * 2));
-              grown.set(faces);
-              faces = grown;
-            }
+            const hides = OPAQUE[n] === 1 || (CUTOUT[n] === 1 && MODELS[n] === null);
+            if (STATE_BLOCK[n] === kind ? !seeThrough : hides && !seeThrough) continue;
+            if (count === faces.length) faces = grow(faces);
             faces[count++] = packFace(x, y, z, d, lowered, b);
           }
         }

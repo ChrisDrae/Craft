@@ -2,7 +2,8 @@
 
 A Minecraft-style voxel world in the browser, built on [Projector](https://github.com/ChrisDrae/Projector):
 seeded terrain with oceans, beaches, cliffs, ores and trees; walking, swimming and climbing out of water;
-breaking and placing blocks.
+breaking and placing blocks; light levels with smooth lighting, torches and glowstone; a 20-minute day with
+the sun, the moon in its phases, stars and clouds.
 
 ```sh
 npm install
@@ -43,6 +44,6 @@ npm run textures                    # the newest release in your .minecraft fold
 npm run textures -- <file>          # a client jar or a resource pack zip
 ```
 
-This copies the 17 block textures Craft needs into `textures/minecraft/`, tinted at load time like a plains
-biome. They belong to Mojang, so they stay on your machine: git ignores the folder and `npm run build` leaves
+This copies the block textures Craft needs, and the sun, the moon's phases and the clouds, into
+`textures/minecraft/`; grass, leaves and water are tinted at load time like a plains biome. They belong to Mojang, so they stay on your machine: git ignores the folder and `npm run build` leaves
 it out (a built Craft always uses its own textures). Delete the folder to go back to them.

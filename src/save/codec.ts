@@ -1,6 +1,7 @@
 import { BLOCKS, OPAQUE, STATE_COUNT, blockByName, stateByName, stateName } from "../blocks.js";
 import { Chunk, SECTIONS, SECTION_VOLUME } from "../chunk.js";
 import type { ScheduledTick } from "../ticks.js";
+import { lightChunk } from "../light.js";
 import { FORMAT_VERSION, upgrade, type ChunkRecord } from "./format.js";
 
 /**
@@ -127,11 +128,15 @@ export async function chunkRecord(world: string, snap: ChunkSnapshot): Promise<C
   };
 }
 
-/** A saved chunk back in one piece, with its scheduled ticks (those of unknown blocks dropped). */
+/**
+ * A saved chunk back in one piece and lit on its own (saves don't keep light: it follows from the blocks),
+ * with its scheduled ticks (those of unknown blocks dropped).
+ */
 export async function readChunkRecord(record: ChunkRecord): Promise<{ chunk: Chunk; ticks: ScheduledTick[] }> {
   const r = upgrade("chunk", record);
   const { chunk, unknown } = decodeBlocks(r.cx, r.cz, r.palette, await decompress(r.blocks));
   if (unknown > 0) console.warn(`Craft: chunk ${r.cx}, ${r.cz} had ${unknown} blocks this version doesn't know; they are air now.`);
+  lightChunk(chunk);
   chunk.unsaved = false;
   const ticks: ScheduledTick[] = [];
   for (const t of r.ticks) {

@@ -12,14 +12,14 @@ function solid(r: number, g: number, b: number, a: number = 255): Uint8ClampedAr
 const first = (t: Uint8ClampedArray): number[] => Array.from(t.subarray(0, 4));
 
 describe("procedural textures", () => {
-  it("has pixels for every tile, cut out only in the leaves", () => {
+  it("has pixels for every tile, cut out only in the leaves and the torch", () => {
     const tiles = proceduralTiles();
     for (const name of TILES) {
       const t = tiles.get(name)!;
       expect(t).toHaveLength(TILE * TILE * 4);
       let holes = 0;
       for (let i = 3; i < t.length; i += 4) if (t[i] === 0) holes++;
-      if (name === "oak_leaves") expect(holes).toBeGreaterThan(0);
+      if (name === "oak_leaves" || name === "torch") expect(holes).toBeGreaterThan(0);
       else expect(holes).toBe(0);
     }
   });

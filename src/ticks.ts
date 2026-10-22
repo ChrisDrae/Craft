@@ -62,6 +62,11 @@ export class WorldTicks extends SimObject {
     this.random = new Random(seed);
   }
 
+  /** How far the clock is into the next tick (0-1), for smooth motion between ticks. */
+  get partial(): number {
+    return Math.min(1, this.elapsed * TICKS_PER_SECOND);
+  }
+
   /** Scheduled ticks waiting to run. */
   get scheduledCount(): number {
     return this.queue.length;

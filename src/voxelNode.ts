@@ -1,11 +1,18 @@
-import { Layer, clipPolygonNear, clipSegmentNear, type CustomNode, type EmitContext, type Scene, type Vec3 } from "projector";
-import { DIR_X, DIR_Y, DIR_Z, STATE_COUNT, faceMaterial } from "./blocks.js";
+import { Layer, Material, clipPolygonNear, clipSegmentNear, type CustomNode, type EmitContext, type Scene, type Vec3 } from "projector";
+import { DIR_X, DIR_Y, DIR_Z, MODELS, STATE_COUNT, faceMaterial } from "./blocks.js";
 import { CHUNK_SIZE, FACE_CORNERS as CORNERS, WATER_TOP } from "./chunk.js";
+import { faceCorners } from "./chunkMesh.js";
+import type { LightMap } from "./lightmap.js";
 import type { VoxelHit } from "./raycast.js";
+import { css } from "./sky.js";
 import type { VoxelWorld } from "./world.js";
 
 /** Fog shades per face style; each is one fill style, so this bounds the batch count. */
 const FOG_LEVELS = 24;
+/** Brightness steps from light levels per face style, for the same reason (twice: by sky or by torch light). */
+const LIGHT_STEPS = 8;
+/** The color of torchlight, which faces lit more by blocks than by the sky take on. */
+const WARM = [1, 0.84, 0.62];
 /**
  * Projected quads grow by this many pixels around their center. Neighbors drawn in different batches
  * would otherwise leave anti-aliased hairlines between them where the sky shows through.
@@ -31,11 +38,16 @@ export class VoxelNode implements CustomNode {
   renderDistance: number = 48;
   /** The block to outline, if any. */
   target: VoxelHit | null = null;
+  /** Light levels to brightness; without it every face is fully lit. */
+  lightMap: LightMap | null = null;
   readonly stats: VoxelStats = { chunks: 0, faces: 0 };
   private readonly world: VoxelWorld;
   private readonly scene: Scene;
-  /** Style ids by (state, direction, fog level), -1 until used; refilled every frame. */
-  private readonly styles: Int32Array = new Int32Array(STATE_COUNT * 6 * FOG_LEVELS);
+  /** Style ids by (state, direction, fog level, light step), -1 until used; refilled every frame. */
+  private readonly styles: Int32Array = new Int32Array(STATE_COUNT * 6 * FOG_LEVELS * LIGHT_STEPS * 2);
+  /** Each face material at every light step, made on first use. */
+  private readonly dimmed: Map<Material, Material[]> = new Map();
+  private readonly corners: Float64Array = new Float64Array(12);
   private readonly view: Float64Array = new Float64Array(12);
   private readonly clipped: Float64Array = new Float64Array(24);
   private readonly screen: Float64Array = new Float64Array(16);
@@ -109,27 +121,28 @@ export class VoxelNode implements CustomNode {
           const d = (f >> 12) & 7;
           const state = f >>> 16;
           const top = (f >> 15) & 1 ? WATER_TOP : 1;
+          const corners = faceCorners(state, d, top, this.corners);
 
-          // Only faces whose outer side the camera is on
+          // Only faces whose outer side the camera is on (the plane of a model's face is inside the cell)
           let front: boolean;
           switch (d) {
             case 0:
-              front = ex > x + 1;
+              front = ex > x + corners[0];
               break;
             case 1:
-              front = ex < x;
+              front = ex < x + corners[0];
               break;
             case 2:
-              front = ey > y + top;
+              front = ey > y + corners[1];
               break;
             case 3:
-              front = ey < y;
+              front = ey < y + corners[1];
               break;
             case 4:
-              front = ez > z + 1;
+              front = ez > z + corners[2];
               break;
             default:
-              front = ez < z;
+              front = ez < z + corners[2];
           }
           if (!front) continue;
 
@@ -141,11 +154,10 @@ export class VoxelNode implements CustomNode {
 
           let minZ = Infinity;
           let maxZ = -Infinity;
-          const c = d * 12;
           for (let k = 0; k < 12; k += 3) {
-            const wx = x + CORNERS[c + k];
-            const wy = y + CORNERS[c + k + 1] * top;
-            const wz = z + CORNERS[c + k + 2];
+            const wx = x + corners[k];
+            const wy = y + corners[k + 1];
+            const wz = z + corners[k + 2];
             const qz = v[2] * wx + v[6] * wy + v[10] * wz + v[14];
             view[k] = v[0] * wx + v[4] * wy + v[8] * wz + v[12];
             view[k + 1] = v[1] * wx + v[5] * wy + v[9] * wz + v[13];
@@ -195,7 +207,16 @@ export class VoxelNode implements CustomNode {
           }
 
           const depth = Math.sqrt(dist2);
-          queue.pushPolygon(layer, this.styleFor(ctx, state, d, depth), depth, screen, n);
+          // Light from the block in front of the face (a model's from its own)
+          let step = LIGHT_STEPS - 1;
+          if (this.lightMap) {
+            const model = MODELS[state] !== null;
+            const light = this.world.getLight(model ? x : x + DIR_X[d], model ? y : y + DIR_Y[d], model ? z : z + DIR_Z[d]);
+            step = Math.round(this.lightMap.brightness(light) * (LIGHT_STEPS - 1));
+            // Steps past LIGHT_STEPS are torchlit
+            if ((light & 15) > light >> 4) step += LIGHT_STEPS;
+          }
+          queue.pushPolygon(layer, this.styleFor(ctx, state, d, depth, step), depth, screen, n);
           drawn++;
         }
       }
@@ -212,23 +233,40 @@ export class VoxelNode implements CustomNode {
    * straight ahead at the face's distance gives it fog by distance instead, so the fog doesn't shift
    * as the view turns.
    */
-  private styleFor(ctx: EmitContext, state: number, d: number, distance: number): number {
+  private styleFor(ctx: EmitContext, state: number, d: number, distance: number, step: number): number {
     const fog = this.scene.fog;
     let level = 0;
     if (fog) {
       const t = (distance - fog.near) / (fog.far - fog.near);
       level = t <= 0 ? 0 : t >= 1 ? FOG_LEVELS - 1 : Math.round(t * (FOG_LEVELS - 1));
     }
-    const key = (state * 6 + d) * FOG_LEVELS + level;
+    const key = ((state * 6 + d) * FOG_LEVELS + level) * LIGHT_STEPS + step;
     let style = this.styles[key];
     if (style < 0) {
       const at = fog ? fog.near + (level / (FOG_LEVELS - 1)) * (fog.far - fog.near) : 1;
       const e = ctx.camera.position;
       const f = this.forward;
-      style = ctx.litStyle(faceMaterial(state, d), DIR_X[d], DIR_Y[d], DIR_Z[d], e.x + f.x * at, e.y + f.y * at, e.z + f.z * at);
+      style = ctx.litStyle(this.dim(faceMaterial(state, d), step), DIR_X[d], DIR_Y[d], DIR_Z[d], e.x + f.x * at, e.y + f.y * at, e.z + f.z * at);
       this.styles[key] = style;
     }
     return style;
+  }
+
+  /** A material at a light step: its color darkened in proportion, and warmer if lit by torches. */
+  private dim(material: Material, step: number): Material {
+    if (step === LIGHT_STEPS - 1) return material;
+    let steps = this.dimmed.get(material);
+    if (!steps) {
+      const hex = parseInt(material.color.slice(1), 16);
+      const base: [number, number, number] = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+      steps = Array.from({ length: LIGHT_STEPS * 2 }, (_, s) => {
+        const k = (s % LIGHT_STEPS) / (LIGHT_STEPS - 1);
+        const tint = s >= LIGHT_STEPS ? WARM : [1, 1, 1];
+        return new Material({ color: css([base[0] * k * tint[0], base[1] * k * tint[1], base[2] * k * tint[2]]), shading: material.shading, opacity: material.opacity });
+      });
+      this.dimmed.set(material, steps);
+    }
+    return steps[step];
   }
 
   /**

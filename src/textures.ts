@@ -21,6 +21,8 @@ export const TILES = [
   "iron_ore",
   "gold_ore",
   "bedrock",
+  "torch",
+  "glowstone",
 ] as const;
 export type TileName = (typeof TILES)[number];
 
@@ -56,6 +58,10 @@ export function tileFor(state: number, dir: number): TileName {
       return "gold_ore";
     case Block.Bedrock:
       return "bedrock";
+    case Block.Torch:
+      return "torch";
+    case Block.Glowstone:
+      return "glowstone";
     default:
       return "stone";
   }
@@ -188,6 +194,23 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
   tiles.set("iron_ore", ore("iron", hex("#d8af93")));
   tiles.set("gold_ore", ore("gold", hex("#fcee4b")));
   tiles.set("bedrock", paint("bedrock", (_x, _y, rnd) => scale(hex("#55525a"), rnd.next() < 0.3 ? 0.45 : jitter(rnd, 0.6))));
+  tiles.set(
+    "torch",
+    paint("torch", (x, y, rnd) => {
+      // A stick two pixels wide in the middle, rows 6-15, burning at the top; the rest is cut out
+      if (x < 7 || x > 8 || y < 6) return [0, 0, 0, 0];
+      if (y === 6) return scale(hex("#fff3a8"), jitter(rnd, 0.1));
+      if (y === 7) return scale(hex("#ffb52e"), jitter(rnd, 0.1));
+      return scale(hex("#8a6a3a"), (x === 8 ? 0.8 : 1) * jitter(rnd, 0.15));
+    }),
+  );
+  tiles.set(
+    "glowstone",
+    paint("glowstone", (_x, _y, rnd) => {
+      const v = rnd.next();
+      return scale(hex(v < 0.2 ? "#8a5a2a" : v < 0.6 ? "#e0b050" : "#ffe9a0"), jitter(rnd, 0.15));
+    }),
+  );
   return tiles;
 }
 
@@ -243,12 +266,23 @@ export function minecraftTiles(files: ReadonlyMap<string, TilePixels>): Map<Tile
 /** Where `npm run textures` puts the textures it imports (not part of builds). */
 const IMPORTED = "textures/minecraft/";
 
+/** Minecraft's phases of the moon, in the order they come: full the first night, then waning. */
+export const MOON_PHASES = ["full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"] as const;
+
+/** Images for the sky from Minecraft (any of them may be missing; Craft draws its own then). */
+export interface SkyImages {
+  sun: ImageBitmap | null;
+  /** One per phase (MOON_PHASES order), or null. */
+  moon: ImageBitmap[] | null;
+  clouds: ImageBitmap | null;
+}
+
 /**
- * The textures imported from Minecraft by `npm run textures`, with procedural ones for any it didn't
- * have, and the version they came from. Null when nothing was imported (or in a build, which leaves
- * them out).
+ * The textures imported from Minecraft by `npm run textures`: block tiles (with procedural ones for any it
+ * didn't have), the sky's images, and the version they came from. Null when nothing was imported (or in
+ * a build, which leaves them out).
  */
-export async function importedTiles(): Promise<{ tiles: Map<TileName, TilePixels>; version: string } | null> {
+export async function importedTextures(): Promise<{ tiles: Map<TileName, TilePixels>; sky: SkyImages; version: string } | null> {
   let manifest: { version: string; textures: string[] };
   try {
     const response = await fetch(`${IMPORTED}manifest.json`);
@@ -257,16 +291,35 @@ export async function importedTiles(): Promise<{ tiles: Map<TileName, TilePixels
   } catch {
     return null;
   }
-  const files = new Map<string, TilePixels>();
+  const images = new Map<string, ImageBitmap>();
   await Promise.all(
     manifest.textures.map(async (name) => {
       const response = await fetch(`${IMPORTED}${name}.png`);
-      if (response.ok) files.set(name, firstFrame(await createImageBitmap(await response.blob())));
+      if (response.ok) images.set(name, await createImageBitmap(await response.blob()));
     }),
   );
+  const files = new Map<string, TilePixels>();
+  for (const [name, image] of images) if (!/^(sun|clouds|moon)/.test(name)) files.set(name, firstFrame(image));
   const tiles = proceduralTiles();
   for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
-  return { tiles, version: manifest.version };
+  const phases = MOON_PHASES.map((p) => images.get(`moon_${p}`));
+  const sheet = images.get("moon_phases");
+  return {
+    tiles,
+    sky: {
+      sun: images.get("sun") ?? null,
+      moon: phases.every((p) => p) ? (phases as ImageBitmap[]) : sheet ? await moonSheet(sheet) : null,
+      clouds: images.get("clouds") ?? null,
+    },
+    version: manifest.version,
+  };
+}
+
+/** The phases from the moon sheet of older Minecraft versions: 4 x 2, in phase order. */
+function moonSheet(sheet: ImageBitmap): Promise<ImageBitmap[]> {
+  const w = sheet.width / 4;
+  const h = sheet.height / 2;
+  return Promise.all(MOON_PHASES.map((_, i) => createImageBitmap(sheet, (i % 4) * w, Math.floor(i / 4) * h, w, h)));
 }
 
 /** The top square of an image (the first frame of an animation strip), scaled to a tile. */

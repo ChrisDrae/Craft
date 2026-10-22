@@ -2,14 +2,16 @@ import { LineSet, Material, MeshNode, SimObject, Transform, type Mesh, type Scen
 import { CHUNK_SIZE, FACE_CORNERS as CORNERS, type Chunk } from "./chunk.js";
 import { buildChunkMeshes, type FaceUVs } from "./chunkMesh.js";
 import { DirectSupply, type ChunkSupply } from "./chunkSupply.js";
+import type { LightMap } from "./lightmap.js";
 import type { VoxelHit } from "./raycast.js";
 import { VoxelNode } from "./voxelNode.js";
 import type { VoxelWorld } from "./world.js";
 
-/** Block textures for the meshed renderer: the atlas and each block face's place in it. */
+/** Block textures for the meshed renderer: the atlas, each block face's place in it, and the light map. */
 export interface TerrainTextures {
   texture: Texture;
   uvs: FaceUVs;
+  lightMap: Texture;
 }
 
 /** The scene nodes of one chunk, while it is near enough to be drawn. */
@@ -41,6 +43,8 @@ export class Terrain extends SimObject {
   meshBudget: number = 4;
   /** Faces farther than this (in blocks) are not drawn. */
   renderDistance: number = 48;
+  /** Light levels to brightness, for the flat-colored renderer (the meshes take it as a texture). */
+  lightMap: LightMap | null = null;
   /** The flat-colored renderer, or null when chunks are meshes. */
   readonly node: VoxelNode | null;
   private readonly scene: Scene;
@@ -64,9 +68,11 @@ export class Terrain extends SimObject {
       // Leaves get see-through holes, so they can't hide what is behind them
       world.fancyLeaves = true;
       this.node = null;
+      // Lit by the light levels in the meshes and the light map, not by the scene's lights
       const map = textures.texture;
-      this.solidMaterial = new Material({ color: "#ffffff", shading: "flat", map, alphaTest: 0.5 });
-      this.waterMaterial = new Material({ color: "#ffffff", shading: "flat", map, opacity: 0.7, side: "double" });
+      const lightMap = textures.lightMap;
+      this.solidMaterial = new Material({ color: "#ffffff", shading: "unlit", map, lightMap, alphaTest: 0.5 });
+      this.waterMaterial = new Material({ color: "#ffffff", shading: "unlit", map, lightMap, opacity: 0.7, side: "double" });
       this.outline = this.addNode(new LineSet(12, { color: "#141414", opacity: 0.85 }), false);
       this.outline.visible = false;
     } else {
@@ -115,6 +121,7 @@ export class Terrain extends SimObject {
   override sync(): void {
     if (this.node) {
       this.node.renderDistance = this.renderDistance;
+      this.node.lightMap = this.lightMap;
       return;
     }
     this.updateMeshes();
@@ -166,7 +173,7 @@ export class Terrain extends SimObject {
   private buildNodes(chunk: Chunk): void {
     const nodes = this.chunkNodes.get(chunk)!;
     if (chunk.dirty) this.world.buildFaces(chunk);
-    const meshes = buildChunkMeshes(chunk, this.textures!.uvs);
+    const meshes = buildChunkMeshes(this.world, chunk, this.textures!.uvs);
     nodes.solid = this.place(chunk, nodes.solid, meshes.solid, this.solidMaterial!);
     nodes.water = this.place(chunk, nodes.water, meshes.water, this.waterMaterial!);
     nodes.stale = false;

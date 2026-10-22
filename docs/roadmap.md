@@ -222,6 +222,23 @@ migrating from today's format.
 
 ### Phase 2: Light, day and night, sky (L)
 
+**Done on 2026-10-22.** What changed against the plan below:
+- Saves don't keep light: it follows from the blocks. The worker lights every chunk it generates on its own,
+  a saved chunk is lit as it's read (0.2 ms), and a chunk's light is joined with its neighbors' when it
+  enters the world. A test checks that light after hundreds of random edits equals the light of the same
+  blocks lit from scratch.
+- Missing chunks count as dark, so no light leaks in from the edge of the loaded world.
+- Projector got R12-R14 (corner colors, a second UV set with light maps, materials outside fog and depth,
+  additive blending) in version 0.4.0. Terrain is unlit by the scene's lights: face shading and ambient
+  occlusion are in the corner colors, light levels in the second UVs, and the day in the light map.
+- Canvas 2D shades each face by the light in front of it (8 steps, warmer where torches light it more than
+  the sky) and follows the day through fog and background; it has no sky objects, as decided.
+- Light filters: leaves and water dim light by one more level per block than air; water is dark below
+  about seven blocks.
+- Measured in Chrome: meshing takes 0.42 ms per chunk (0.17 before, for the light and occlusion per
+  corner); flying at 25 blocks/s, at most 5.8 ms a frame (3.2 before), at 50 blocks/s 7.1 ms; 60 fps
+  throughout. Canvas 2D: 60 fps, 2.9 ms a frame.
+
 - **Light levels** (`src/light.ts`): sky light (15 straight down from the sky, 1 less per block sideways and
   through leaves or water) and block light from emitters (torch 14, glowstone and lava 15), 0–15 per block in
   the section light arrays. Flood-filled when a chunk is generated (in the worker) and updated on edits with
@@ -413,9 +430,9 @@ R1–R11 in Projector's `docs/requirements-feedback.md`.
 
 | ID | Requirement | What Craft uses it for | Phase | Priority |
 | --- | --- | --- | --- | --- |
-| R12 | Colors per face corner on `Mesh` (like `uvs`), multiplied into the surface color on WebGL and averaged per face on Canvas 2D | Ambient occlusion; biome tints of grass, leaves and water | 2 | P1 |
-| R13 | A second UV set per corner and `Material.lightMap`, a texture looked up by it and multiplied in | Sky and block light that changes with the time of day without remeshing (Minecraft's light map) | 2 | P1 |
-| R14 | `Material.fog = false`, and control over depth writes | Sky, sun, moon, stars and clouds, which fog would otherwise turn into the fog color | 2 | P2 |
+| R12 | Colors per face corner on `Mesh` (like `uvs`), multiplied into the surface color on WebGL and averaged per face on Canvas 2D | Ambient occlusion; biome tints of grass, leaves and water | 2 | Done (0.4.0) |
+| R13 | A second UV set per corner and `Material.lightMap`, a texture looked up by it and multiplied in | Sky and block light that changes with the time of day without remeshing (Minecraft's light map) | 2 | Done (0.4.0) |
+| R14 | `Material.fog = false`, and control over depth writes | Sky, sun, moon, stars and clouds, which fog would otherwise turn into the fog color | 2 | Done (0.4.0), with additive blending |
 | R15 | Clearing the depth buffer before a layer (a depth-tested overlay) | The hand and held item: on top of the world, yet correct in themselves | 8 | P2 |
 | R16 | Freeing a mesh's GPU buffers right away (`backend.release(mesh)`) instead of after 300 unused frames | Chunk rebuilds and unloading churn through meshes | 0 | P3 |
 | R17 | Building a `Mesh` from flat typed arrays (face indices and starts, optional normals) | Meshes made in a worker, without an array per face | 0 | P3 |
@@ -440,4 +457,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 and 1 are done; next is Phase 2, light, day and night.
+Phases 0, 1 and 2 are done; next is Phase 3, block shapes, more blocks and fluids.
