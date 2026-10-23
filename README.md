@@ -302,7 +302,9 @@ out (a built Craft always uses its own textures). Delete the folder to go back t
 
 ## Project
 
-- `src/`: the game. `docs/roadmap.md`: the plan, phase by phase, with what each one turned out to be.
+- `src/`: the game. `docs/roadmap.md`: the plan, phase by phase, with what each one turned out to be;
+  after pistons comes a technology tree after the IndustrialCraft mods, from a coal generator to a nuclear
+  reactor.
 - `api/`: the multiplayer endpoints (Vercel Functions, also served by the dev server).
 - `tests/`: Vitest, run by `npm test`; `tests/fixtures/` holds a saved world of every save format, which
   must keep opening.

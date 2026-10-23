@@ -1,11 +1,13 @@
 # Craft roadmap
 
-A plan for giving Craft Minecraft's principal features, save games included. Written on 2026-10-22 against
-`feature/textures` (7a6fdea).
+A plan for giving Craft Minecraft's principal features, save games included, and then a technology tree
+after the IndustrialCraft mods (added on 2026-10-23). Written on 2026-10-22 against `feature/textures`
+(7a6fdea).
 
 - [Where Craft stands](#where-craft-stands) and the [principles](#principles) every phase follows
 - [1. Feature inventory](#1-feature-inventory): Minecraft's features, what Craft has, and the phase for the rest
-- [2. Phases at a glance](#2-phases-at-a-glance) and [3. the phases](#3-phases) in build order
+- [2. Phases at a glance](#2-phases-at-a-glance) and [3. the phases](#3-phases) in build order, the
+  [industry's technology tree](#industry-a-technology-tree-phases-11-to-16) among them
 - [4. What Projector needs](#4-what-projector-needs): rendering features that belong in the framework
 - [5. Decisions](#5-decisions)
 
@@ -86,9 +88,16 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | | Villagers and trading | — | L |
 | Simulation | Game ticks: scheduled and random | — | 0 |
 | | Growth, spreading, leaf decay, farming | — | 9 |
-| | Redstone | — | 9 (basics), L |
+| | Redstone | — | 9 (basics), 10 (pistons, hoppers, comparators), L |
 | | Fire | — | L |
 | | Boats, minecarts, horses | — | L |
+| Industry (beyond Minecraft) | Energy: generators, cables, transformers, stores | — | 11, 12 |
+| | Machines: macerator, extractor, compressor, electric furnace | — | 11 |
+| | Solar, wind, water and geothermal power | — | 12 |
+| | Advanced machines, upgrades, automation | — | 13 |
+| | Electric tools, jetpack, nano suit, the miner | — | 14 |
+| | Nuclear reactors | — | 15 |
+| | UU-matter, quantum suit, teleporters, terraformers | — | 16 |
 | Saves and UI | Several worlds, saving, autosave | — (lost on reload) | 1 |
 | | Title, world list and pause menus | ◐ start overlay | 1 |
 | | Settings and key bindings | ◐ URL parameters | 1, 8 |
@@ -118,6 +127,13 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | 7 | Mobs and combat | L | 6 |
 | 8 | Feel: sound, particles, hand, camera, UI | M | parts any time |
 | 9 | Farming, weather, redstone basics | L | 5, 7 |
+| 10 | Pistons, hoppers and comparators | M | 9 |
+| 11 | Industry I: energy, cables, the generator and the first machines | L | 9, 10 |
+| 12 | Industry II: solar, wind, water and geothermal power; transformers | M | 11 |
+| 13 | Industry III: advanced machines, upgrades, automation | L | 12 |
+| 14 | Industry IV: electric tools and armor, the miner | M | 12 |
+| 15 | Industry V: nuclear power | L | 13, 14 |
+| 16 | Industry VI: UU-matter, quantum suit, teleporters, terraformers | M | 15 |
 | L | Later: Nether, enchanting, brewing, villagers, transport | | |
 
 Sizes are relative effort (S, M, L), not dates. Each phase is planned in detail when it starts.
@@ -694,6 +710,259 @@ Parts of this phase can come at any point; sound in particular depends on nothin
 - **Tests:** growth over ticks, leaf decay, circuit truth tables and timing (inverter, clock, repeater delays)
   stepped in Node.
 
+### Phase 10: Pistons, hoppers and comparators (M)
+
+The rest of redstone that the industry phases build on: things moved by redstone, items moved between
+blocks, and blocks read by redstone.
+
+- **Pistons and sticky pistons:** push up to 12 blocks in a line (not obsidian, bedrock, or blocks with
+  contents); plants, torches and dust in the way break; sticky pistons pull one block back. A move takes
+  2 ticks, drawn moving, and carries or shoves what stands on it; a world saved mid-move finishes it.
+- **Observers:** a pulse when the block they face changes, for farms that harvest themselves.
+- **Hoppers:** take items from the container above and items lying on them, and pass them into what they
+  point at, one every 8 ticks; powered, they stop. They work with chests and furnaces now, and with every
+  machine of the industry phases.
+- **Comparators:** keep or subtract a signal, and read how full a container (later a machine or an energy
+  store) is.
+- **Done when:** a piston door opens to a button; a sugar cane farm with an observer and a piston harvests
+  itself into hoppers and a chest; a comparator's signal grows as the chest fills.
+- **Tests:** push limits and order, sticky pulls, moves saved halfway, hopper rates and directions,
+  comparator modes and container levels, observer pulses.
+
+### Industry: a technology tree (Phases 11 to 16)
+
+Beyond Minecraft: a technology tree after the IndustrialCraft mods, from a coal generator and a copper
+cable to a nuclear reactor. Each step needs machines and materials from the ones before.
+
+```mermaid
+flowchart LR
+  subgraph P11["11: energy and the first machines"]
+    ore["Copper, tin,<br/>uranium ore"] --> ingot["Copper, tin,<br/>bronze"]
+    tree["Rubber trees"] -->|tree tap| rubber["Resin, rubber"]
+    iron["Iron"] --> refined["Refined iron"]
+    ingot --> cable["Cables"]
+    rubber --> cable
+    cable --> circuit["Electronic circuit"]
+    ingot --> battery["Battery"]
+    refined --> casing["Machine casing"]
+    casing --> gen["Generator"]
+    battery --> gen
+    casing --> mach["Macerator, extractor,<br/>compressor, electric furnace"]
+    circuit --> mach
+    battery --> batbox["Battery box"]
+  end
+  subgraph P12["12: renewable power"]
+    solar["Solar panel"]
+    windwater["Wind and water mills"]
+    geo["Geothermal generator"]
+    trans["Transformers"]
+    crystal["Energy crystal"]
+    bank["Energy cell, energy bank"]
+  end
+  subgraph P13["13: advanced machines"]
+    alloy["Advanced alloy,<br/>carbon plate"]
+    adv["Advanced circuit"]
+    advcasing["Advanced casing"]
+    upg["Upgrades"]
+    advmach["Induction furnace, recycler,<br/>pump"]
+  end
+  subgraph P14["14: electric tools and armor"]
+    tools["Drills, chainsaw,<br/>mining laser"]
+    lapo["Lapotron crystal"]
+    packs["Battery packs, jetpack"]
+    nano["Nano suit"]
+    miner["Miner, ore scanners"]
+  end
+  subgraph P15["15: nuclear power"]
+    fuel["Uranium fuel rods"]
+    parts["Vents, exchangers,<br/>coolant, plating"]
+    reactor["Nuclear reactor"]
+    vault["Energy vault"]
+  end
+  subgraph P16["16: high tech"]
+    fab["Mass fabricator"]
+    uu["UU-matter"]
+    irid["Iridium plate"]
+    quantum["Quantum suit"]
+    tele["Teleporter, terraformer"]
+  end
+  gen --> solar & windwater & geo
+  circuit --> solar & trans
+  mach -->|coal dust| solar
+  battery --> bank
+  crystal --> bank & trans
+  mach -->|compressor| alloy
+  circuit --> adv
+  casing --> advcasing
+  alloy --> advcasing
+  adv --> upg & advmach & lapo
+  advcasing --> advmach
+  crystal --> tools & lapo
+  circuit --> tools
+  alloy --> nano
+  crystal --> nano
+  lapo --> packs
+  tools --> miner
+  ore -->|macerator, compressor| fuel
+  advcasing --> reactor
+  adv --> reactor
+  parts --> reactor
+  fuel --> reactor
+  lapo --> vault
+  reactor -->|power| fab
+  advmach -->|scrap| fab
+  fab --> uu --> irid
+  alloy --> irid
+  irid --> quantum
+  nano --> quantum
+  lapo --> tele
+```
+
+**Energy** comes in EU (energy units), sent from generators and stores to machines in packets, at one of
+four tiers. A machine fed packets above its tier explodes, a cable carrying more than its tier burns up,
+and a little is lost on every block of cable (least in tin and glass fibre, most in uncovered cable, which
+also shocks whoever touches it while it carries current). Transformers step packets between tiers.
+
+| Tier | Packet (EU) | Cables | Store | Phase |
+| --- | --- | --- | --- | --- |
+| Low (LV) | 32 | tin; copper | battery box: 40,000 EU | 11 |
+| Medium (MV) | 128 | copper, insulated | energy cell: 300,000 EU | 12 |
+| High (HV) | 512 | gold, double-insulated | energy bank: 4 million EU | 12 |
+| Extreme (EV) | 2,048 | HV cable, glass fibre | energy vault: 40 million EU | 15 |
+
+How every industry phase works, besides the principles above:
+- **Machines are block entities,** like furnaces: slots, stored energy, progress, and a front lit while
+  working (a block state, so it reaches guests as any block change). One screen layout serves them all:
+  slots, a progress arrow, an energy bar, upgrade slots.
+- **Registries:** machines, generators, cables, components and upgrades are entries (tier, capacity,
+  energy per operation, recipes, slots, faces) with small handlers, like blocks and items.
+- **Energy nets** are found again only when a cable or energy block changes: each connected net keeps its
+  sources, stores and machines with the paths and losses between them, and a tick hands out the energy.
+  Budget: a big base (hundreds of cables and machines) under a millisecond a tick.
+- **Where the world runs:** machines tick alone or on the host; guests open their screens as they open
+  furnaces now. Every phase adds its block entities and items' charge to the save format, with a migration
+  and a fixture.
+- **Craft's own art:** IndustrialCraft's textures are the mod's, not in a Minecraft installation, and not
+  imported. Craft paints machines, cables and items in code, in Minecraft's style, and the Canvas 2D
+  renderer gets them in flat colors.
+- **Mechanics after IndustrialCraft 2,** with the numbers tuned for Craft when each phase is planned in
+  detail; names are plain English where IndustrialCraft's are its own coinages (battery box, energy cell,
+  energy bank and energy vault for its BatBox, CESU, MFE and MFSU).
+- **Tests:** every net, generator, machine and reactor rule runs headless, like the redstone tests.
+
+### Phase 11: Industry I: energy and the first machines (L)
+
+- **Resources** (generator 5): tin ore, uranium ore (deep and rare, used from Phase 15, generated now so
+  worlds explored in between have it), rubber trees with resin spots in forests, swamps and jungles. Copper
+  and tin ingots; bronze (copper and tin), with bronze tools and armor between iron and diamond in
+  durability; refined iron (iron smelted again); resin and rubber.
+- **Tools:** the tree tap takes resin from rubber logs; the wrench turns machines and takes them up whole
+  (a pickaxe gets only the casing back); the EU meter shows what a cable carries and a machine uses.
+- **Energy:** low and medium voltage (32 and 128 EU packets); tin and copper cables, insulated with rubber;
+  cables drawn as thin connected shapes, like fences.
+- **The generator:** burns what a furnace burns (coal gives 4,000 EU), 10 EU a tick.
+- **Machines** (low voltage): the electric furnace (faster than a furnace, no fuel); the macerator (an ore
+  into two dusts that smelt into ingots, cobblestone into gravel and gravel into sand); the extractor
+  (resin into rubber, rubber saplings and logs into rubber too); the compressor (dusts into plates, snow
+  into ice). Recipes in their own registry, shown in the creative inventory's tooltips.
+- **Storage:** the battery (10,000 EU, a charge bar like a tool's wear) and the battery box (40,000 EU,
+  low voltage out of its front, a slot to charge batteries and one to empty them).
+- **Done when:** a coal generator powers a macerator and an electric furnace down a copper cable and the
+  ore comes out doubled; a battery box keeps what they didn't use and runs them a while without coal.
+- **Tests:** a generator's output; nets with one and several sources and machines, cable loss by length
+  and kind, packets over a machine's tier blowing it up, storage filling and emptying; each machine's
+  recipes and timing; nets found again when a cable breaks.
+
+### Phase 12: Industry II: renewable power and bigger grids (M)
+
+- **Solar panels:** 1 EU a tick while they see the sky in daylight; nothing at night, under a roof or in
+  the rain (Phase 2's daylight, Phase 9's weather).
+- **Wind mills:** more the higher above the ground and the less is built around them; more in storms,
+  and one too high may be torn apart in a storm.
+- **Water mills:** by how much water is around them, more in the rain.
+- **Geothermal generators:** lava poured in from buckets or cells, 20 EU a tick.
+- **Cells:** tin cells carry water and lava, like buckets that stack.
+- **Transformers** between low, medium and high voltage (and back, flipped by a redstone signal); gold
+  cable; the energy crystal (stored energy, and a part of recipes); the energy cell (medium voltage) and
+  energy bank (high).
+- **Done when:** a base runs off-grid: solar panels by day, wind and water mills by night, the surplus
+  banked, power sent far at high voltage and stepped down to the machines.
+- **Tests:** solar output through a day and in rain; wind by height, obstruction and storms; water by the
+  water around and rain; transformers both ways; stores of every tier.
+
+### Phase 13: Industry III: advanced machines and automation (L)
+
+- **Advanced materials:** advanced alloy (from mixed metal ingots), coal dust pressed to carbon fibre and
+  carbon plates, the advanced circuit (redstone, glowstone, lapis), the advanced machine casing.
+- **Upgrades,** four slots on every machine: the overclocker (faster, for more energy), energy storage,
+  the transformer upgrade (takes a higher tier), the ejector (puts what is made into the inventory beside
+  it) and the puller.
+- **Automation:** machines take and give items through hoppers (Phase 10) by face, and stop while
+  powered (or run only while powered, a switch on their screen); comparators read their progress and
+  energy.
+- **Machines:** the induction furnace (two items at once, faster as it heats up); the recycler (anything
+  into scrap now and then) and scrap boxes (something at random); the pump (fluids into cells, or straight
+  into a geothermal generator beside it).
+- **Done when:** an ore line runs by itself: a hopper feeds ore to an overclocked macerator, an ejector
+  passes the dust to an induction furnace, and ingots fill a chest.
+- **Tests:** upgrades' arithmetic, items through faces and hoppers, the induction furnace's heat, the
+  recycler's odds, redstone control.
+
+### Phase 14: Industry IV: electric tools and armor (M)
+
+- **Charged items:** energy kept in the stack, charged in a store's slot, used up by work; an item takes
+  charge up to its tier only. The lapotron crystal (lapis and advanced circuits) holds the most.
+- **Tools:** the mining drill and the diamond drill (anything a pickaxe or shovel breaks, fast, for energy
+  per block), the chainsaw (wood and leaves, and shears), the electric hoe and tree tap, the electric wrench
+  (no losses), the mining laser (a beam through rock), the nano saber (strong while switched on).
+- **Worn:** battery and lapotron packs (charge what is held), the electric jetpack (flight on energy), the
+  nano suit (takes damage with energy instead of health; night vision; softer falls), night-vision goggles.
+- **The miner:** with a drill and mining pipes it digs a shaft down and takes ores from around it, found by
+  an ore scanner (scanners in two strengths also work in the hand).
+- **Done when:** a drill goes through stone in a moment and needs charging; a jetpack lifts a player over
+  a hill; the nano suit takes a creeper's blast; a miner empties a column of its ores into a chest.
+- **Tests:** charging and use, tier limits, the suit's absorption, the jetpack's lift and drain, drill
+  speeds and costs, the miner's shaft.
+
+### Phase 15: Industry V: nuclear power (L)
+
+- **Uranium:** ore macerated and compressed into uranium, made into fuel rods (single, dual and quad).
+  Carried without a hazmat suit (rubber) it makes players sick (a slow hurt, the view tinted); fuel rods
+  are used up into depleted rods, which are slowly made fresh again beside active rods in a reactor.
+- **The nuclear reactor:** a block with a grid of components, 6 rows of 3 columns and a column more for
+  each reactor chamber beside it (up to 9). Every reactor second (20 ticks), each rod pulses itself and its
+  neighbors (energy and heat per pulse) and neutron reflectors send pulses back; heat goes to the
+  components beside that take it (heat exchangers spread it, coolant cells hold it, vents give it away from
+  themselves, the hull or their neighbors) and the rest heats the hull; reactor plating raises how much heat
+  the hull bears and softens a blast.
+- **Heat:** past 40 % of the hull's limit fires start around it, past 50 % water near it boils away, past
+  70 % radiation hurts whoever is near, past 85 % the blocks around melt into lava, and at 100 % it melts
+  down: an explosion as big as its load.
+- **Control:** it runs while it gets a redstone signal. Its energy leaves at high or extreme voltage; the
+  energy vault (extreme, 40 million EU, lapotron crystals) stores it.
+- **The reactor's screen:** the grid, every component's heat and wear, the hull's heat, the energy made.
+- **Done when:** a well-cooled four-rod reactor runs a day at steady output into an energy vault; a badly
+  cooled one starts fires, then melts down.
+- **Tests:** each component's rule; pulses and reflection; known designs, stable and not, their heat over
+  time and their output; every heat threshold's effect; the meltdown; redstone control; the same result on
+  every run.
+
+### Phase 16: Industry VI: high tech (M)
+
+- **The mass fabricator:** turns a great deal of energy into UU-matter, faster with scrap; UU-matter
+  recipes make ores, diamonds and iridium.
+- **The quantum suit** (iridium plates from UU-matter, advanced alloy and diamond): flight with its chest
+  piece, no fall damage, fast running and high jumps, food and air kept up, all on energy.
+- **The teleporter:** linked to another by a frequency transmitter, for energy by distance and what is
+  carried, drawn from the stores beside it.
+- **The terraformer:** with a blueprint, changes the land around it: grass and trees, water and farmland,
+  sand, or flattened ground.
+- **Done when:** a reactor-powered fabricator makes the UU-matter for diamonds; a teleporter links two
+  bases; a player flies in the quantum suit.
+- **Tests:** the fabricator's rates and scrap, teleporter costs and links, each blueprint's changes.
+
+Not planned for the industry: world-wrecking items (IndustrialCraft's nuke), and its crop breeding.
+
 ### Later
 
 Each gets its own plan when its turn comes.
@@ -724,7 +993,9 @@ R1–R11 in Projector's `docs/requirements-feedback.md`.
 | R19 | Instanced meshes: one mesh drawn with many transforms | Many mobs and dropped items in few draw calls | 7 | P3 |
 | R20 | Lines wider than 1 px on WebGL (`LineSet.width`) | A more visible block outline | 8 | P3 |
 
-Sound stays in Craft (Web Audio), unless Projector should get positional audio tied to its objects.
+Sound stays in Craft (Web Audio), unless Projector should get positional audio tied to its objects. The
+industry phases need nothing new: machines are blocks, cables are block shapes, and the jetpack's flame
+and a working machine's glow are particles and lit faces Craft already draws.
 
 ## 5. Decisions
 
@@ -740,6 +1011,11 @@ Settled on 2026-10-22, all as recommended:
    deployed game (Phase M). Phase 0 kept the simulation free of DOM and rendering code for this.
 5. **Assets:** sounds and entity, item and GUI textures are imported from the player's installation like the
    block textures, with Craft's own fallbacks.
-6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
+6. **Redstone:** the basics in Phase 9, then pistons, with hoppers and comparators (changed on
+   2026-10-23: the industry phases move items between machines and read them by redstone), the rest later.
+7. **Industry** (added on 2026-10-23): a technology tree after the IndustrialCraft mods, in Phases 11 to
+   16 before the "Later" list. Mechanics follow IndustrialCraft 2 where they fit Craft, with numbers
+   tuned when each phase starts; plain names where the mod's are its own; Craft's own textures.
 
-Phases 0 to 9 and M are done; next are pistons.
+Phases 0 to 9 and M are done; next is Phase 10 (pistons, hoppers and comparators), then the industry
+phases.
