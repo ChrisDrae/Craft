@@ -1,13 +1,13 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
-import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, furnaceAccepts, loadEntity, tickFurnaces, type BlockEntity } from "./blockEntities.js";
-import { BLOCKS, Block, FACING_DIR, HOTBAR, LEFT_OF, RIGHT_OF, blockOf, propertyOf } from "./blocks.js";
+import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, furnaceAccepts, loadEntity, takeXp, tickFurnaces, type BlockEntity } from "./blockEntities.js";
+import { BLOCKS, Block, DIR_X, DIR_Z, FACING_DIR, HOTBAR, LEFT_OF, RIGHT_OF, SOLID, blockOf, isBed, propertyOf } from "./blocks.js";
 import { WORLD_HEIGHT, type ChunkGenerator } from "./chunk.js";
 import { Drops } from "./drops.js";
 import { Icons } from "./icons.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, PLAYER_SLOTS, arraySlot, type Slot } from "./inventory.js";
 import { ITEMS, loadStack, saveStack, type Item, type ItemStack } from "./items.js";
 import { ItemView } from "./itemView.js";
-import { dropsOf } from "./mining.js";
+import { dropsOf, xpOf } from "./mining.js";
 import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
@@ -17,22 +17,31 @@ import { Avatars } from "./net/avatars.js";
 import type { Connection } from "./net/connection.js";
 import { GuestSession } from "./net/guest.js";
 import { HostSession, type Guest } from "./net/host.js";
-import type { GuestState, PlayerView } from "./net/protocol.js";
+import { ORB, type GuestState, type PlayerView } from "./net/protocol.js";
 import { Hosting } from "./net/rtc.js";
-import type { GameMode, GuestRecord, PlayerRecord, WorldMeta } from "./save/format.js";
+import type { GameMode, GuestRecord, PlayerLife, PlayerRecord, Position, WorldMeta } from "./save/format.js";
 import type { WorldStore } from "./save/store.js";
 import { WorldSave } from "./save/worldSave.js";
 import { playerId, viewDistance, type Settings } from "./settings.js";
-import { Sky, css } from "./sky.js";
+import { DAY, Sky, css } from "./sky.js";
+import { BREAKING, Survival } from "./survival.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { blockBehaviors } from "./fluids.js";
 import { AtlasTexture, animatedFrames, blockAtlas, importedTextures, proceduralTiles } from "./textures.js";
 import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
 import { formatWhen, h } from "./ui/dom.js";
+import { Hud, hudSprites } from "./ui/hud.js";
 import { ItemScreen } from "./ui/items.js";
 import { optionsScreen } from "./ui/options.js";
+import { DEATH_MESSAGES, DIFFICULTIES, deathXp, type Difficulty, type PlayMode } from "./vitals.js";
 import { VoxelWorld } from "./world.js";
+
+/** Times of day a player may sleep (Minecraft's: from dusk to just before dawn). */
+const NIGHT_START = 12542;
+const NIGHT_END = 23459;
+/** Ticks everyone must lie in bed before the night passes. */
+const SLEEP_TICKS = 100;
 
 /** The color of water seen from inside, in full light. */
 const UNDERWATER: [number, number, number] = [0x21 / 255, 0x46 / 255, 0x7f / 255];
@@ -59,7 +68,7 @@ export interface GameOptions {
    * The world to play: a saved one, a seed for quick play (nothing saved), or a friend's world joined
    * over a connection to its host.
    */
-  world: SavedWorld | { seed: string; mode?: GameMode } | { guest: Connection };
+  world: SavedWorld | { seed: string; mode?: GameMode; difficulty?: Difficulty } | { guest: Connection };
 }
 
 /** A guest's world makes nothing itself: its chunks come from the host. */
@@ -69,11 +78,12 @@ const NOTHING: ChunkGenerator = { generate: () => {} };
 type GuestData = Omit<GuestRecord, "format" | "world">;
 
 function recordOf(g: Guest): GuestData {
-  return { id: g.id, name: g.name, ...g.state, position: { ...g.state.position }, inventory: [...g.state.inventory] };
+  return { id: g.id, name: g.name, ...g.state, position: { ...g.state.position }, inventory: [...g.state.inventory], vitals: { ...g.state.vitals } };
 }
 
 function stateOf(r: GuestData): GuestState {
-  return { position: { ...r.position }, yaw: r.yaw, pitch: r.pitch, selected: r.selected, inventory: [...r.inventory] };
+  const { position, yaw, pitch, selected, inventory, vitals, bed, spectating, flying } = r;
+  return { position: { ...position }, yaw, pitch, selected, inventory: [...inventory], vitals: { ...vitals }, bed, spectating, flying };
 }
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -116,6 +126,10 @@ export async function startGame(options: GameOptions): Promise<void> {
   const blockName = element("block-name", HTMLElement);
   const underwaterEl = element("underwater", HTMLElement);
   const crosshair = element("crosshair", HTMLElement);
+  const hurtEl = element("hurt", HTMLElement);
+  const burningEl = element("burning", HTMLElement);
+  const sleepEl = element("sleep", HTMLElement);
+  const eatingEl = element("eating", HTMLElement);
 
   const backend = createBackend(canvas, options.renderer);
   const textured = backend instanceof WebGLBackend;
@@ -184,7 +198,26 @@ export async function startGame(options: GameOptions): Promise<void> {
   const interaction = sim.add(new BlockInteraction(world, player, terrain));
   const inventory = interaction.inventory;
   let mode: GameMode = saved ? saved.meta.mode : "seed" in options.world ? (options.world.mode ?? "survival") : "survival";
-  interaction.mode = mode;
+  let difficulty: Difficulty = saved ? saved.meta.difficulty : "seed" in options.world ? (options.world.difficulty ?? "normal") : "normal";
+  let hardcore = saved ? saved.meta.hardcore : false;
+  // Health, hunger and the rest, ticked with the world (paused with it)
+  const survival = new Survival(world, player, inventory);
+  /** The bed the player last slept in (its head): where they come back after dying. */
+  let bed: Position | null = null;
+  /** Died in hardcore: looking on. */
+  let spectating = false;
+  /** Sets everything that follows from how the player plays now. */
+  function applyMode(): void {
+    const playing: PlayMode = spectating ? "spectator" : mode;
+    survival.mode = interaction.mode = playing;
+    survival.difficulty = difficulty;
+    player.mayFly = playing !== "survival";
+    player.noClip = playing === "spectator";
+    if (playing === "spectator") player.flying = true;
+    if (playing === "survival") player.flying = false;
+    hotbarEl.hidden = playing === "spectator";
+  }
+  applyMode();
   /** The friend's world this is, if joined. */
   let guest: GuestSession | null = null;
   if (joined) {
@@ -199,26 +232,47 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Items lying about: they fall and are picked up where the world runs (alone, or the host); a guest is
   // told where they are and asks for those it walks into
   const drops = sim.add(new Drops(world));
-  drops.collectors = () => (guest ? [] : [{ position: player.position, take: (s: ItemStack) => inventory.add(s) }]);
+  /** Whether the player picks things up: alive and not looking on. */
+  const collecting = (): boolean => !survival.vitals.dead && !spectating;
+  drops.collectors = () =>
+    guest
+      ? []
+      : [...(collecting() ? [{ position: player.position, take: (s: ItemStack) => inventory.add(s), xp: (n: number) => (survival.vitals.xp += n) }] : []), ...(host?.collectors() ?? [])];
   const icons = new Icons(tiles);
   const itemView = sim.add(new ItemView(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null));
   itemView.drops = () =>
     guest
-      ? guest.drops.map(([id, x, y, z, item, count]) => ({ id, item, count, position: { x, y, z } }))
+      ? guest.drops.filter((d) => d[4] !== ORB).map(([id, x, y, z, item, count]) => ({ id, item, count, position: { x, y, z } }))
       : [...drops.items.values()].map((d) => ({ id: d.id, item: d.stack.item, count: d.stack.count, position: d.position }));
+  itemView.orbs = () =>
+    guest
+      ? guest.drops.filter((d) => d[4] === ORB).map(([id, x, y, z, , xp]) => ({ id, xp, position: { x, y, z } }))
+      : [...drops.orbs.values()].map((o) => ({ id: o.id, xp: o.xp, position: o.position }));
   itemView.cracking = () => {
     const t = interaction.target;
     const p = interaction.progress;
     return t && p !== null ? { x: t.x, y: t.y, z: t.z, state: t.block, progress: p } : null;
   };
-  if (!joined) {
-    // What broken blocks drop (in survival), and what a broken chest or furnace held; furnaces burn on
-    interaction.onBroken = (x, y, z, state, held) => {
-      if (mode === "survival") drops.spill(x, y, z, dropsOf(state, held, Math.random));
-    };
-    world.onEntityRemoved = (x, y, z, e) => drops.spill(x, y, z, e.items);
-    ticks.onTick = () => tickFurnaces(world);
-  }
+  // What broken blocks drop in survival, with experience from ores (the host does a guest's), and what a
+  // broken chest or furnace held; breaking makes a little hungry
+  interaction.onBroken = (x, y, z, state, held) => {
+    if (mode !== "survival") return;
+    survival.vitals.exert(BREAKING);
+    if (guest) return;
+    drops.spill(x, y, z, dropsOf(state, held, Math.random));
+    const xp = xpOf(state, held, Math.random);
+    if (xp > 0) drops.spawnXp(x + 0.5, y + 0.5, z + 0.5, xp);
+  };
+  if (!joined) world.onEntityRemoved = (x, y, z, e) => drops.spill(x, y, z, e.items);
+  // Every game tick furnaces burn (where the world runs), the player's vitals change, and sleepers sleep
+  ticks.onTick = () => {
+    if (!joined) tickFurnaces(world);
+    survival.tick();
+    sleepTick();
+  };
+  // Eating: when hungry, held for EAT_TIME
+  interaction.canEat = () => interaction.mode === "survival" && survival.vitals.hungry;
+  interaction.onEat = (food) => survival.vitals.eat(food);
 
   /** Throws a stack out in front of the player, the way they look. */
   function throwStack(s: ItemStack): void {
@@ -249,6 +303,7 @@ export async function startGame(options: GameOptions): Promise<void> {
       const p = player.position;
       const now = performance.now();
       for (const [id, x, y, z, item] of session.drops) {
+        if (item === ORB || !collecting()) continue;
         if (Math.abs(x - p.x) > 1.5 || Math.abs(z - p.z) > 1.5 || y < p.y - 0.75 || y > p.y + 2.5) continue;
         if ((asked.get(id) ?? 0) > now) continue;
         const room = roomFor(item);
@@ -261,6 +316,26 @@ export async function startGame(options: GameOptions): Promise<void> {
       const left = inventory.add(s);
       if (left) throwStack(left);
     };
+    session.onXp = (n) => (survival.vitals.xp += n);
+    session.onNotice = (text) => notice(text);
+    session.onRules = (d) => {
+      difficulty = d;
+      applyMode();
+    };
+    session.onWake = () => wakeUp();
+    // How the player is goes to the host now and then, for keeping
+    let lifeSent = "";
+    let lifeTimer = 0;
+    sim.onUpdate((dt) => {
+      lifeTimer += dt;
+      if (lifeTimer < 1) return;
+      lifeTimer = 0;
+      const now = life();
+      const text = JSON.stringify(now);
+      if (text === lifeSent) return;
+      lifeSent = text;
+      session.life(now);
+    });
     // What the player carries goes to the host now and then, for keeping
     let inventoryTimer = 0;
     inventory.onChange = () => {
@@ -308,6 +383,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           pitch: player.pitch,
           selected: inventory.selected,
           inventory: inventory.slots.map(saveStack),
+          ...life(),
         }),
         guests: guestRecords,
         drops,
@@ -331,20 +407,35 @@ export async function startGame(options: GameOptions): Promise<void> {
     for (let i = 0; i < PLAYER_SLOTS; i++) inventory.slots[i] = loadStack(slots[i]);
     inventory.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, Math.floor(selected) || 0));
   };
+  /** Health and the rest back as saved (or as the host kept them). */
+  const restoreLife = (l: PlayerLife): void => {
+    survival.vitals.load(l.vitals);
+    bed = l.bed ? { ...l.bed } : null;
+    spectating = hardcore && l.spectating;
+    applyMode();
+    player.flying = player.flying || (player.mayFly && l.flying);
+  };
+  let guestSpawn: Position | null = null;
   if (guest) {
-    const { world: name, mode: worldMode, you } = await guest.welcome;
-    worldName = name;
-    mode = interaction.mode = worldMode;
+    const welcome = await guest.welcome;
+    worldName = welcome.world;
+    mode = welcome.mode;
+    difficulty = welcome.difficulty;
+    hardcore = welcome.hardcore;
+    guestSpawn = welcome.spawn;
+    const you = welcome.you;
     Object.assign(player.position, you.position);
     player.yaw = you.yaw;
     player.pitch = you.pitch;
     restore(you.inventory, you.selected);
+    restoreLife(you);
   } else if (record) {
     Object.assign(player.position, record.position);
     Object.assign(player.velocity, record.velocity);
     player.yaw = record.yaw;
     player.pitch = record.pitch;
     restore(record.inventory, record.selected);
+    restoreLife(record);
     await save!.loadNow(player.position.x, player.position.z, 1);
   } else {
     // A new player: nothing in survival, the usual blocks at hand in creative
@@ -363,8 +454,28 @@ export async function startGame(options: GameOptions): Promise<void> {
       await save.save();
     }
   }
-  /** Where newcomers to the world start. */
-  const spawnPoint = saved?.meta.spawn ?? { x: player.position.x, y: player.position.y, z: player.position.z };
+  /** Where newcomers to the world start, and players without a bed come back to. */
+  const spawnPoint = guestSpawn ?? saved?.meta.spawn ?? { x: player.position.x, y: player.position.y, z: player.position.z };
+
+  /** How the player is, for saving (and the host's keeping of a guest). */
+  function life(): PlayerLife {
+    return { vitals: survival.vitals.save(), bed, spectating, flying: player.flying };
+  }
+
+  // The status bar, the red flash of a hit, flames while burning, the darkness of sleep, eating's progress
+  const hud = new Hud(element("status", HTMLElement), hudSprites(imported?.hud ?? null));
+  sim.onUpdate(() => {
+    const v = survival.vitals;
+    const shown = survival.mode === "survival" && started;
+    hud.update({ shown, hardcore, health: v.health, food: v.food, defense: survival.armor().defense, air: v.air, underwater: player.eyeInWater, xp: v.xp, hurt: v.hurt });
+    hurtEl.style.opacity = v.hurt > 10 && !v.dead ? String(((v.hurt - 10) / 10) * 0.9) : v.dead ? "0.6" : "0";
+    burningEl.hidden = !(v.fire > 0 && !v.dead);
+    const eating = interaction.eating;
+    eatingEl.hidden = eating === null;
+    if (eating !== null) eatingEl.style.setProperty("--eat", eating.toFixed(3));
+    sleepEl.hidden = !player.asleep;
+    if (player.asleep) sleepEl.style.setProperty("--dark", String(Math.min(0.9, (sleepTicks / SLEEP_TICKS) * 0.9)));
+  });
 
   // Fog and the background: the sky's horizon color, darker the less sky light reaches the eyes (black in
   // caves); under water a short blue fog as bright as the light around
@@ -425,15 +536,22 @@ export async function startGame(options: GameOptions): Promise<void> {
     crosshair.hidden = !on && !started;
     interaction.release(0);
     interaction.release(2);
+    updatePause();
     if (on) return;
     friendsShown = false;
     if (ended !== null) showEnded(ended);
+    else if (survival.vitals.dead) showDeath();
     else if (!items.open) showPauseMenu();
     if (started) void save?.save().catch(() => {});
   }
 
+  /** A game played alone stands still under its menu, as Minecraft's; shared, it goes on. */
+  function updatePause(): void {
+    sim.paused = !guest && !hosting && !player.controls && !items.open && !survival.vitals.dead;
+  }
+
   function play(): void {
-    if (ended !== null) return;
+    if (ended !== null || survival.vitals.dead) return;
     started = true;
     Promise.resolve(canvas.requestPointerLock()).catch(() => {
       // Where the browser refuses pointer lock (some embedded or automated browsers), dragging looks around
@@ -483,6 +601,12 @@ export async function startGame(options: GameOptions): Promise<void> {
           { class: "buttons column" },
           h("button", { class: "primary", autofocus: true, onclick: play }, started ? "Back to game" : "Play"),
           h("button", { onclick: showOptions }, "Options…"),
+          !guest &&
+            h(
+              "button",
+              { disabled: hardcore, title: "Peaceful, easy, normal or hard: how hunger and starving go", onclick: cycleDifficulty },
+              `Difficulty: ${difficulty[0].toUpperCase()}${difficulty.slice(1)}${hardcore ? " (hardcore)" : ""}`,
+            ),
           !guest && h("button", { onclick: () => void openToFriends() }, hosting ? `Friends (${host?.guests.length ?? 0} playing)…` : "Open to friends…"),
           h("button", { onclick: () => void quit() }, guest ? "Leave world" : save ? "Save and quit to title" : "Quit to title"),
         ),
@@ -495,7 +619,8 @@ export async function startGame(options: GameOptions): Promise<void> {
             ["Space", "jump, swim up"],
             ["Shift", "sprint"],
             ["Left click", "break"],
-            ["Right click", "place, use"],
+            ["Right click", mode === "survival" ? "place, use, eat (hold)" : "place, use"],
+            ...(mode === "creative" ? [["Space twice", "fly (Shift down)"]] : []),
             ["1–9, wheel", "choose from the hotbar"],
             ["E", mode === "creative" ? "all items" : "inventory"],
             ["Q", "throw the held item (Ctrl: all of it)"],
@@ -505,6 +630,15 @@ export async function startGame(options: GameOptions): Promise<void> {
       ),
     );
     menu.querySelector<HTMLElement>("[autofocus]")?.focus();
+  }
+
+  /** The next difficulty, for this world and its guests. */
+  function cycleDifficulty(): void {
+    difficulty = DIFFICULTIES[(DIFFICULTIES.indexOf(difficulty) + 1) % DIFFICULTIES.length];
+    applyMode();
+    if (save) save.meta = { ...save.meta, difficulty };
+    host?.rulesChanged();
+    showPauseMenu();
   }
 
   // Sharing the world: friends join it by its code, connecting to this browser directly
@@ -520,6 +654,8 @@ export async function startGame(options: GameOptions): Promise<void> {
           ticks,
           worldName,
           mode,
+          difficulty: () => difficulty,
+          hardcore,
           drops,
           host: () => ({ id: "host", name: settings.name || "Host", ...player.position, yaw: player.yaw, pitch: player.pitch }),
           spawn: () => spawnPoint,
@@ -533,6 +669,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           onGuests: () => {
             if (friendsShown && menu.isConnected && !menu.hidden) showFriends();
           },
+          onNotice: (text) => notice(text),
         }),
       );
       const session = host;
@@ -554,6 +691,7 @@ export async function startGame(options: GameOptions): Promise<void> {
       } catch (e) {
         hostingError = (e as Error).message;
       }
+      updatePause();
     }
     showFriends();
   }
@@ -562,6 +700,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     hosting?.stop();
     hosting = null;
     host?.close();
+    updatePause();
   }
 
   function showFriends(): void {
@@ -667,6 +806,11 @@ export async function startGame(options: GameOptions): Promise<void> {
       return;
     }
     if (!player.controls) return;
+    if (player.asleep) {
+      if (e.code === "Space" || e.code.startsWith("Shift")) wakeUp();
+      return;
+    }
+    if (spectating && e.code !== "Escape") return;
     const digit = /^Digit([1-9])$/.exec(e.code);
     if (digit) interaction.select(Number(digit[1]) - 1);
     if (e.code === "KeyE") showItems(() => (mode === "creative" ? items.showCreative() : items.showInventory()));
@@ -716,7 +860,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     nameTimer = window.setTimeout(() => blockName.classList.remove("shown"), 1200);
   };
   refreshHotbar();
-  hotbarEl.hidden = false;
+  hotbarEl.hidden = spectating;
 
   // Screens with items: the inventory (E), the creative list, crafting tables, chests, furnaces
   const items = new ItemScreen(menu, { icons, inventory, spill: throwStack });
@@ -748,6 +892,11 @@ export async function startGame(options: GameOptions): Promise<void> {
         } else {
           const chunk = world.chunk(x >> 4, z >> 4);
           if (chunk) chunk.unsaved = true;
+          // Taking from a furnace's output takes the experience it kept
+          if (e.kind === "furnace" && i === FURNACE_OUTPUT) {
+            const xp = takeXp(e, Math.random);
+            if (xp > 0) drops.spawnXp(player.position.x, player.position.y + 1, player.position.z, xp);
+          }
         }
       }),
     );
@@ -781,7 +930,9 @@ export async function startGame(options: GameOptions): Promise<void> {
 
   interaction.onOpen = (x, y, z, state) => {
     const block = blockOf(state);
-    if (block === Block.CraftingTable) {
+    if (isBed(block)) {
+      useBed(x, y, z, state);
+    } else if (block === Block.CraftingTable) {
       showItems(() => items.showTable());
     } else if (guest) {
       // Shown when the host sends what it holds
@@ -813,6 +964,151 @@ export async function startGame(options: GameOptions): Promise<void> {
         pendingOpen = null;
       }
     };
+  }
+
+  // Death: what the player carried and some of their experience fall where they died; everyone is told
+  survival.vitals.onHurt = () => {
+    if (player.asleep) wakeUp();
+  };
+  survival.onDeath = () => {
+    const v = survival.vitals;
+    const cause = v.cause ?? "fall";
+    const p = player.position;
+    if (player.asleep) wakeUp();
+    interaction.release(0);
+    interaction.release(2);
+    const stacks = inventory.slots.filter((s): s is ItemStack => s !== null);
+    inventory.clear();
+    const fling = (): { x: number; y: number; z: number } => ({ x: (Math.random() - 0.5) * 4, y: 2 + Math.random() * 2, z: (Math.random() - 0.5) * 4 });
+    const from = { x: p.x, y: p.y + 1, z: p.z };
+    const xp = deathXp(v.xp);
+    const text = `${settings.name || (guest ? "Guest" : "Player")} ${DEATH_MESSAGES[cause]}`;
+    if (guest) {
+      for (const s of stacks) guest.throwItem(s, from, fling());
+      guest.died(cause, xp);
+    } else {
+      for (const s of stacks) drops.spawn(from.x, from.y, from.z, s, fling(), 2);
+      if (xp > 0) drops.spawnXp(p.x, p.y + 0.5, p.z, xp);
+      if (host) host.announce(text);
+      else notice(text);
+    }
+    deathText = text;
+    if (items.open) items.close();
+    if (locked()) document.exitPointerLock();
+    else setPlaying(false);
+  };
+  // Saved (or kept by the host) dead: back on the death screen
+  let deathText = survival.vitals.dead ? `${settings.name || (guest ? "Guest" : "Player")} died` : "";
+
+  function showDeath(): void {
+    const score = survival.vitals.xp;
+    menu.classList.add("dead");
+    const leave = (): void => {
+      menu.classList.remove("dead");
+      void quit();
+    };
+    menu.replaceChildren(
+      h(
+        "div",
+        { class: "screen" },
+        h("h1", {}, hardcore ? "Game over!" : "You died!"),
+        h("p", {}, deathText),
+        h("p", { class: "muted" }, `Score: ${score}`),
+        h(
+          "div",
+          { class: "buttons column" },
+          hardcore
+            ? h("button", { class: "primary", autofocus: true, onclick: () => void comeBack(true) }, "Spectate world")
+            : h("button", { class: "primary", autofocus: true, onclick: () => void comeBack(false) }, "Respawn"),
+          h("button", { onclick: leave }, guest ? "Leave world" : "Title screen"),
+        ),
+      ),
+    );
+    menu.querySelector<HTMLElement>("[autofocus]")?.focus();
+  }
+
+  /** Back after dying: alive at the bed (or the world's spawn), or looking on in hardcore. */
+  async function comeBack(spectate: boolean): Promise<void> {
+    menu.classList.remove("dead");
+    const where = { x: player.position.x, y: player.position.y, z: player.position.z };
+    survival.revive();
+    if (spectate) {
+      spectating = true;
+      applyMode();
+    } else {
+      const home = bed ? besideBed(bed) : null;
+      if (bed && !home) {
+        notice("Your home bed was missing or obstructed");
+        bed = null;
+      }
+      Object.assign(player.position, home ?? spawnPoint);
+      if (!home) player.position.y += 0.01;
+      player.velocity.x = player.velocity.y = player.velocity.z = 0;
+      player.fallDistance = 0;
+      if (save && !world.isLoaded(player.position.x, player.position.z)) await save.loadNow(player.position.x, player.position.z, 1);
+    }
+    if (spectate) Object.assign(player.position, where);
+    play();
+  }
+
+  /** Where to stand beside a bed (its head at `head`): a free spot around it on solid ground, or null if it's gone. */
+  function besideBed(head: Position): Position | null {
+    const state = world.get(head.x, head.y, head.z);
+    if (!isBed(blockOf(state))) return world.isLoaded(head.x, head.z) ? null : { x: head.x + 0.5, y: head.y + 0.6, z: head.z + 0.5 };
+    const d = FACING_DIR[propertyOf(state, "facing")];
+    const foot = { x: head.x - DIR_X[d], z: head.z - DIR_Z[d] };
+    const free = (x: number, y: number, z: number): boolean => !SOLID[world.get(x, y, z)] && !SOLID[world.get(x, y + 1, z)] && SOLID[world.get(x, y - 1, z)] === 1;
+    for (const c of [foot, { x: head.x, z: head.z }]) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+        const x = c.x + dx;
+        const z = c.z + dz;
+        if (free(x, head.y, z)) return { x: x + 0.5, y: head.y, z: z + 0.5 };
+      }
+    }
+    return { x: head.x + 0.5, y: head.y + 0.6, z: head.z + 0.5 };
+  }
+
+  // Beds: using one makes it home; at night the player lies down, and when everyone sleeps the night passes
+  let sleepTicks = 0;
+  function useBed(x: number, y: number, z: number, state: number): void {
+    const facing = propertyOf(state, "facing");
+    const d = FACING_DIR[facing];
+    const head = propertyOf(state, "part") === "head" ? { x, y, z } : { x: x + DIR_X[d], y, z: z + DIR_Z[d] };
+    if (!bed || bed.x !== head.x || bed.y !== head.y || bed.z !== head.z) notice("Respawn point set");
+    bed = head;
+    const time = ticks.time % DAY;
+    if (time < NIGHT_START || time > NIGHT_END) {
+      notice("You can sleep only at night");
+      return;
+    }
+    player.asleep = { ...head, facing };
+    sleepTicks = 0;
+    guest?.sleep(true);
+  }
+
+  function wakeUp(): void {
+    const asleep = player.asleep;
+    if (!asleep) return;
+    player.asleep = null;
+    guest?.sleep(false);
+    const spot = besideBed(asleep);
+    if (spot) Object.assign(player.position, spot);
+    player.velocity.x = player.velocity.y = player.velocity.z = 0;
+  }
+
+  function sleepTick(): void {
+    const asleep = player.asleep;
+    if (!asleep) return;
+    sleepTicks++;
+    if (!isBed(blockOf(world.get(asleep.x, asleep.y, asleep.z)))) {
+      wakeUp();
+      return;
+    }
+    // When everyone has slept long enough, morning comes (the host decides for its guests)
+    if (guest || sleepTicks < SLEEP_TICKS || (host && !host.allAsleep)) return;
+    ticks.time += DAY - (ticks.time % DAY);
+    host?.wake();
+    wakeUp();
   }
 
   // Who comes and goes

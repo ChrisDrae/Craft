@@ -10,7 +10,8 @@ and climbing; building with 121 blocks, slabs, stairs, fences, walls, panes, doo
 water and lava that flow, fall and harden where they meet; light levels with smooth lighting, torches and
 glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds. In survival you gather:
 blocks take time to break and drop as items, tools in five tiers break them faster, and you craft, smelt in
-furnaces and keep things in chests. In creative every block is at hand. Friends can join any world.
+furnaces and keep things in chests; you get hungry, falls and lava hurt, and a bed brings you back. In
+creative every block is at hand and you fly. Friends can join any world.
 
 ```sh
 npm install
@@ -18,12 +19,13 @@ npm run dev      # http://localhost:5173
 npm run check    # typecheck, tests, build
 ```
 
-The title screen lists your worlds: create one (in survival or creative) and play, or join a friend's.
-WASD moves, Space jumps (and swims up), Shift sprints. The left button breaks (hold it in survival); the
-right one places the held block, opens and shuts doors and trapdoors, and opens crafting tables, chests and
-furnaces. 1–9 or the wheel pick a hotbar slot, the middle button picks the block you aim at, E opens the
-inventory (every item in creative), Q throws the held item (Ctrl+Q the whole stack), Esc opens the game
-menu (options, save and quit).
+The title screen lists your worlds: create one (in survival, hardcore or creative, on a difficulty) and
+play, or join a friend's. WASD moves, Space jumps (and swims up), Shift sprints; in creative a double tap
+of Space flies (Space up, Shift down). The left button breaks (hold it in survival); the right one places
+the held block, opens and shuts doors and trapdoors, opens crafting tables, chests and furnaces, sleeps in
+beds, and eats the food held (hold it). 1–9 or the wheel pick a hotbar slot, the middle button picks the
+block you aim at, E opens the inventory (every item in creative), Q throws the held item (Ctrl+Q the whole
+stack), Esc opens the game menu (options, difficulty, save and quit); a game played alone pauses there.
 
 <sub>The pictures here show Craft's own textures, painted in code. Minecraft's can be used instead on your
 own computer (see below).</sub>
@@ -52,9 +54,22 @@ the inventory's 2×2 grid, then sticks and a wooden pickaxe at the table's 3×3 
 to drop anything, iron ore a stone one, diamonds an iron one. Tools wear out. A furnace smelts ores, sand
 and logs with coal, charcoal or wood; a chest holds 27 stacks, two side by side 54. Items move as in
 Minecraft: the left button picks up and puts down stacks, the right one halves a stack or puts down one,
-shift moves a stack across, a double click gathers. About a hundred recipes: planks, sticks, tables,
-furnaces, chests, torches, tools and armor in every material, doors, stairs, slabs, panes, ladders, fences,
-walls and more. (Health, hunger and armor that protects come next, in Phase 6.)
+shift moves a stack across, a double click gathers. About 120 recipes: planks, sticks, tables, furnaces,
+chests, torches, tools and armor in every material, beds in 16 colors, doors, stairs, slabs, panes, ladders,
+fences, walls, bowls and stew and more.
+
+Staying alive goes as in Minecraft. Ten hearts: falls of more than three blocks hurt (half as much onto a
+bed, not at all into water), lava burns and sets you burning until water puts it out, you drown when your
+air runs out, and cacti, being shut in a block and the void hurt too; armor takes part of what lava and
+cacti do, wearing as it does. Running, jumping, swimming and breaking make you hungry; with 18 or more food
+you heal, at 6 or less you can't sprint, at none you starve (on easy to half your hearts, on normal to
+half a heart, on hard to death; peaceful feeds and heals you). Food is apples from oak leaves, melon slices
+from jungle melons, stew from mushrooms found in dark and damp places, and bread; a hungry player eats by
+holding the right button. Dungeons hold a chest or two: bread, apples, string to make wool, iron, gold,
+now and then diamonds. Ores of coal, gems and redstone give experience, as does smelting; the orbs fly to
+you and fill the bar over the hotbar. Sleeping in a bed makes it home, and when everyone is in bed the
+night passes. Dying drops what you carried and some of your experience where you fell, and you start again
+at your bed or the world's spawn; in hardcore you have one life, then look on.
 
 | | |
 | --- | --- |
@@ -230,7 +245,8 @@ blocks.
 ![The Canvas 2D renderer: flat-colored blocks and items](docs/images/canvas2d.jpg)
 
 URL options: `?seed=` plays a fresh world with that seed that isn't saved (Quick play, in survival, or
-creative with `&mode=creative`); `?view=16..160` and `?renderer=canvas|webgl` override the options for one
+creative with `&mode=creative`; `&difficulty=peaceful|easy|normal|hard`); `?view=16..160` and
+`?renderer=canvas|webgl` override the options for one
 page; `?textures=craft` uses Craft's own textures even where Minecraft's were imported.
 
 ## Minecraft's textures

@@ -1,42 +1,53 @@
 import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, type Action } from "./actions.js";
-import { Block, blockOf } from "./blocks.js";
+import { Block, blockOf, isBed } from "./blocks.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, Inventory } from "./inventory.js";
-import { ITEMS, type Item, type ItemStack } from "./items.js";
+import { ITEMS, itemByName, type Food, type Item, type ItemStack } from "./items.js";
 import { breakTime } from "./mining.js";
 import type { Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
-import type { GameMode } from "./save/format.js";
 import { SELECTION } from "./shapes.js";
 import type { Terrain } from "./terrain.js";
+import type { PlayMode } from "./vitals.js";
 import type { VoxelWorld } from "./world.js";
 
 /** Seconds between repeated placements while the button is held, and between breaks in creative. */
 const REPEAT = 0.25;
 /** Seconds of pause after breaking a block in survival before the next one starts, as Minecraft's. */
 const BREAK_PAUSE = 0.25;
+/** Seconds of holding the right button it takes to eat. */
+export const EAT_TIME = 1.6;
 
 /** What the crosshair can hit in a block: fluids have no boxes, so the ray goes through them. */
 const selectionOf = (state: number): Float64Array => SELECTION[state];
 
-/** Blocks that open a screen when used: a crafting table, a chest, a furnace. */
-const OPENS: ReadonlySet<number> = new Set([Block.CraftingTable, Block.Chest, Block.Furnace]);
+/** Blocks that do something for the player when used: a crafting table, chest or furnace opens, a bed is slept in. */
+const OPENS = (block: number): boolean => block === Block.CraftingTable || block === Block.Chest || block === Block.Furnace || isBed(block);
 
 /**
  * Breaking, placing and using blocks: finds the block under the crosshair every frame (outlined by the
  * terrain). The left button breaks it: at once in creative, in survival after as long as the block and the
  * held tool take (the progress shows as cracks), wearing the tool. The right one opens a crafting table,
- * chest or furnace, opens or shuts a door or trapdoor, or places the held block (in survival using one up),
- * repeating while the button is held. The middle button picks the block aimed at: any block in creative,
- * from the inventory in survival. What breaking or placing does to the blocks around (torches coming off,
- * water flowing in, fences connecting) is up to the block updates.
+ * chest or furnace (or lies down in a bed), opens or shuts a door or trapdoor, places the held block (in
+ * survival using one up), repeating while the button is held, or eats the held food when the player is
+ * hungry (held for EAT_TIME). The middle button picks the block aimed at: any block in creative, from the
+ * inventory in survival. A spectator does none of it. What breaking or placing does to the blocks around
+ * (torches coming off, water flowing in, fences connecting) is up to the block updates.
  */
 export class BlockInteraction extends SimObject {
   target: VoxelHit | null = null;
   /** Where the crosshair meets the target, or null (then its middle counts). */
   hit: Vec3 | null = null;
   readonly inventory: Inventory;
-  mode: GameMode = "creative";
+  mode: PlayMode = "creative";
+  /** Whether the player could eat now (hungry). */
+  canEat: () => boolean = () => false;
+  /** Called when the player has eaten something. */
+  onEat: ((food: Food) => void) | null = null;
+  /** How far eating has come (0-1), or null when not eating. */
+  get eating(): number | null {
+    return this.held === "eat" ? Math.min(1, this.eatTime / EAT_TIME) : null;
+  }
   /** Called with the selected slot when the selection or the hotbar's items change. */
   onSelect: ((slot: number) => void) | null = null;
   /** Called with every action that changed something, and what was held (a guest sends them to the host). */
@@ -54,8 +65,9 @@ export class BlockInteraction extends SimObject {
   private readonly terrain: Terrain;
   private readonly dir: Vec3 = { x: 0, y: 0, z: 1 };
   private readonly blockAt: (x: number, y: number, z: number) => number;
-  private held: "break" | "place" | null = null;
+  private held: "break" | "place" | "eat" | null = null;
   private timer: number = 0;
+  private eatTime: number = 0;
   /** The block being broken (survival) and seconds spent on it. */
   private breaking: { x: number; y: number; z: number; state: number } | null = null;
   private elapsed: number = 0;
@@ -107,8 +119,9 @@ export class BlockInteraction extends SimObject {
     this.onSelect?.(this.selected);
   }
 
-  /** A mouse button went down: 0 breaks, 1 picks the block aimed at, 2 uses or places. */
+  /** A mouse button went down: 0 breaks, 1 picks the block aimed at, 2 uses, places or eats. */
   press(button: number): void {
+    if (this.mode === "spectator") return;
     if (button === 1) {
       if (this.target) this.choose(blockOf(this.target.block));
       return;
@@ -122,8 +135,34 @@ export class BlockInteraction extends SimObject {
   }
 
   release(button: number): void {
-    if ((button === 0 && this.held === "break") || (button === 2 && this.held === "place")) this.held = null;
+    if ((button === 0 && this.held === "break") || (button === 2 && (this.held === "place" || this.held === "eat"))) this.held = null;
     if (button === 0) this.stopBreaking();
+  }
+
+  /** Starts eating the held food, if it is food and the player is hungry. */
+  private startEating(): boolean {
+    const held = this.inventory.held;
+    if (!held || !ITEMS[held.item].food || !this.canEat()) return false;
+    this.held = "eat";
+    this.eatTime = 0;
+    return true;
+  }
+
+  /** Eats the held food: the player is fed, one is used up (in survival), a stew leaves its bowl. */
+  private finishEating(): void {
+    const held = this.inventory.held;
+    const food = held ? ITEMS[held.item].food : null;
+    if (!held || !food) return;
+    if (this.mode === "survival") {
+      this.inventory.useHeld(1);
+      const left = food.leaves ? itemByName(food.leaves) : null;
+      if (left !== null) {
+        const bowl = { item: left, count: 1, damage: 0 };
+        if (!this.inventory.held) this.inventory.put(this.selected, bowl);
+        else this.inventory.add(bowl);
+      }
+    }
+    this.onEat?.(food);
   }
 
   /** The action on the target with the held block, from where the player looks. */
@@ -181,6 +220,20 @@ export class BlockInteraction extends SimObject {
   }
 
   override update(dt: number): void {
+    if (this.held === "eat") {
+      const held = this.inventory.held;
+      if (!held || !ITEMS[held.item].food || !this.canEat()) {
+        this.held = null;
+        return;
+      }
+      this.eatTime += dt;
+      if (this.eatTime >= EAT_TIME) {
+        this.finishEating();
+        // Still holding the button: on to the next one, if still hungry
+        this.eatTime = 0;
+      }
+      return;
+    }
     if (this.held === "break" && this.mode === "survival") {
       this.breakSurvival(dt);
       return;
@@ -229,10 +282,14 @@ export class BlockInteraction extends SimObject {
     this.progress = null;
   }
 
-  /** After the player moved the camera: what the crosshair points at now. */
+  /** After the player moved the camera: what the crosshair points at now (nothing for a spectator). */
   override sync(): void {
     const camera = this.sim?.camera;
     if (!camera) return;
+    if (this.mode === "spectator" || this.player.asleep) {
+      this.target = this.hit = this.terrain.target = null;
+      return;
+    }
     const d = camera.getForward(this.dir);
     const e = camera.position;
     this.target = raycastVoxels(this.blockAt, selectionOf, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
@@ -246,13 +303,14 @@ export class BlockInteraction extends SimObject {
       this.breakTarget();
     } else {
       const t = this.target;
-      if (t && OPENS.has(blockOf(t.block)) && this.onOpen) {
+      if (t && OPENS(blockOf(t.block)) && this.onOpen) {
         // Not again while the button is held
         this.held = null;
         this.onOpen(t.x, t.y, t.z, t.block);
         return;
       }
-      if (!this.useTarget()) this.placeAtTarget();
+      if (!this.useTarget() && !this.startEating()) this.placeAtTarget();
+      if (this.held === "eat") return;
     }
     // Aim again right away, so a held button acts on what is there now
     this.sync();

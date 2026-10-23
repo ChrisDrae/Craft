@@ -115,6 +115,8 @@ export class WorldTicks extends SimObject {
   }
 
   override update(dt: number): void {
+    // A paused game stands still (a single player's game menu)
+    if (this.sim?.paused) return;
     this.elapsed += dt;
     let ran = 0;
     while (this.elapsed >= 1 / TICKS_PER_SECOND && ran < MAX_TICKS_PER_FRAME) {

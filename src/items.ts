@@ -23,6 +23,13 @@ export interface Tool {
 
 export type ArmorSlot = "head" | "chest" | "legs" | "feet";
 
+/** What eating an item gives: food points, saturation, and what is left in the hand (a stew's bowl). */
+export interface Food {
+  hunger: number;
+  saturation: number;
+  leaves?: string;
+}
+
 export interface ItemInfo {
   readonly id: Item;
   /** Stable name, as saves store it: "iron_ingot". A block item has its block's name. */
@@ -34,6 +41,10 @@ export interface ItemInfo {
   readonly block: Block | null;
   readonly tool: Tool | null;
   readonly armor: ArmorSlot | null;
+  /** Armor points worn (each half an armor icon), and the toughness that helps against heavy hits. */
+  readonly defense: number;
+  readonly toughness: number;
+  readonly food: Food | null;
   /** Uses before it breaks (tools and armor), 0 for items that don't wear. */
   readonly durability: number;
   /** Ticks it keeps a furnace burning, 0 if it doesn't burn. */
@@ -48,6 +59,9 @@ interface ItemOptions {
   maxStack?: number;
   tool?: Tool;
   armor?: ArmorSlot;
+  defense?: number;
+  toughness?: number;
+  food?: Food;
   durability?: number;
   fuel?: number;
 }
@@ -78,7 +92,7 @@ const WOODEN: ReadonlySet<number> = new Set([
 
 function blockItem(b: (typeof BLOCKS)[number]): ItemInfo {
   const fuel = WOODEN.has(b.id) ? WOOD_FUEL : b.id === Block.OakSlab ? 150 : b.id === Block.Ladder ? WOOD_FUEL : b.id === Block.OakSapling ? 100 : 0;
-  return { id: b.id, name: b.name, label: b.label, maxStack: 64, block: b.id, tool: null, armor: null, durability: 0, fuel, texture: null, color: b.top };
+  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, tool: null, armor: null, defense: 0, toughness: 0, food: null, durability: 0, fuel, texture: null, color: b.top };
 }
 
 const extra: ItemInfo[] = [];
@@ -92,6 +106,9 @@ function item(name: string, label: string, color: string, options: ItemOptions =
     block: null,
     tool: options.tool ?? null,
     armor: options.armor ?? null,
+    defense: options.defense ?? 0,
+    toughness: options.toughness ?? 0,
+    food: options.food ?? null,
     durability: options.durability ?? 0,
     fuel: options.fuel ?? 0,
     texture: name,
@@ -125,8 +142,11 @@ export const Items = {
   Paper: item("paper", "paper", "#f0f0e8"),
   Book: item("book", "book", "#7a4a2a"),
   Wheat: item("wheat", "wheat", "#d8c060"),
-  Apple: item("apple", "apple", "#d02020"),
-  Bread: item("bread", "bread", "#c08840"),
+  Apple: item("apple", "apple", "#d02020", { food: { hunger: 4, saturation: 2.4 } }),
+  Bread: item("bread", "bread", "#c08840", { food: { hunger: 5, saturation: 6 } }),
+  MelonSlice: item("melon_slice", "melon slice", "#c8402a", { food: { hunger: 2, saturation: 1.2 } }),
+  Bowl: item("bowl", "bowl", "#8a6a3a"),
+  MushroomStew: item("mushroom_stew", "mushroom stew", "#b08a5a", { maxStack: 1, food: { hunger: 6, saturation: 7.2, leaves: "bowl" } }),
 };
 
 /** The five tool kinds in each of the five materials, and the four armor pieces in four. */
@@ -156,11 +176,12 @@ export const TOOLS: Readonly<Record<string, Readonly<Record<ToolKind, Item>>>> =
   ]),
 );
 
+/** Armor materials: durability factors, armor points of helmet, chestplate, leggings and boots, toughness. */
 const ARMOR_MATERIALS = [
-  { prefix: "leather", factor: 5, color: "#a0552e" },
-  { prefix: "iron", factor: 15, color: "#d8d8d8" },
-  { prefix: "golden", factor: 7, color: "#f6d84a" },
-  { prefix: "diamond", factor: 33, color: "#5ae8e0" },
+  { prefix: "leather", factor: 5, defense: [1, 3, 2, 1], toughness: 0, color: "#a0552e" },
+  { prefix: "iron", factor: 15, defense: [2, 6, 5, 2], toughness: 0, color: "#d8d8d8" },
+  { prefix: "golden", factor: 7, defense: [2, 5, 3, 1], toughness: 0, color: "#f6d84a" },
+  { prefix: "diamond", factor: 33, defense: [3, 8, 6, 3], toughness: 2, color: "#5ae8e0" },
 ] as const;
 const ARMOR_PIECES: ReadonlyArray<readonly [string, ArmorSlot, number]> = [
   ["helmet", "head", 11],
@@ -171,7 +192,12 @@ const ARMOR_PIECES: ReadonlyArray<readonly [string, ArmorSlot, number]> = [
 
 /** Armor by material prefix and piece: ARMOR.iron.helmet. */
 export const ARMOR: Readonly<Record<string, Readonly<Record<string, Item>>>> = Object.fromEntries(
-  ARMOR_MATERIALS.map((m) => [m.prefix, Object.fromEntries(ARMOR_PIECES.map(([piece, slot, base]) => [piece, item(`${m.prefix}_${piece}`, `${m.prefix} ${piece}`, m.color, { armor: slot, durability: base * m.factor })]))]),
+  ARMOR_MATERIALS.map((m) => [
+    m.prefix,
+    Object.fromEntries(
+      ARMOR_PIECES.map(([piece, slot, base], i) => [piece, item(`${m.prefix}_${piece}`, `${m.prefix} ${piece}`, m.color, { armor: slot, defense: m.defense[i], toughness: m.toughness, durability: base * m.factor })]),
+    ),
+  ]),
 );
 
 /** Every item, by id: the blocks' first (air included, as no item), then the rest. */

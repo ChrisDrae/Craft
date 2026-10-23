@@ -100,6 +100,11 @@ export const Block = {
   LilyPad: 119,
   Pumpkin: 120,
   Chest: 121,
+  /** WhiteBed + a color's index in COLORS. */
+  WhiteBed: 122,
+  Melon: 138,
+  BrownMushroom: 139,
+  RedMushroom: 140,
 } as const;
 export type Block = number;
 
@@ -139,7 +144,9 @@ export type Shape =
   | "tall"
   | "lilypad"
   /** A chest: a box a pixel in from the sides, 14 pixels high (two side by side make one long box). */
-  | "chest";
+  | "chest"
+  /** Half of a bed: a mattress 9 pixels high on two legs, the head and the foot each a block. */
+  | "bed";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
@@ -299,6 +306,8 @@ const SNOWY = bool("snowy");
 const LIT = bool("lit");
 /** A chest alone, or half of a double chest: the left or right half as seen from its front. */
 const CHEST_TYPE: Property = { name: "type", values: ["single", "left", "right"] };
+/** A bed's halves: the foot, where it was placed, and the head, the way it faces from there. */
+const BED_PART: Property = { name: "part", values: ["foot", "head"] };
 
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
@@ -408,7 +417,16 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.LilyPad, "lily_pad", "lily pad", { top: "#208030" }, { shape: "lilypad", opacity: "cutout", tint: Tint.LilyPad }),
   block(Block.Pumpkin, "pumpkin", "pumpkin", { top: "#c07615", side: "#e08a1d" }, { textures: { top: "pumpkin_top", side: "pumpkin_side" } }),
   block(Block.Chest, "chest", "chest", { top: "#a8742e", side: "#8a5a24" }, { shape: "chest", textures: { top: "chest_top", side: "chest_side", front: "chest_front" }, properties: [FACING, CHEST_TYPE] }),
+  ...COLORS.map((c, i) =>
+    block(Block.WhiteBed + i, `${c}_bed`, `${c.replace("_", " ")} bed`, { top: DYES[i], side: "#8a6a3a" }, { shape: "bed", opacity: "cutout", textures: { top: `${c}_bed_head_up`, side: `${c}_bed_head_west`, bottom: "bed_down", front: `${c}_bed_foot_south` }, properties: [FACING, BED_PART] }),
+  ),
+  block(Block.Melon, "melon", "melon", { top: "#a3a428", side: "#6f9a2a" }, { textures: { top: "melon_top", side: "melon_side" } }),
+  block(Block.BrownMushroom, "brown_mushroom", "brown mushroom", { top: "#9a7558" }, { ...PLANT, emission: 1 }),
+  block(Block.RedMushroom, "red_mushroom", "red mushroom", { top: "#c8322a" }, PLANT),
 ];
+
+/** Whether a block is a bed (of any color). */
+export const isBed = (block: Block): boolean => block >= Block.WhiteBed && block < Block.WhiteBed + COLORS.length;
 
 // States: the default ones take the blocks' own ids, the others the ids after them
 const stateBlock: number[] = BLOCKS.map((b) => b.id);
@@ -524,8 +542,20 @@ export const LEAFY: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].l
 /** 1 for water, 2 for lava, 0 for everything else. */
 export const FLUID: Uint8Array = Uint8Array.from(stateBlock, (b) => (b === Block.Water ? 1 : b === Block.Lava ? 2 : 0));
 
-/** Every texture any block uses, in a fixed order: blocks refer to them by index. Snowy grass, the grass overlay and a burning furnace's front too. */
-export const TILE_NAMES: readonly string[] = [...new Set([...BLOCKS.flatMap((b) => (b.id === Block.Air ? [] : b.textures)), "grass_block_snow", "grass_block_side_overlay", "furnace_front_on"])];
+/**
+ * Every texture any block uses, in a fixed order: blocks refer to them by index. Snowy grass, the grass
+ * overlay, a burning furnace's front and the faces of beds that a block's four looks don't name too.
+ */
+export const TILE_NAMES: readonly string[] = [
+  ...new Set([
+    ...BLOCKS.flatMap((b) => (b.id === Block.Air ? [] : b.textures)),
+    "grass_block_snow",
+    "grass_block_side_overlay",
+    "furnace_front_on",
+    ...COLORS.flatMap((c) => [`${c}_bed_head_east`, `${c}_bed_foot_up`, `${c}_bed_foot_east`, `${c}_bed_foot_west`]),
+    "bed_head_north",
+  ]),
+];
 const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
 
 /** The index of a texture in TILE_NAMES. */

@@ -29,6 +29,8 @@ function hostWorld() {
     ticks,
     worldName: "Shared",
     mode: "creative",
+    difficulty: () => "normal",
+    hardcore: false,
     drops,
     host: () => ({ id: "host", name: "Host", x: 0.5, y: 10, z: 0.5, yaw: 0, pitch: 0 }),
     spawn: () => ({ x: 8.5, y: 10, z: 8.5 }),

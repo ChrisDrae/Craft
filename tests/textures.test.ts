@@ -78,14 +78,17 @@ describe("Minecraft textures", () => {
 describe("the texture importer", () => {
   it("knows every texture Craft uses", () => {
     const script = new TextDecoder().decode(readFileSync(new URL("../scripts/import-textures.mjs", import.meta.url)));
-    // Wool is listed by color, tools and armor by material; the chest comes from its model's texture
+    // Wool and beds are listed by color, tools and armor by material; the chest comes from its model's
+    // texture, the orbs from their sheet
     for (const name of TILES) {
-      if (name.endsWith("_wool") || name.startsWith("chest_")) continue;
+      if (name.endsWith("_wool") || name.startsWith("chest_") || /^[a-z_]+_bed_(head|foot)_[a-z]+$/.test(name) || name.startsWith("experience_orb_")) continue;
       const item = name.replace(/^item_/, "");
       if (/_(pickaxe|axe|shovel|hoe|sword|helmet|chestplate|leggings|boots)$/.test(item)) continue;
       expect(script, name).toContain(`"${item}"`);
     }
     expect(script).toContain("_wool`");
+    expect(script).toContain("_bed_${f}`");
     expect(script).toContain("entity/chest/normal.png");
+    expect(script).toContain("entity/experience/experience_orb.png");
   });
 });

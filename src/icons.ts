@@ -1,6 +1,6 @@
 import type { TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
-import { BLOCKS, Block, Face, Tint } from "./blocks.js";
+import { BLOCKS, Block, Face, Tint, isBed } from "./blocks.js";
 import { ITEMS, type Item } from "./items.js";
 import { overlay, tint } from "./textures.js";
 
@@ -8,7 +8,7 @@ import { overlay, tint } from "./textures.js";
 const SIZE = 48;
 
 /** How high each block shape stands in its icon (cubes are 1); shapes not listed are drawn flat. */
-const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, cactus: 1, stairs: 1, chest: 14 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16 };
+const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, cactus: 1, stairs: 1, chest: 14 / 16, bed: 9 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16 };
 
 /**
  * Item icons for the hotbar and inventory screens: blocks as small cubes seen from above at an angle,
@@ -97,7 +97,9 @@ export class Icons {
       [Face.Side, 0.6, () => g.setTransform(w / 16, -half / 16, 0, h / 16, front.x, front.y)],
     ];
     for (const [look, shade, place] of faces) {
-      const tile = this.face(block, block === Block.Chest && shade === 0.8 ? Face.Front : look);
+      // A chest shows its front on the left, a bed its foot on the right
+      const front = (block === Block.Chest && shade === 0.8) || (isBed(block) && shade === 0.6);
+      const tile = this.face(block, front ? Face.Front : look);
       if (!tile) continue;
       place();
       g.filter = `brightness(${shade})`;

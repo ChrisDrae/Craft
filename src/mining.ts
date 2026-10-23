@@ -58,6 +58,7 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.OakTrapdoor]: by("axe", 3),
   [Block.OakFence]: WOOD_LIKE,
   [Block.Pumpkin]: by("axe", 1),
+  [Block.Melon]: by("axe", 1),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
   [Block.Glowstone]: hand(0.3),
@@ -73,6 +74,7 @@ for (const b of BLOCKS) {
   else if (n.endsWith("_leaves")) TABLE[b.id] = by("hoe", 0.2);
   else if (n.endsWith("_wool")) TABLE[b.id] = hand(0.8);
   else if (n.endsWith("_carpet")) TABLE[b.id] = hand(0.1);
+  else if (b.shape === "bed") TABLE[b.id] = hand(0.2);
   else if (b.shape === "slab" || b.shape === "stairs" || b.shape === "wall") TABLE[b.id] = n.startsWith("oak") ? WOOD_LIKE : by("pickaxe", 2, Tier.Wood);
   else if (b.shape === "cross" || b.shape === "tall" || b.shape === "torch" || b.shape === "lilypad" || n === "sugar_cane") TABLE[b.id] = hand(0);
 }
@@ -141,6 +143,8 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return one(Items.Emerald);
     case Block.Glowstone:
       return one(Items.GlowstoneDust, between(2, 4));
+    case Block.Melon:
+      return one(Items.MelonSlice, between(3, 7));
     case Block.Bookshelf:
       return one(Items.Book, 3);
     case Block.DeadBush:
@@ -167,4 +171,21 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
   if (shape === "slab" && propertyOf(state, "type") === "double") return one(block, 2);
   if (shape === "door" || shape === "tall") return one(block);
   return one(block);
+}
+
+/** Experience from ores that drop what they hold (coal, gems, redstone, lapis), when harvested. */
+const ORE_XP: Partial<Record<number, readonly [number, number]>> = {
+  [Block.CoalOre]: [0, 2],
+  [Block.DiamondOre]: [3, 7],
+  [Block.EmeraldOre]: [3, 7],
+  [Block.LapisOre]: [2, 5],
+  [Block.RedstoneOre]: [1, 5],
+};
+
+/** The experience breaking a block gives with a held item (or none). */
+export function xpOf(state: number, held: ItemStack | null, random: () => number): number {
+  const block = STATE_BLOCK[state];
+  const range = ORE_XP[block];
+  if (!range || !canHarvest(block, held)) return 0;
+  return range[0] + Math.floor(random() * (range[1] - range[0] + 1));
 }

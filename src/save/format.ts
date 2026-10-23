@@ -2,6 +2,7 @@ import type { SavedEntity } from "../blockEntities.js";
 import { BLOCKS, HOTBAR } from "../blocks.js";
 import type { SavedDrop } from "../drops.js";
 import type { SavedStack } from "../items.js";
+import { FRESH_VITALS, type Difficulty, type SavedVitals } from "../vitals.js";
 
 /**
  * Version of the save format. Every record carries the version that wrote it: older records are migrated
@@ -14,8 +15,11 @@ import type { SavedStack } from "../items.js";
  * 4. Guests: the players who joined the world from elsewhere, each by their id.
  * 5. Items: worlds have a game mode, players and guests an inventory (instead of a hotbar of block
  *    names), chunks their chests' and furnaces' contents and the items lying in them.
+ * 6. Survival: worlds have a difficulty and may be hardcore; players and guests their health, hunger and
+ *    experience, the bed they sleep in, and whether they fly or look on (dead in hardcore); chunks the
+ *    orbs of experience lying in them, and furnaces the experience they keep.
  */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 
 /** How a world is played: gathering and crafting, or with every block at hand. */
 export type GameMode = "survival" | "creative";
@@ -45,9 +49,22 @@ export interface WorldMeta {
   chunks: number;
   bytes: number;
   mode: GameMode;
+  difficulty: Difficulty;
+  /** One life: a player who dies looks on, and the difficulty stays hard. */
+  hardcore: boolean;
 }
 
-export interface PlayerRecord {
+/** What a player is besides where they are and what they carry. */
+export interface PlayerLife {
+  vitals: SavedVitals;
+  /** The bed they last slept in (its head), where they come back after dying, or null for the world's spawn. */
+  bed: Position | null;
+  /** Died in a hardcore world: they look on. */
+  spectating: boolean;
+  flying: boolean;
+}
+
+export interface PlayerRecord extends PlayerLife {
   format: number;
   /** The world's id. */
   world: string;
@@ -62,7 +79,7 @@ export interface PlayerRecord {
 }
 
 /** A player who joined the world from another browser, kept for when they come back. */
-export interface GuestRecord {
+export interface GuestRecord extends PlayerLife {
   format: number;
   /** The world's id. */
   world: string;
@@ -102,7 +119,7 @@ export interface ChunkRecord {
   ticks: SavedTick[];
   /** What its chests and furnaces hold. */
   entities: SavedEntity[];
-  /** The items lying in it. */
+  /** The items and orbs of experience lying in it. */
   drops: SavedDrop[];
 }
 
@@ -126,15 +143,18 @@ function hotbarInventory(r: { format: number; hotbar?: string[] }): { format: nu
   return { ...next(rest), inventory };
 }
 
+/** A player from before survival: alive and well, with nothing learned. */
+const fresh = (r: { format: number }): { format: number } & PlayerLife => ({ ...next(r), vitals: { ...FRESH_VITALS }, bed: null, spectating: false, flying: false });
+
 const MIGRATIONS: Record<RecordKind, Migration<{ format: number }>[]> = {
-  // Worlds from before game modes were played with every block at hand
-  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" })],
+  // Worlds from before game modes were played with every block at hand; from before difficulty, normal
+  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false })],
   // Players from before the hotbar could change get the hotbar it had; their hotbar becomes their inventory
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh],
   // Chunks from before biomes were all made like plains; from before items they hold none
-  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] })],
+  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next],
   // Guests came with format 4
-  guest: [next, next, next, hotbarInventory],
+  guest: [next, next, next, hotbarInventory, fresh],
 };
 
 export type RecordKind = "world" | "player" | "chunk" | "guest";

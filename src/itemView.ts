@@ -17,10 +17,20 @@ export interface ShownDrop {
   position: Vec3;
 }
 
-/** Block items drawn as cubes (the rest flat), and how big. */
-const CUBES: ReadonlySet<string> = new Set(["cube", "cactus", "stairs", "chest", "slab"]);
+/** An orb of experience to draw: which, its points, and where. */
+export interface ShownOrb {
+  id: number;
+  xp: number;
+  position: Vec3;
+}
+
+/** Block items drawn as cubes (the rest flat), and how big; orbs. */
+const CUBES: ReadonlySet<string> = new Set(["cube", "cactus", "stairs", "chest", "slab", "bed"]);
 const CUBE_SIZE = 0.25;
 const FLAT_SIZE = 0.4;
+const ORB_SIZE = 0.35;
+/** The points from which an orb looks the next size larger (Minecraft's). */
+const ORB_STEPS = [3, 7, 17, 37, 73, 149, 307, 617, 1237, 2477];
 
 /** A mesh of quads with their own corners: corners (x, y, z) and texture coordinates (u, v) per corner. */
 function quadMesh(quads: Array<{ corners: number[]; uvs: number[]; color: readonly number[] }>): Mesh {
@@ -48,15 +58,20 @@ function inTile(uvs: TileUVs, tile: number, u: number, v: number): [number, numb
 /**
  * The items lying about, drawn as Minecraft does: block items as small spinning cubes with their faces'
  * textures, other items as their picture, turning and bobbing; as bright as the light where they lie.
- * Also the cracks over the block being broken. Without textures (Canvas 2D) items are colored boxes and
- * there are no cracks.
+ * Orbs of experience face the camera, glowing green and yellow by turns. Also the cracks over the block
+ * being broken. Without textures (Canvas 2D) items and orbs are colored boxes and there are no cracks.
  */
 export class ItemView extends SimObject {
   /** The items to draw. */
   drops: () => Iterable<ShownDrop> = () => [];
+  /** The orbs of experience to draw. */
+  orbs: () => Iterable<ShownOrb> = () => [];
   /** The block being broken and how far (0-1), or null. */
   cracking: () => { x: number; y: number; z: number; state: number; progress: number } | null = () => null;
   private readonly nodes: Map<number, { node: MeshNode; brightness: number; spin: number }> = new Map();
+  private readonly orbNodes: Map<number, { node: MeshNode; size: number; phase: number }> = new Map();
+  private readonly orbMeshes: Map<number, Mesh> = new Map();
+  private readonly forward: Vec3 = { x: 0, y: 0, z: 1 };
   private readonly meshes: Map<Item, Mesh> = new Map();
   private crack: MeshNode | null = null;
   private crackKey = "";
@@ -147,7 +162,55 @@ export class ItemView extends SimObject {
       this.removeResource(entry.node);
       this.nodes.delete(id);
     }
+    this.updateOrbs();
     this.updateCracks();
+  }
+
+  /** An orb's picture by size (0-10), standing up in the xy plane. */
+  private orbMesh(size: number): Mesh {
+    let mesh = this.orbMeshes.get(size);
+    if (mesh) return mesh;
+    if (!this.atlas) {
+      mesh = Mesh.box(0.1 + size * 0.015);
+    } else {
+      const tile = atlasIndex(`experience_orb_${size}`);
+      const s = ORB_SIZE / 2;
+      const uv = [...inTile(this.atlas.uvs, tile, 0, 1), ...inTile(this.atlas.uvs, tile, 1, 1), ...inTile(this.atlas.uvs, tile, 1, 0), ...inTile(this.atlas.uvs, tile, 0, 0)];
+      mesh = quadMesh([{ corners: [-s, -s, 0, s, -s, 0, s, s, 0, -s, s, 0], uvs: uv, color: [1, 1, 1] }]);
+    }
+    this.orbMeshes.set(size, mesh);
+    return mesh;
+  }
+
+  /** The orbs, turned to the camera, their color swinging between green and yellow. */
+  private updateOrbs(): void {
+    const camera = this.sim?.camera;
+    const f = camera ? camera.getForward(this.forward) : this.forward;
+    const yaw = Math.atan2(f.x, f.z);
+    const seen = new Set<number>();
+    for (const o of this.orbs()) {
+      seen.add(o.id);
+      const size = ORB_STEPS.filter((n) => o.xp >= n).length;
+      let entry = this.orbNodes.get(o.id);
+      if (!entry || entry.size !== size) {
+        if (entry) this.removeResource(entry.node);
+        const material = this.atlas
+          ? new Material({ color: "#80ff20", shading: "unlit", map: this.atlas.texture, alphaTest: 0.1, side: "double" })
+          : new Material({ color: "#80ff20", shading: "flat" });
+        entry = { node: this.addNode(new MeshNode(this.orbMesh(size), material, new Transform()), false), size, phase: (o.id * 1.7) % (Math.PI * 2) };
+        this.orbNodes.set(o.id, entry);
+      }
+      const t = entry.node.transform;
+      t.position = { x: o.position.x, y: o.position.y + ORB_SIZE / 2 + 0.05, z: o.position.z };
+      quat.setAxisAngle(t.rotation, { x: 0, y: 1, z: 0 }, yaw);
+      const swing = (Math.sin(this.time * 3 + entry.phase) + 1) / 2;
+      entry.node.material.color = `rgb(${Math.round(128 + swing * 127)},255,${Math.round(swing * 40)})`;
+    }
+    for (const [id, entry] of this.orbNodes) {
+      if (seen.has(id)) continue;
+      this.removeResource(entry.node);
+      this.orbNodes.delete(id);
+    }
   }
 
   /** The cracks over the block being broken: a box a little larger than its outline, the stage's texture. */

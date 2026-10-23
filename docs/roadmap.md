@@ -419,7 +419,7 @@ start rather than fitted to it later.
   up. New worlds pick one, older ones are creative (save format 5), quick play takes `&mode=creative`.
 - Items (`src/items.ts`): every block, 25 materials and foods, 25 tools in five tiers (gold as fast as
   Minecraft's and as weak), 16 pieces of armor (worn in their slots; protection comes with health in
-  Phase 6). Not yet: buckets, shears, flint and steel, beds (Phase 6), food that can be eaten (Phase 6).
+  Phase 6). Not yet: buckets, shears, flint and steel; beds and food came in Phase 6.
 - Inventory (`src/inventory.ts`): 36 slots, 4 armor slots and an off-hand slot (kept, not used yet).
   Minecraft's clicks: pick up, put down, swap, halve, one at a time, shift to move across, double click to
   gather; not yet dragging to spread a stack.
@@ -474,6 +474,42 @@ start rather than fitted to it later.
   tool, furnace progress over ticks, chest contents through a save.
 
 ### Phase 6: Survival and game modes (M)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- Game modes per world: survival, creative (flying: a double tap of Space, Shift to go down, as Craft's
+  sprint key is Shift) and hardcore (survival on hard, one life; after dying the player looks on as a
+  spectator, flying through blocks). Chosen when the world is made; no switching in a world yet.
+- Health (`src/vitals.ts`, `src/survival.ts`): Minecraft's rules. Falls (a point per block beyond three,
+  half onto a bed, none into water or onto a ladder), drowning, lava (4, and burning for 15 seconds, put
+  out by water), burning, suffocating, cactus and the void; half a second in which only a harder hit lands;
+  a red flash, hearts that flash when hit and shake when nearly gone, flames on screen while burning. The
+  death screen gives the cause and score; what the player carried and 7 points of experience per level
+  (100 at most) fall where they died; they come back at their bed (beside it, if there's room) or the
+  world's spawn. Creative takes only the void, spectators nothing. Fire blocks: not yet.
+- Hunger: Minecraft's exhaustion (sprinting, swimming, jumping, breaking, hurts), saturation, healing (from
+  18, quickly at 20 with saturation), starving by difficulty, no sprinting at 6 or less. Food came short
+  before monsters, so came: melons in jungles (slices), mushrooms in dark forests, swamps and taigas, bowls
+  and mushroom stew, and loot chests in dungeons (bread, wheat, apples, string for wool and so beds, coal,
+  iron, gold, redstone, diamonds). Generator version 3.
+- Armor: Minecraft's points and toughness, against lava and cactus (falls, drowning and the rest go through
+  armor in Minecraft too); every piece wears a use per 4 damage.
+- Beds in the 16 colors, from wool and planks: two blocks long, the head the way the player looks; using
+  one makes it home, at night the player lies down, and when every player sleeps for 5 seconds morning
+  comes. Waking with Space or Shift, or a hit. Minecraft 26 draws beds as block models with textures of
+  their own, which are imported; Craft's world is Minecraft's mirrored, so the sides swap.
+- Experience: orbs from coal, diamond, emerald, lapis and redstone ores and from smelting (the furnace keeps
+  it until its output is taken); they fly to the nearest player within 8 blocks; Minecraft's levels.
+- Difficulty: peaceful, easy, normal, hard, set when the world is made and from the game menu (hard in
+  hardcore); for now it decides hunger and starving, damage waits for monsters (Phase 7).
+- The status bar (`src/ui/hud.ts`) uses Minecraft's sprites when imported (gui/sprites/hud), its own
+  drawings otherwise.
+- A game played alone pauses under its game menu, as Minecraft's; a shared one goes on.
+- Multiplayer (protocol 3): a guest's own physics runs on their side, so they feel their own hurts and
+  send their vitals to the host for keeping; deaths are told to everyone; orbs fly to guests; difficulty
+  changes reach them; the night passes when host and guests all sleep.
+- Save format 6: difficulty and hardcore; players' and guests' vitals, beds, flying and spectating; orbs in
+  chunks; furnaces' experience.
+
 
 - **Game modes** per world: survival and creative, and hardcore as an option. Creative flies (double-tap
   Space), breaks instantly, has endless blocks and takes no damage.
@@ -605,4 +641,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 5 and M are done; next is Phase 6, survival: health, hunger, armor, beds and death.
+Phases 0 to 6 and M are done; next is Phase 7, mobs and combat.

@@ -10,6 +10,12 @@ const PICKUP_RANGE = 1.5;
 const PICKUP_DELAY = 0.5;
 /** Dropped items of the same kind this close together become one. */
 const MERGE_RANGE = 0.6;
+/** Experience orbs: how near a player draws them in, how near they are taken, and how fast they fly. */
+const ORB_PULL = 8;
+const ORB_TAKE = 1.25;
+const ORB_SPEED = 12;
+/** Orb sizes, as Minecraft splits experience into orbs: the largest that fits, again and again. */
+const ORB_SIZES = [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3, 1];
 const GRAVITY = 16;
 const MAX_FALL = 40;
 
@@ -44,29 +50,72 @@ export class DroppedItem extends Entity {
   }
 }
 
-/** Someone who picks things up: where they stand, and taking a stack (returns what didn't fit, or null). */
+/** An orb of experience: drifts, then flies to a player near it, who takes its points. */
+export class Orb extends Entity {
+  readonly xp: number;
+  readonly id: number;
+  age: number = 0;
+
+  constructor(world: VoxelWorld, id: number, position: Vec3, xp: number) {
+    super(world, position, 0.125, 0.25);
+    this.id = id;
+    this.xp = xp;
+  }
+
+  /** Falls and slides like an item, or flies toward a point (a player's middle). */
+  step(dt: number, toward: Vec3 | null): void {
+    this.age += dt;
+    if (!this.active) return;
+    const v = this.velocity;
+    if (toward) {
+      const dx = toward.x - this.position.x;
+      const dy = toward.y - this.position.y;
+      const dz = toward.z - this.position.z;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      const k = Math.min(1, 6 * dt);
+      v.x += ((dx / d) * ORB_SPEED - v.x) * k;
+      v.y += ((dy / d) * ORB_SPEED - v.y) * k;
+      v.z += ((dz / d) * ORB_SPEED - v.z) * k;
+    } else {
+      v.y = Math.max(-MAX_FALL, v.y - GRAVITY * dt);
+      const drag = Math.exp(-(this.onGround ? 10 : 1) * dt);
+      v.x *= drag;
+      v.z *= drag;
+    }
+    this.move(dt);
+  }
+}
+
+/**
+ * Someone who picks things up: where they stand, taking a stack (returns what didn't fit, or null), and
+ * taking experience (players who can).
+ */
 export interface Collector {
   position: Vec3;
   take(stack: ItemStack): ItemStack | null;
+  xp?(points: number): void;
 }
 
-/** A dropped item as saves keep it. */
+/** A dropped item or an orb of experience as saves keep it. */
 export interface SavedDrop {
   x: number;
   y: number;
   z: number;
-  item: SavedStack;
+  item?: SavedStack;
+  xp?: number;
   age: number;
 }
 
 /**
  * The items dropped in the world: from broken blocks and chests, thrown out of the inventory. They fall,
  * merge with others of their kind nearby, are picked up by whoever comes close (after a moment, so a
- * thrown item isn't picked straight back up) and disappear after five minutes. Runs where the world does
- * (alone, or the host); a guest only sees them (see the host's messages).
+ * thrown item isn't picked straight back up) and disappear after five minutes. Orbs of experience too,
+ * which fly to a player near them. Runs where the world does (alone, or the host); a guest only sees them
+ * (see the host's messages).
  */
 export class Drops extends SimObject {
   readonly items: Map<number, DroppedItem> = new Map();
+  readonly orbs: Map<number, Orb> = new Map();
   /** Who picks items up. */
   collectors: () => readonly Collector[] = () => [];
   private nextId: number = 1;
@@ -85,12 +134,25 @@ export class Drops extends SimObject {
     return item;
   }
 
+  /** Experience at a point, in orbs (the largest sizes that make it up), flying off a little. */
+  spawnXp(x: number, y: number, z: number, points: number): void {
+    let left = Math.floor(points);
+    while (left > 0) {
+      const size = ORB_SIZES.find((s) => s <= left)!;
+      left -= size;
+      const orb = new Orb(this.world, this.nextId++, { x, y, z }, size);
+      Object.assign(orb.velocity, { x: (Math.random() - 0.5) * 3, y: 2 + Math.random() * 2, z: (Math.random() - 0.5) * 3 });
+      this.orbs.set(orb.id, orb);
+    }
+  }
+
   /** Drops stacks out of a block, as breaking it or the chest it was does. */
   spill(x: number, y: number, z: number, stacks: readonly (ItemStack | null)[]): void {
     for (const s of stacks) if (s) this.spawn(x + 0.25 + Math.random() * 0.5, y + 0.25 + Math.random() * 0.5, z + 0.25 + Math.random() * 0.5, s);
   }
 
   override update(dt: number): void {
+    if (this.sim?.paused) return;
     for (const item of this.items.values()) {
       item.step(dt);
       if (item.age > LIFETIME || item.position.y < -64) this.items.delete(item.id);
@@ -100,7 +162,42 @@ export class Drops extends SimObject {
       this.mergeTimer = 0;
       this.merge();
     }
-    for (const c of this.collectors()) this.collect(c);
+    const collectors = this.collectors();
+    for (const c of collectors) this.collect(c);
+    this.moveOrbs(dt, collectors);
+  }
+
+  /** Orbs fly to the nearest player that takes experience within reach, who takes them on arrival. */
+  private moveOrbs(dt: number, collectors: readonly Collector[]): void {
+    for (const orb of this.orbs.values()) {
+      let nearest: Collector | null = null;
+      let best = ORB_PULL;
+      const p = orb.position;
+      for (const c of collectors) {
+        if (!c.xp) continue;
+        const d = Math.hypot(c.position.x - p.x, c.position.y + 0.9 - p.y, c.position.z - p.z);
+        if (d < best) {
+          best = d;
+          nearest = c;
+        }
+      }
+      if (nearest && best < ORB_TAKE) {
+        this.orbs.delete(orb.id);
+        nearest.xp!(orb.xp);
+        continue;
+      }
+      orb.step(dt, nearest ? { x: nearest.position.x, y: nearest.position.y + 0.9, z: nearest.position.z } : null);
+      if (orb.age > LIFETIME || orb.position.y < -64) this.orbs.delete(orb.id);
+    }
+  }
+
+  /** Hands an orb to a collector (a guest asking for it). Returns its points, or 0 if it's gone. */
+  giveOrb(id: number, c: Collector): number {
+    const orb = this.orbs.get(id);
+    if (!orb || !c.xp) return 0;
+    this.orbs.delete(id);
+    c.xp(orb.xp);
+    return orb.xp;
   }
 
   /** Items of a kind lying close together become one stack (as far as stacks go). */
@@ -150,25 +247,40 @@ export class Drops extends SimObject {
     return { ...offered, count: taken };
   }
 
-  /** The dropped items in a chunk, taken out (it is being unloaded) or not (saved). */
+  /** The dropped items and orbs in a chunk, taken out (it is being unloaded) or not (saved). */
   inChunk(cx: number, cz: number, take: boolean): SavedDrop[] {
     const out: SavedDrop[] = [];
+    const inside = (p: Vec3): boolean => Math.floor(p.x / CHUNK_SIZE) === cx && Math.floor(p.z / CHUNK_SIZE) === cz;
     for (const item of this.items.values()) {
       const p = item.position;
-      if (Math.floor(p.x / CHUNK_SIZE) !== cx || Math.floor(p.z / CHUNK_SIZE) !== cz) continue;
+      if (!inside(p)) continue;
       out.push({ x: p.x, y: p.y, z: p.z, item: saveStack(item.stack)!, age: item.age });
       if (take) this.items.delete(item.id);
+    }
+    for (const orb of this.orbs.values()) {
+      const p = orb.position;
+      if (!inside(p)) continue;
+      out.push({ x: p.x, y: p.y, z: p.z, xp: orb.xp, age: orb.age });
+      if (take) this.orbs.delete(orb.id);
     }
     return out;
   }
 
-  /** Puts saved items back (their chunk was read). */
+  /** Puts saved items and orbs back (their chunk was read). */
   restore(saved: readonly SavedDrop[]): void {
     for (const d of saved) {
+      const age = Math.max(0, Number(d.age) || 0);
+      const xp = Math.floor(Number(d.xp) || 0);
+      if (xp > 0) {
+        const orb = new Orb(this.world, this.nextId++, { x: d.x, y: d.y, z: d.z }, xp);
+        orb.age = age;
+        this.orbs.set(orb.id, orb);
+        continue;
+      }
       const s = loadStack(d.item);
       if (!s) continue;
       const item = this.spawn(d.x, d.y, d.z, s, { x: 0, y: 0, z: 0 }, 0);
-      item.age = Math.max(0, Number(d.age) || 0);
+      item.age = age;
     }
   }
 }

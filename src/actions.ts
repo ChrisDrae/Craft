@@ -1,8 +1,8 @@
-import { BLOCKS, Block, FLUID, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
+import { BLOCKS, Block, DIR_X, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
 import { placementState } from "./placement.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT } from "./player.js";
-import { standsOn, supported } from "./updates.js";
+import { standsOn, sturdy, supported } from "./updates.js";
 import type { VoxelWorld } from "./world.js";
 
 /** How far away blocks can be broken or placed, in blocks. */
@@ -78,7 +78,8 @@ function occupied(standing: readonly { x: number; y: number; z: number }[], x: n
 /**
  * Places a block against the face aimed at (see placementState), or adds it to the block aimed at: a slab
  * on a slab of its kind makes a double slab, snow on snow a thicker layer, and short grass gives way to it.
- * Nothing happens where the block has nothing to hold it up, the place is taken, or someone stands there.
+ * Doors and tall plants take two blocks up, beds two along the way the player looks. Nothing happens where
+ * the block has nothing to hold it up, the place is taken, or someone stands there.
  */
 export function placeBlock(world: VoxelWorld, a: Action, standing: readonly { x: number; y: number; z: number }[]): boolean {
   const aimed = world.get(a.x, a.y, a.z);
@@ -104,20 +105,27 @@ export function placeBlock(world: VoxelWorld, a: Action, standing: readonly { x:
   const y = inPlace ? a.y : a.y + a.ny;
   const z = inPlace ? a.z : a.z + a.nz;
   if (!makesRoom(world.get(x, y, z))) return false;
-  // Doors and tall plants are two blocks high, on ground that holds them
+  // Doors and tall plants are two blocks high, on ground that holds them; beds two long, on a floor
   const twoHigh = SHAPE[state] === "door" || SHAPE[state] === "tall";
+  const bed = SHAPE[state] === "bed";
+  const ahead = bed ? FACING_DIR[propertyOf(state, "facing")] : -1;
+  const [hx, hz] = bed ? [x + DIR_X[ahead], z + DIR_Z[ahead]] : [x, z];
   if (twoHigh) {
     if (!makesRoom(world.get(x, y + 1, z)) || !standsOn(world, x, y, z, state)) return false;
+  } else if (bed) {
+    if (!makesRoom(world.get(hx, y, hz)) || !sturdy(world.get(x, y - 1, z), Dir.Up) || !sturdy(world.get(hx, y - 1, hz), Dir.Up)) return false;
   } else if (!supported(world, x, y, z, state)) {
     return false;
   }
-  if (SOLID[state] && (occupied(standing, x, y, z) || (twoHigh && occupied(standing, x, y + 1, z)))) return false;
+  const other = twoHigh ? [x, y + 1, z] : bed ? [hx, y, hz] : null;
+  if (SOLID[state] && (occupied(standing, x, y, z) || (other && occupied(standing, other[0], other[1], other[2])))) return false;
   if (!world.set(x, y, z, state)) return false;
   if (twoHigh) world.set(x, y + 1, z, withProperties(state, { half: "upper" }));
+  if (bed) world.set(hx, y, hz, withProperties(state, { part: "head" }));
   return true;
 }
 
-/** The blocks an action may change, for putting them right on a guest that guessed wrong. */
+/** The blocks an action may change, for putting them right on a guest that guessed wrong (a bed's head among them). */
 export function touched(a: Action): Array<[number, number, number]> {
   const out: Array<[number, number, number]> = [];
   for (const [x, y, z] of [
@@ -126,5 +134,7 @@ export function touched(a: Action): Array<[number, number, number]> {
   ]) {
     for (let dy = -1; dy <= 1; dy++) out.push([x, y + dy, z]);
   }
+  const [x, y, z] = [a.x + a.nx, a.y + a.ny, a.z + a.nz];
+  for (const d of [Dir.PosX, Dir.NegX, Dir.PosZ, Dir.NegZ]) out.push([x + DIR_X[d], y, z + DIR_Z[d]]);
   return out;
 }

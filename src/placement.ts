@@ -30,7 +30,8 @@ function normalFacing(nx: number, nz: number): string {
  * - torches stand on floors and hang on walls, ladders only hang on walls;
  * - slabs and stairs (and trapdoors) take the top half when placed against a ceiling or the upper half of
  *   a wall, the bottom half otherwise;
- * - stairs, doors and trapdoors face the way the player looks; furnaces turn their front to the player.
+ * - stairs, doors and trapdoors face the way the player looks; furnaces turn their front to the player;
+ * - a bed's foot goes there, its head the way the player looks.
  */
 export function placementState(block: Block, aim: Aim, yaw: number): number | null {
   const info = BLOCKS[block];
@@ -53,6 +54,8 @@ export function placementState(block: Block, aim: Aim, yaw: number): number | nu
       return stateOf(block, { facing: look, half: upper ? "top" : "bottom" });
     case "door":
       return stateOf(block, { facing: look });
+    case "bed":
+      return stateOf(block, { facing: look, part: "foot" });
   }
   if (has("axis")) return stateOf(block, { axis: nx !== 0 ? "x" : nz !== 0 ? "z" : "y" });
   if (has("facing")) return stateOf(block, { facing: OPPOSITE[look] });

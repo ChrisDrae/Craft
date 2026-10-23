@@ -12,6 +12,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
+const COLORS = ["white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"];
 /** The block textures Craft draws (src/textures.ts TILES), plus the overlay tinted onto grass sides. */
 const BLOCKS = [
   "grass_block_top",
@@ -120,7 +121,15 @@ const BLOCKS = [
   "destroy_stage_7",
   "destroy_stage_8",
   "destroy_stage_9",
-  ...["white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"].map((c) => `${c}_wool`),
+  ...COLORS.map((c) => `${c}_wool`),
+  // Beds as block models (Minecraft 26 and later; before, Craft draws its own)
+  ...COLORS.flatMap((c) => ["head_up", "head_east", "head_west", "foot_up", "foot_east", "foot_west", "foot_south"].map((f) => `${c}_bed_${f}`)),
+  "bed_head_north",
+  "bed_down",
+  "melon_side",
+  "melon_top",
+  "brown_mushroom",
+  "red_mushroom",
 ];
 /** The item textures Craft draws (src/items.ts), saved as item_<name>. */
 const ITEMS = [
@@ -149,8 +158,31 @@ const ITEMS = [
   "wheat",
   "apple",
   "bread",
+  "melon_slice",
+  "bowl",
+  "mushroom_stew",
   ...["wooden", "stone", "iron", "golden", "diamond"].flatMap((m) => ["pickaxe", "axe", "shovel", "hoe", "sword"].map((t) => `${m}_${t}`)),
   ...["leather", "iron", "golden", "diamond"].flatMap((m) => ["helmet", "chestplate", "leggings", "boots"].map((p) => `${m}_${p}`)),
+];
+/** The status bar's sprites, by their path under gui/sprites/hud. */
+const HUD = [
+  "heart/container",
+  "heart/container_blinking",
+  "heart/container_hardcore",
+  "heart/full",
+  "heart/half",
+  "heart/hardcore_full",
+  "heart/hardcore_half",
+  "food_empty",
+  "food_full",
+  "food_half",
+  "armor_empty",
+  "armor_full",
+  "armor_half",
+  "air",
+  "air_bursting",
+  "experience_bar_background",
+  "experience_bar_progress",
 ];
 const PHASES = ["full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"];
 const TEXTURES = "assets/minecraft/textures/";
@@ -158,8 +190,11 @@ const TEXTURES = "assets/minecraft/textures/";
 const WANTED = new Map([
   ...BLOCKS.map((n) => [n, [`block/${n}.png`]]),
   ...ITEMS.map((n) => [`item_${n}`, [`item/${n}.png`]]),
-  // The chest is drawn from its model's texture
+  // The chest is drawn from its model's texture, orbs of experience cut from their sheet
   ["chest_entity", ["entity/chest/normal.png"]],
+  ["experience_orb", ["entity/experience/experience_orb.png", "entity/experience_orb.png"]],
+  // The status bar: hearts, food, armor, air and the experience bar (Minecraft 1.20.2 and later)
+  ...HUD.map((n) => [`hud_${n.replaceAll("/", "_")}`, [`gui/sprites/hud/${n}.png`]]),
   ["sun", ["environment/celestial/sun.png", "environment/sun.png"]],
   ["clouds", ["environment/clouds.png"]],
   ...PHASES.map((p) => [`moon_${p}`, [`environment/celestial/moon/${p}.png`]]),

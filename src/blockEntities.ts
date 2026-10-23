@@ -1,6 +1,6 @@
 import { Block, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
 import { CHUNK_SIZE, type Chunk } from "./chunk.js";
-import { SMELT_TIME, fuelOf, smelt } from "./crafting.js";
+import { SMELT_TIME, fuelOf, smelt, smeltXp } from "./crafting.js";
 import { ITEMS, loadStack, saveStack, type ItemStack, type SavedStack } from "./items.js";
 
 /**
@@ -22,6 +22,8 @@ export interface FurnaceEntity {
   burnTotal: number;
   /** Ticks into smelting the input, up to SMELT_TIME. */
   cook: number;
+  /** Experience from what it smelted, given to whoever takes from the output (takeXp). */
+  xp: number;
 }
 
 export type BlockEntity = ChestEntity | FurnaceEntity;
@@ -34,7 +36,7 @@ export const FURNACE_OUTPUT = 2;
 /** A new, empty entity for a block that has one, or null. */
 export function entityFor(block: number): BlockEntity | null {
   if (block === Block.Chest) return { kind: "chest", items: new Array(CHEST_SLOTS).fill(null) };
-  if (block === Block.Furnace) return { kind: "furnace", items: [null, null, null], burn: 0, burnTotal: 0, cook: 0 };
+  if (block === Block.Furnace) return { kind: "furnace", items: [null, null, null], burn: 0, burnTotal: 0, cook: 0, xp: 0 };
   return null;
 }
 
@@ -77,11 +79,20 @@ export function furnaceTick(f: FurnaceEntity): boolean {
       f.items[FURNACE_INPUT] = input.count > 1 ? { ...input, count: input.count - 1 } : null;
       const output = f.items[FURNACE_OUTPUT];
       f.items[FURNACE_OUTPUT] = output ? { ...output, count: output.count + 1 } : { item: made, count: 1, damage: 0 };
+      f.xp += smeltXp(made);
     }
   } else {
     f.cook = 0;
   }
   return f.burn > 0 || canSmelt(f);
+}
+
+/** Takes the experience a furnace has kept: its whole points, and one more by chance for the fraction. */
+export function takeXp(f: FurnaceEntity, random: () => number): number {
+  const whole = Math.floor(f.xp);
+  const xp = whole + (random() < f.xp - whole ? 1 : 0);
+  f.xp = 0;
+  return xp;
 }
 
 /** The furnace's state for whether it burns. */
@@ -133,11 +144,12 @@ export interface SavedEntity {
   burn?: number;
   burnTotal?: number;
   cook?: number;
+  xp?: number;
 }
 
 export function saveEntity(x: number, y: number, z: number, e: BlockEntity): SavedEntity {
   const items = e.items.map(saveStack);
-  return e.kind === "furnace" ? { x, y, z, kind: e.kind, items, burn: e.burn, burnTotal: e.burnTotal, cook: e.cook } : { x, y, z, kind: e.kind, items };
+  return e.kind === "furnace" ? { x, y, z, kind: e.kind, items, burn: e.burn, burnTotal: e.burnTotal, cook: e.cook, xp: e.xp } : { x, y, z, kind: e.kind, items };
 }
 
 /** A saved entity back, or null for a kind this Craft doesn't know. */
@@ -149,6 +161,7 @@ export function loadEntity(s: SavedEntity): BlockEntity | null {
     fresh.burn = Math.max(0, Number(s.burn) || 0);
     fresh.burnTotal = Math.max(fresh.burn, Number(s.burnTotal) || 0);
     fresh.cook = Math.max(0, Math.min(SMELT_TIME, Number(s.cook) || 0));
+    fresh.xp = Math.max(0, Number(s.xp) || 0);
   }
   return fresh;
 }

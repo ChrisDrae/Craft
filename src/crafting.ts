@@ -96,11 +96,15 @@ export const SHAPED: readonly Shaped[] = [
   shaped(["###"], { "#": "sugar_cane" }, "paper", 3),
   shaped(["WWW"], { W: "wheat" }, "bread"),
   ...COLORS.map((c) => shaped(["##"], { "#": `${c}_wool` }, `${c}_carpet`, 3)),
+  ...COLORS.map((c) => shaped(["WWW", "PPP"], { W: `${c}_wool`, P: "#planks" }, `${c}_bed`)),
+  shaped(["# #", " # "], { "#": "#planks" }, "bowl", 4),
+  shaped(["###", "###", "###"], { "#": "melon_slice" }, "melon"),
 ];
 
 export const SHAPELESS: readonly Shapeless[] = [
   ...WOODS.map((w) => shapeless([`${w}_log`], `${w}_planks`, 4)),
   shapeless(["paper", "paper", "paper", "leather"], "book"),
+  shapeless(["brown_mushroom", "red_mushroom", "bowl"], "mushroom_stew"),
 ];
 
 /** Whether an item fits an ingredient (a name or a #tag). */
@@ -195,6 +199,22 @@ const SMELTING: Readonly<Record<string, string>> = {
 export function smelt(item: Item): Item | null {
   const out = SMELTING[ITEMS[item].name];
   return out ? itemByName(out) : null;
+}
+
+/** Experience a furnace keeps for each item it makes, by what it made, until someone takes the output. */
+const SMELT_XP: Readonly<Record<string, number>> = {
+  iron_ingot: 0.7,
+  gold_ingot: 1,
+  copper_ingot: 0.7,
+  glass: 0.1,
+  stone: 0.1,
+  brick: 0.3,
+  charcoal: 0.15,
+};
+
+/** The experience smelting gives per item made. */
+export function smeltXp(made: Item): number {
+  return SMELT_XP[ITEMS[made].name] ?? 0;
 }
 
 /** Ticks of furnace burning an item gives (0 if it doesn't burn). */

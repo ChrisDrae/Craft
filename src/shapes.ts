@@ -60,6 +60,23 @@ function turn(box: Box, turns: number): Box {
 
 const TURNS: Readonly<Record<string, number>> = { north: 0, east: 1, south: 2, west: 3 };
 
+/** The direction a face points after a quarter turn as turn() makes (north to east), by Dir. */
+const TURN_DIR: readonly number[] = [Dir.PosZ, Dir.NegZ, Dir.Up, Dir.Down, Dir.NegX, Dir.PosX];
+
+/** Quads turned like turn() turns boxes, their textures turning with them (a bed's pillow stays at its head). */
+function turnQuads(quads: Quad[], turns: number): Quad[] {
+  return quads.map((q) => {
+    const corners = new Float64Array(q.corners);
+    let { cull, dir } = q;
+    for (let t = 0; t < turns; t++) {
+      for (let k = 0; k < 12; k += 3) [corners[k], corners[k + 2]] = [1 - corners[k + 2], corners[k]];
+      if (cull >= 0) cull = TURN_DIR[cull];
+      if (dir >= 0) dir = TURN_DIR[dir];
+    }
+    return { ...q, corners, cull, dir };
+  });
+}
+
 /** Flips a box upside down within the cell. */
 const flip = (b: Box): Box => [b[0], 1 - b[4], b[2], b[3], 1 - b[1], b[5]];
 
@@ -251,6 +268,31 @@ function partsOf(state: number): Parts | null {
       const quads = boxQuads(turned, (d) => (d === front ? t[Face.Front] : t[lookOf(d)]));
       return { quads, collision: [turned], selection: [turned] };
     }
+    case "bed": {
+      // Built facing north (the head toward -z), then turned. A side shows Minecraft's texture of the
+      // opposite side: Craft's world is Minecraft's mirrored, and so the pillow stays at the head end
+      const color = info.name.slice(0, -"_bed".length);
+      const head = prop("part") === "head";
+      const part = head ? "head" : "foot";
+      const end = head ? Dir.NegZ : Dir.PosZ;
+      const tiles: Record<number, number> = {
+        [Dir.Up]: tileIndex(`${color}_bed_${part}_up`),
+        [Dir.Down]: tileIndex("bed_down"),
+        [Dir.PosX]: tileIndex(`${color}_bed_${part}_west`),
+        [Dir.NegX]: tileIndex(`${color}_bed_${part}_east`),
+        [end]: tileIndex(head ? "bed_head_north" : `${color}_bed_foot_south`),
+      };
+      const mattress: Box = [0, px(3), 0, 1, px(9), 1];
+      // Two wooden legs at the end
+      const z0 = head ? 0 : px(13);
+      const legs: Box[] = [
+        [0, 0, z0, px(3), px(3), z0 + px(3)],
+        [px(13), 0, z0, 1, px(3), z0 + px(3)],
+      ];
+      const quads = [...boxQuads(mattress, (d) => tiles[d], [Dir.Up, Dir.Down, Dir.PosX, Dir.NegX, end]), ...legs.flatMap((b) => boxQuads(b, () => tiles[Dir.Down]))];
+      const box: Box = [0, 0, 0, 1, px(9), 1];
+      return { quads: turnQuads(quads, TURNS[prop("facing")]), collision: [box], selection: [box] };
+    }
     case "lilypad": {
       // A leaf lying on the water, seen from above and below
       const leaf: Box = [0, px(0.25), 0, 1, px(0.25), 1];
@@ -338,7 +380,7 @@ for (let s = 0; s < STATE_COUNT; s++) {
 /**
  * The direction (Dir) of the block a state rests or hangs on, which it can't stay without, or -1:
  * torches and ladders on their wall (or the floor), plants, carpet, snow and cactus on the block below,
- * door halves on the block below (the upper half on the lower one).
+ * door halves on the block below (the upper half on the lower one), a bed's halves on each other.
  */
 export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s) => {
   const shape = SHAPE[s];
@@ -347,6 +389,8 @@ export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s)
     return facing === "up" ? Dir.Down : FACING_DIR[facing] ^ 1;
   }
   if (shape === "ladder") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
+  // A bed's halves hold each other: the head lies the way it faces from the foot
+  if (shape === "bed") return FACING_DIR[propertyOf(s, "facing")] ^ (propertyOf(s, "part") === "foot" ? 0 : 1);
   if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door" || shape === "tall" || shape === "lilypad") return Dir.Down;
   return -1;
 });

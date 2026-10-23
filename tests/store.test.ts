@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FORMAT_VERSION, NewerFormatError, type ChunkRecord } from "../src/save/format.js";
 import { WorldStore } from "../src/save/store.js";
 import { readWorldFile, writeWorldFile } from "../src/save/worldFile.js";
-import { freshStore, newMeta } from "./saveHelpers.js";
+import { LIFE, freshStore, newMeta } from "./saveHelpers.js";
 
 function chunk(world: string, cx: number, cz: number, fill: number): ChunkRecord {
   return { format: FORMAT_VERSION, world, cx, cz, generator: 1, palette: ["air", "stone"], blocks: new Uint8Array([fill, fill, fill]), biomes: "plains 256", ticks: [], entities: [], drops: [] };
@@ -18,6 +18,7 @@ const guest = (world: string, id: string) => ({
   pitch: 0,
   selected: 1,
   inventory: [{ item: "glass", count: 3 }, { item: "torch", count: 1 }],
+  ...LIFE,
 });
 
 const player = (world: string) => ({
@@ -29,6 +30,7 @@ const player = (world: string) => ({
   pitch: 0,
   selected: 2,
   inventory: [{ item: "stone", count: 64 }],
+  ...LIFE,
 });
 
 describe("WorldStore", () => {

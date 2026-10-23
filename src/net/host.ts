@@ -1,19 +1,20 @@
 import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, touched, type Action } from "../actions.js";
-import { saveEntity } from "../blockEntities.js";
+import { FURNACE_OUTPUT, saveEntity, takeXp } from "../blockEntities.js";
 import { BLOCKS, HOTBAR, PLACEABLE } from "../blocks.js";
 import { CHUNK_SIZE } from "../chunk.js";
-import type { Drops } from "../drops.js";
+import type { Collector, Drops } from "../drops.js";
 import { PLAYER_SLOTS } from "../inventory.js";
 import { loadStack, saveStack, type SavedStack } from "../items.js";
-import { dropsOf } from "../mining.js";
+import { dropsOf, xpOf } from "../mining.js";
 import { EYE_HEIGHT } from "../player.js";
-import type { GameMode } from "../save/format.js";
+import type { GameMode, Position } from "../save/format.js";
 import { compress, snapshotChunk } from "../save/codec.js";
 import type { WorldTicks } from "../ticks.js";
+import { DEATH_MESSAGES, FRESH_VITALS, Vitals, type DamageSource, type Difficulty } from "../vitals.js";
 import { VoxelWorld } from "../world.js";
 import type { Connection } from "./connection.js";
-import { PROTOCOL_VERSION, REGISTRY, decode, encode, type DropView, type GuestState, type PlayerView, type ToGuest, type ToHost } from "./protocol.js";
+import { ORB, PROTOCOL_VERSION, REGISTRY, decode, encode, type DropView, type GuestState, type PlayerView, type ToGuest, type ToHost } from "./protocol.js";
 
 /** Chunks sent to a guest per frame at most, and only while less than this many bytes wait to go out. */
 const CHUNKS_PER_FRAME = 6;
@@ -40,6 +41,8 @@ interface Visitor extends Guest {
   outbox: Promise<void>;
   /** The chest or furnace the guest has open, and what they were last sent of it. */
   open: { x: number; y: number; z: number; sent: string } | null;
+  /** Lying in a bed. */
+  asleep: boolean;
 }
 
 export interface HostOptions {
@@ -47,6 +50,9 @@ export interface HostOptions {
   ticks: WorldTicks;
   worldName: string;
   mode: GameMode;
+  /** The difficulty now, and whether the world is hardcore. */
+  difficulty: () => Difficulty;
+  hardcore: boolean;
   /** The items lying about, which guests see, pick up and throw. */
   drops: Drops;
   /** The host's own player, as the guests see them. */
@@ -59,6 +65,14 @@ export interface HostOptions {
   onLeave?: (guest: Guest) => void;
   /** Called when the guests come or go (for the game menu's list). */
   onGuests?: () => void;
+  /** Called with what everyone is told (a guest died), for the host's own screen. */
+  onNotice?: (text: string) => void;
+}
+
+/** A position that came from a guest, if it is one. */
+function position(p: unknown): Position | null {
+  const q = p as Position | null;
+  return q && finite(q.x, q.y, q.z) ? { x: Number(q.x), y: Number(q.y), z: Number(q.z) } : null;
 }
 
 /** Ids and names: short and plain. */
@@ -99,6 +113,38 @@ export class HostSession extends SimObject {
   /** Where chunks must be loaded for the guests: around each, as far as they see. */
   focuses(): Array<{ x: number; z: number; radius: number }> {
     return [...this.visitors.values()].map((v) => ({ x: v.state.position.x, z: v.state.position.z, radius: v.view }));
+  }
+
+  /** Whether every guest is asleep (the host's player must be too for the night to pass). */
+  get allAsleep(): boolean {
+    return [...this.visitors.values()].every((v) => v.asleep);
+  }
+
+  /** The guests as collectors of experience: orbs fly to them, and the points are sent. */
+  collectors(): Collector[] {
+    return [...this.visitors.values()]
+      .filter((v) => !v.state.spectating)
+      .map((v) => ({ position: v.state.position, take: (s) => s, xp: (points: number) => this.send(v, { t: "given", xp: points }) }));
+  }
+
+  /** Tells every guest something (and the host's screen). */
+  announce(text: string): void {
+    for (const v of this.visitors.values()) this.send(v, { t: "notice", text });
+    this.options.onNotice?.(text);
+  }
+
+  /** Tells the guests the difficulty changed. */
+  rulesChanged(): void {
+    for (const v of this.visitors.values()) this.send(v, { t: "rules", difficulty: this.options.difficulty() });
+  }
+
+  /** Morning: the guests wake, and get the time. */
+  wake(): void {
+    for (const v of this.visitors.values()) {
+      v.asleep = false;
+      this.send(v, { t: "wake" });
+      this.send(v, { t: "time", time: this.options.ticks.time });
+    }
   }
 
   /** Takes a new connection; it becomes a guest when it says hello and is welcome. */
@@ -149,11 +195,22 @@ export class HostSession extends SimObject {
     // A newcomer starts with nothing, or in creative with the usual blocks at hand
     const inventory: (SavedStack | null)[] = new Array(PLAYER_SLOTS).fill(null);
     if (this.options.mode === "creative") HOTBAR.forEach((b, i) => (inventory[i] = { item: BLOCKS[b].name, count: 1 }));
-    const state: GuestState = saved ?? { position: { x: spawn.x, y: spawn.y, z: spawn.z }, yaw: 0, pitch: 0, selected: 0, inventory };
+    const state: GuestState = saved ?? {
+      position: { x: spawn.x, y: spawn.y, z: spawn.z },
+      yaw: 0,
+      pitch: 0,
+      selected: 0,
+      inventory,
+      vitals: { ...FRESH_VITALS },
+      bed: null,
+      spectating: false,
+      flying: false,
+    };
     const view = Math.max(2, Math.min(MAX_VIEW, Math.floor(Number(hello.view) || 6)));
-    const visitor: Visitor = { id: hello.id, name, state, conn, view, sent: new Set(), outbox: Promise.resolve(), open: null };
+    const visitor: Visitor = { id: hello.id, name, state, conn, view, sent: new Set(), outbox: Promise.resolve(), open: null, asleep: false };
     this.visitors.set(conn, visitor);
-    this.send(visitor, { t: "welcome", id: hello.id, world: this.options.worldName, time: this.options.ticks.time, mode: this.options.mode, you: state });
+    const o = this.options;
+    this.send(visitor, { t: "welcome", id: hello.id, world: o.worldName, time: o.ticks.time, mode: o.mode, difficulty: o.difficulty(), hardcore: o.hardcore, spawn: { x: spawn.x, y: spawn.y, z: spawn.z }, you: state });
     this.options.onGuests?.();
   }
 
@@ -180,6 +237,23 @@ export class HostSession extends SimObject {
         if (!Array.isArray(msg.inventory)) return;
         v.state.inventory = Array.from({ length: PLAYER_SLOTS }, (_, i) => saveStack(loadStack(msg.inventory[i])));
         v.state.selected = Math.max(0, Math.min(8, Math.floor(Number(msg.selected) || 0)));
+        return;
+      case "life": {
+        const vitals = new Vitals();
+        vitals.load(msg.vitals);
+        Object.assign(v.state, { vitals: vitals.save(), bed: position(msg.bed), spectating: msg.spectating === true, flying: msg.flying === true });
+        return;
+      }
+      case "died": {
+        const cause = msg.cause in DEATH_MESSAGES ? (msg.cause as DamageSource) : null;
+        if (cause) this.announce(`${v.name} ${DEATH_MESSAGES[cause]}`);
+        const xp = Math.max(0, Math.min(100, Math.floor(Number(msg.xp) || 0)));
+        const p = v.state.position;
+        if (xp > 0) this.options.drops.spawnXp(p.x, p.y + 0.5, p.z, xp);
+        return;
+      }
+      case "sleep":
+        v.asleep = msg.asleep === true;
         return;
       case "take": {
         // Only what lies within reach
@@ -208,7 +282,14 @@ export class HostSession extends SimObject {
         if (!o || o.x !== msg.x || o.y !== msg.y || o.z !== msg.z || !Array.isArray(msg.slots)) return;
         const e = this.options.world.blockEntity(o.x, o.y, o.z);
         if (!e) return;
+        const before = e.kind === "furnace" ? (e.items[FURNACE_OUTPUT]?.count ?? 0) : 0;
         for (const [i, s] of msg.slots) if (Number.isInteger(i) && i >= 0 && i < e.items.length) e.items[i] = loadStack(s);
+        // Taking a furnace's output takes the experience it kept
+        if (e.kind === "furnace" && (e.items[FURNACE_OUTPUT]?.count ?? 0) < before) {
+          const xp = takeXp(e, Math.random);
+          const p = v.state.position;
+          if (xp > 0) this.options.drops.spawnXp(p.x, p.y + 1, p.z, xp);
+        }
         const chunk = this.options.world.chunk(o.x >> 4, o.z >> 4);
         if (chunk) chunk.unsaved = true;
         // What they did is what they have: don't send it back
@@ -258,7 +339,12 @@ export class HostSession extends SimObject {
     const standing = [this.options.host(), ...this.standing()];
     const before = this.options.world.get(a.x, a.y, a.z);
     if (reach && known && unit && perform(this.options.world, a, standing)) {
-      if (a.act === "break" && this.options.mode === "survival") this.options.drops.spill(a.x, a.y, a.z, dropsOf(before, loadStack(msg.held), Math.random));
+      if (a.act === "break" && this.options.mode === "survival") {
+        const held = loadStack(msg.held);
+        this.options.drops.spill(a.x, a.y, a.z, dropsOf(before, held, Math.random));
+        const xp = xpOf(before, held, Math.random);
+        if (xp > 0) this.options.drops.spawnXp(a.x + 0.5, a.y + 0.5, a.z + 0.5, xp);
+      }
       return;
     }
     // The guest already did it on their side: show them what is really there
@@ -293,16 +379,16 @@ export class HostSession extends SimObject {
     }
   }
 
-  /** The items lying within a guest's sight. */
+  /** The items and orbs lying within a guest's sight. */
   private dropsNear(v: Visitor): DropView[] {
     const out: DropView[] = [];
     const range = v.view * CHUNK_SIZE;
     const p = v.state.position;
-    for (const d of this.options.drops.items.values()) {
-      const q = d.position;
-      if (Math.abs(q.x - p.x) > range || Math.abs(q.z - p.z) > range) continue;
-      out.push([d.id, Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100, Math.round(q.z * 100) / 100, d.stack.item, d.stack.count]);
-    }
+    const round = (n: number): number => Math.round(n * 100) / 100;
+    const near = (q: Vec3): boolean => Math.abs(q.x - p.x) <= range && Math.abs(q.z - p.z) <= range;
+    const drops = this.options.drops;
+    for (const d of drops.items.values()) if (near(d.position)) out.push([d.id, round(d.position.x), round(d.position.y), round(d.position.z), d.stack.item, d.stack.count]);
+    for (const o of drops.orbs.values()) if (near(o.position)) out.push([o.id, round(o.position.x), round(o.position.y), round(o.position.z), ORB, o.xp]);
     return out;
   }
 

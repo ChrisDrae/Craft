@@ -4,6 +4,7 @@ import { WorldStore } from "./save/store.js";
 import { NAME_LENGTH, loadSettings, playerId, saveSettings } from "./settings.js";
 import { h } from "./ui/dom.js";
 import { TitleScreen } from "./ui/title.js";
+import { DIFFICULTIES } from "./vitals.js";
 import "./style.css";
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -16,7 +17,8 @@ const canvas = element("canvas", HTMLCanvasElement);
 const menu = element("menu", HTMLElement);
 const settings = loadSettings();
 // ?world=<id> plays a saved world, ?seed=... a fresh one that isn't saved (in survival, or with
-// &mode=creative), ?join=<code> a friend's world, nothing the title screen.
+// &mode=creative; &difficulty= one of peaceful, easy, normal, hard), ?join=<code> a friend's world, nothing
+// the title screen.
 // ?renderer=canvas|webgl and ?view=16..160 override the options for one page.
 const params = new URLSearchParams(location.search);
 const renderer = params.get("renderer");
@@ -122,7 +124,8 @@ if (joinCode !== null) {
 } else if (worldId) {
   await playSaved(worldId);
 } else if (seed !== null) {
-  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { seed: seed || "craft", mode: params.get("mode") === "creative" ? "creative" : "survival" } });
+  const difficulty = DIFFICULTIES.find((d) => d === params.get("difficulty")) ?? "normal";
+  await startGame({ canvas, menu, settings, renderer: pageRenderer, world: { seed: seed || "craft", mode: params.get("mode") === "creative" ? "creative" : "survival", difficulty } });
 } else {
   await new TitleScreen(menu, await openStore(), settings).show();
 }

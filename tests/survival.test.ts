@@ -160,6 +160,8 @@ describe("items with friends", () => {
       ticks,
       worldName: "Shared",
       mode: "survival",
+      difficulty: () => "normal",
+      hardcore: false,
       drops,
       host: () => ({ id: "host", name: "Host", x: -20.5, y: 10, z: 0.5, yaw: 0, pitch: 0 }),
       spawn: () => ({ x: 8.5, y: 10, z: 8.5 }),

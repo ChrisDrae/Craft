@@ -12,7 +12,7 @@ const LEFT: Readonly<Record<string, string>> = { north: "west", west: "south", s
 const RIGHT: Readonly<Record<string, string>> = { north: "east", east: "south", south: "west", west: "north" };
 
 /** Whether a block's side (in direction d from it) is a full solid face that things can attach to. */
-function sturdy(state: number, d: number): boolean {
+export function sturdy(state: number, d: number): boolean {
   return STURDY[state * 6 + d] === 1;
 }
 
@@ -21,7 +21,7 @@ const isSoil = (block: number): boolean => block === Block.Grass || block === Bl
 /**
  * Whether a block can stand on the block below it, for plants and the lower halves of doors and tall
  * plants: flowers and grass on grass or dirt, dead bushes on sand too, sugar cane on sugar cane or on
- * ground by water, doors on a solid floor.
+ * ground by water, mushrooms and doors on a solid floor.
  */
 export function standsOn(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
   const below = world.get(x, y - 1, z);
@@ -29,6 +29,9 @@ export function standsOn(world: VoxelWorld, x: number, y: number, z: number, sta
   switch (STATE_BLOCK[state]) {
     case Block.DeadBush:
       return isSoil(b) || b === Block.Sand;
+    case Block.BrownMushroom:
+    case Block.RedMushroom:
+      return sturdy(below, Dir.Up);
     case Block.SugarCane: {
       if (b === Block.SugarCane) return true;
       if (!isSoil(b) && b !== Block.Sand) return false;
@@ -43,7 +46,7 @@ export function standsOn(world: VoxelWorld, x: number, y: number, z: number, sta
  * Whether the block at (x, y, z) in `state` is held up by what it rests or hangs on (see SUPPORT):
  * plants by the ground they grow on (standsOn), cactus by sand or cactus, lily pads by still water, the
  * lower half of a door or tall plant by its ground and its upper half, the upper half by the lower one,
- * everything else by a solid face.
+ * each half of a bed by the other, everything else by a solid face.
  */
 export function supported(world: VoxelWorld, x: number, y: number, z: number, state: number): boolean {
   const d = SUPPORT[state];
@@ -59,6 +62,8 @@ export function supported(world: VoxelWorld, x: number, y: number, z: number, st
       return n !== Block.Air && FLUID[n] === 0;
     case "lilypad":
       return (FLUID[n] === 1 && isSource(n)) || nb === Block.Ice;
+    case "bed":
+      return nb === STATE_BLOCK[state] && propertyOf(n, "part") !== propertyOf(state, "part") && propertyOf(n, "facing") === propertyOf(state, "facing");
     case "door":
     case "tall": {
       const own = STATE_BLOCK[state];

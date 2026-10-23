@@ -21,6 +21,12 @@ const FLOWERS: ReadonlyArray<readonly [Block, number]> = [
   [Block.Poppy, 0.006],
 ];
 
+/** Mushrooms in shady, damp places. */
+const MUSHROOMS: ReadonlyArray<readonly [Block, number]> = [
+  [Block.BrownMushroom, 0.004],
+  [Block.RedMushroom, 0.002],
+];
+
 const VEGETATION: Readonly<Record<number, Vegetation>> = {
   [Biome.Plains]: {
     trees: 0.0015,
@@ -29,13 +35,13 @@ const VEGETATION: Readonly<Record<number, Vegetation>> = {
   },
   [Biome.Forest]: { trees: 0.05, kinds: [["oak", 7], ["birch", 2], ["big_oak", 1]], plants: [[Block.ShortGrass, 0.12], ...FLOWERS, [Block.LilyOfTheValley, 0.004]] },
   [Biome.BirchForest]: { trees: 0.05, kinds: [["birch", 1]], plants: [[Block.ShortGrass, 0.12], ...FLOWERS, [Block.Allium, 0.004], [Block.LilyOfTheValley, 0.003]] },
-  [Biome.DarkForest]: { trees: 0.1, kinds: [["dark_oak", 6], ["oak", 1], ["big_oak", 1]], plants: [[Block.ShortGrass, 0.06], [Block.Fern, 0.02]] },
-  [Biome.Taiga]: { trees: 0.06, kinds: [["spruce", 1]], plants: [[Block.Fern, 0.1], [Block.LargeFern, 0.015], [Block.ShortGrass, 0.06], [Block.Pumpkin, 0.0005]] },
+  [Biome.DarkForest]: { trees: 0.1, kinds: [["dark_oak", 6], ["oak", 1], ["big_oak", 1]], plants: [[Block.ShortGrass, 0.06], [Block.Fern, 0.02], ...MUSHROOMS] },
+  [Biome.Taiga]: { trees: 0.06, kinds: [["spruce", 1]], plants: [[Block.Fern, 0.1], [Block.LargeFern, 0.015], [Block.ShortGrass, 0.06], [Block.Pumpkin, 0.0005], ...MUSHROOMS] },
   [Biome.SnowyPlains]: { trees: 0.0012, kinds: [["spruce", 1]], plants: [] },
   [Biome.Desert]: { trees: 0, kinds: [], plants: [[Block.DeadBush, 0.006], [Block.Cactus, 0.006]] },
   [Biome.Savanna]: { trees: 0.006, kinds: [["acacia", 4], ["oak", 1]], plants: [[Block.ShortGrass, 0.4], [Block.TallGrass, 0.06], [Block.Dandelion, 0.003]] },
-  [Biome.Jungle]: { trees: 0.12, kinds: [["jungle", 6], ["mega_jungle", 1]], plants: [[Block.Fern, 0.12], [Block.ShortGrass, 0.2], [Block.LargeFern, 0.03]] },
-  [Biome.Swamp]: { trees: 0.012, kinds: [["swamp_oak", 1]], plants: [[Block.ShortGrass, 0.15], [Block.BlueOrchid, 0.008]] },
+  [Biome.Jungle]: { trees: 0.12, kinds: [["jungle", 6], ["mega_jungle", 1]], plants: [[Block.Fern, 0.12], [Block.ShortGrass, 0.2], [Block.LargeFern, 0.03], [Block.Melon, 0.004]] },
+  [Biome.Swamp]: { trees: 0.012, kinds: [["swamp_oak", 1]], plants: [[Block.ShortGrass, 0.15], [Block.BlueOrchid, 0.008], ...MUSHROOMS] },
   [Biome.StonyMountains]: { trees: 0.004, kinds: [["spruce", 2], ["oak", 1]], plants: [[Block.ShortGrass, 0.05]] },
   [Biome.River]: { trees: 0, kinds: [], plants: [[Block.ShortGrass, 0.1]] },
 };

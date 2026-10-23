@@ -1,17 +1,21 @@
 import type { Random } from "projector";
 import { TILE, type TilePixels } from "./atlas.js";
+import { BLOCKS, Block, COLORS } from "./blocks.js";
 import { ITEMS, type ItemInfo } from "./items.js";
 import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 
 /**
- * The textures of items that aren't blocks, of the cracks on a block being broken and of the chest: the
- * names they have in the atlas, and Craft's own drawings of them for when Minecraft's weren't imported.
+ * The textures of items that aren't blocks, of the cracks on a block being broken, of orbs of experience,
+ * of the chest, beds, melons and mushrooms: the names they have in the atlas, and Craft's own drawings of
+ * them for when Minecraft's weren't imported.
  */
 
 /** Atlas names of item textures: "item_" and Minecraft's name (item/stick.png is "item_stick"). */
 export const ITEM_TILES: readonly string[] = ITEMS.filter((i) => i.texture !== null).map((i) => `item_${i.texture}`);
 /** The ten stages of cracks, from a few to many (Minecraft's block/destroy_stage_N.png). */
 export const DESTROY_TILES: readonly string[] = Array.from({ length: 10 }, (_, i) => `destroy_stage_${i}`);
+/** Orbs of experience from small to large, gray to be colored as they are drawn. */
+export const ORB_TILES: readonly string[] = Array.from({ length: 11 }, (_, i) => `experience_orb_${i}`);
 
 type Mask = (x: number, y: number) => boolean;
 const CLEAR: [number, number, number, number] = [0, 0, 0, 0];
@@ -105,6 +109,19 @@ function drawItem(info: ItemInfo): TilePixels {
       return layered(name, [[(x, y) => ((x - 7.5) / 6.5) ** 2 + ((y - 9) / 3.5) ** 2 <= 1, color], [any(line(5, 8, 6, 10, 0.5), line(8, 7, 9, 9, 0.5)), [230, 190, 120]]]);
     case "snowball":
       return layered(name, [[disc(8, 8, 5), color, 0.05], [edge(disc(8, 8, 5)), [200, 214, 222], 0.03]]);
+    case "melon_slice": {
+      // A wedge of red flesh with seeds, green rind along its curve
+      const wedge = (x: number, y: number): boolean => y >= 4 && y <= 13 && Math.hypot(x - 2, y - 14) <= 11 && x >= 2 + (13 - y) * 0.15;
+      const rind = (x: number, y: number): boolean => wedge(x, y) && Math.hypot(x - 2, y - 14) > 9.5;
+      return layered(name, [[wedge, color], [rind, hex("#4a8a2a")], [any(disc(6, 10, 0.6), disc(9, 9, 0.6), disc(7, 7, 0.6)), [30, 20, 20], 0]]);
+    }
+    case "bowl":
+    case "mushroom_stew": {
+      const bowl = (x: number, y: number): boolean => y >= 8 && y <= 13 && Math.abs(x - 7.5) <= 6.5 - Math.max(0, y - 10) * 1.2;
+      const layers: Array<readonly [Mask, Rgb, number?]> = [[bowl, hex("#8a6a3a")], [edge(bowl), hex("#5a4426"), 0.05]];
+      if (name === "mushroom_stew") layers.push([(x, y) => y === 8 && Math.abs(x - 7.5) <= 5.5, color], [(x, y) => y === 7 && Math.abs(x - 7.5) <= 4, scale(color, 1.15) as Rgb]);
+      return layered(name, layers);
+    }
     default: {
       // Lumps: coal, ores, flint, clay, leather, lapis
       const lump = any(disc(7, 8, 4.5), disc(10, 7, 3), disc(8, 11, 3));
@@ -212,6 +229,106 @@ export function chestFromSheet(sheet: Uint8ClampedArray, width: number): Map<str
     ],
     ["chest_side", tile((x, y) => sideAt(x, y, false))],
     ["chest_front", tile((x, y) => sideAt(x, y, true))],
+  ]);
+}
+
+/** Orbs of experience, gray with a lighter middle, from 3 pixels across to 13. */
+export function orbTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  ORB_TILES.forEach((name, i) => {
+    const r = 1.5 + i * 0.5;
+    out.set(name, paint(name, (x, y) => {
+      const d = Math.hypot(x - 7.5, y - 7.5);
+      if (d > r) return CLEAR;
+      const k = d < r * 0.45 ? 255 : d < r - 0.8 ? 200 : 120;
+      return [k, k, k, 255];
+    }));
+  });
+  return out;
+}
+
+/** Orbs of experience from Minecraft's sheet (entity/experience/experience_orb.png): 16 cells of 4 x 4, by size. */
+export function orbsFromSheet(sheet: Uint8ClampedArray, width: number): Map<string, TilePixels> {
+  const cell = width / 4;
+  const out = new Map<string, TilePixels>();
+  ORB_TILES.forEach((name, i) => {
+    const pixels = new Uint8ClampedArray(TILE * TILE * 4);
+    for (let y = 0; y < TILE; y++) {
+      for (let x = 0; x < TILE; x++) {
+        const sx = (i % 4) * cell + Math.floor((x * cell) / TILE);
+        const sy = Math.floor(i / 4) * cell + Math.floor((y * cell) / TILE);
+        pixels.set(sheet.subarray((sy * width + sx) * 4, (sy * width + sx) * 4 + 4), (y * TILE + x) * 4);
+      }
+    }
+    out.set(name, pixels);
+  });
+  return out;
+}
+
+const SHEET = hex("#e4e4e4");
+const FRAME = hex("#8a6a3a");
+
+/**
+ * Craft's beds, laid out as Minecraft's bed textures are (block/<color>_bed_*.png): the tops, the sides of
+ * the mattress in rows 7 to 12 (sheet and blanket over a wooden frame), the ends, and the planks below.
+ * A side named west shows the head end on its left, east on its right.
+ */
+export function bedTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  const side = (seed: string, cloth: (x: number) => Rgb) =>
+    paint(seed, (x, y, rnd) => {
+      if (y < 7 || y > 12) return CLEAR;
+      if (y >= 11) return scale(FRAME, (y === 12 ? 0.8 : 1) * jitter(rnd, 0.12));
+      return scale(cloth(x), (y === 10 ? 0.85 : 1) * jitter(rnd, 0.06));
+    });
+  out.set("bed_down", paint("bed down", (x, y, rnd) => scale(FRAME, (y % 4 === 0 ? 0.8 : 1) * (x === (y >> 2) * 5 % 16 ? 0.85 : 1) * jitter(rnd, 0.12))));
+  out.set("bed_head_north", side("bed head north", () => SHEET));
+  COLORS.forEach((c, i) => {
+    const color = hex(BLOCKS[Block.WhiteBed + i].top);
+    const blanket = (x: number, y: number, rnd: { next(): number }): [number, number, number] => scale(color, ((x + y * 3) % 7 === 0 ? 0.9 : 1) * (0.94 + rnd.next() * 0.08));
+    out.set(
+      `${c}_bed_head_up`,
+      paint(`${c} bed head`, (x, y, rnd) => {
+        if (y >= 7) return blanket(x, y, rnd);
+        if (y === 6) return scale(SHEET, 0.7);
+        const pillow = x >= 2 && x <= 13 && y >= 1 && y <= 5;
+        const rim = pillow && (x === 2 || x === 13 || y === 1 || y === 5);
+        return scale(SHEET, (rim ? 0.82 : pillow ? 1.05 : 0.92) * jitter(rnd, 0.04));
+      }),
+    );
+    out.set(`${c}_bed_foot_up`, paint(`${c} bed foot`, (x, y, rnd) => (y === 15 ? scale(color, 0.8) : blanket(x, y, rnd))));
+    // The head's sides: sheet at the head end (the pillow's), blanket after it
+    out.set(`${c}_bed_head_west`, side(`${c} head west`, (x) => (x < 6 ? SHEET : color)));
+    out.set(`${c}_bed_head_east`, side(`${c} head east`, (x) => (x > 9 ? SHEET : color)));
+    out.set(`${c}_bed_foot_west`, side(`${c} foot west`, () => color));
+    out.set(`${c}_bed_foot_east`, side(`${c} foot east`, () => color));
+    out.set(`${c}_bed_foot_south`, side(`${c} foot south`, () => color));
+  });
+  return out;
+}
+
+/** Craft's melon and mushrooms. */
+export function plantTiles(): Map<string, TilePixels> {
+  const green = hex("#6f9a2a");
+  const dark = hex("#3e6a1a");
+  return new Map([
+    ["melon_side", paint("melon side", (x, _y, rnd) => scale(x % 5 < 2 ? dark : green, jitter(rnd, 0.15)))],
+    ["melon_top", paint("melon top", (x, y, rnd) => scale(Math.floor(Math.hypot(x - 7.5, y - 7.5)) % 3 === 0 ? dark : hex("#a3a428"), jitter(rnd, 0.15)))],
+    [
+      "brown_mushroom",
+      layered("brown mushroom", [
+        [rect(7, 9, 8, 13), hex("#d8ccb4")],
+        [(x, y) => y >= 6 && y <= 9 && Math.abs(x - 7.5) <= (y === 6 ? 2.5 : 4.5), hex("#9a7558"), 0.2],
+      ]),
+    ],
+    [
+      "red_mushroom",
+      layered("red mushroom", [
+        [rect(7, 10, 8, 14), hex("#d8ccb4")],
+        [(x, y) => y >= 5 && y <= 10 && Math.abs(x - 7.5) <= (y === 5 ? 2 : y === 6 ? 3.5 : 4.5), hex("#c8322a"), 0.15],
+        [any(disc(5, 8, 0.6), disc(9, 6, 0.6), disc(10, 9, 0.6)), [240, 236, 230], 0.05],
+      ]),
+    ],
   ]);
 }
 

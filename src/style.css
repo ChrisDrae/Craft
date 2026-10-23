@@ -110,7 +110,7 @@ canvas {
 #block-name {
   position: fixed;
   left: 50%;
-  bottom: 78px;
+  bottom: 136px;
   transform: translateX(-50%);
   font-size: 14px;
   text-shadow: 0 1px 3px #000;
@@ -516,4 +516,141 @@ button.danger {
   background-size: contain;
   image-rendering: pixelated;
   pointer-events: none;
+}
+
+/* The status bar over the hotbar: hearts, food, armor, air, experience */
+#status {
+  position: fixed;
+  left: 50%;
+  bottom: 74px;
+  width: 436px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+#status .row {
+  display: flex;
+  justify-content: space-between;
+  height: 18px;
+}
+
+#status .icons {
+  display: flex;
+}
+
+#status .icons.right {
+  flex-direction: row-reverse;
+}
+
+#status .icons span {
+  width: 18px;
+  height: 18px;
+  margin-right: -2px;
+  background-size: 18px 18px;
+  background-repeat: no-repeat;
+}
+
+#status .icons.right span {
+  margin-right: 0;
+  margin-left: -2px;
+}
+
+#status .xp {
+  position: relative;
+  height: 10px;
+  margin-top: 4px;
+  background-size: 100% 100%;
+}
+
+#status .xp i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background-size: 436px 100%;
+  background-repeat: no-repeat;
+}
+
+#status .xp b {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  color: #80ff20;
+  font: 700 16px/1 ui-monospace, monospace;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+
+/* Hurt: a red flash at the edges; burning: flames rising from below; asleep: the screen goes dark */
+#hurt {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(200, 0, 0, 0.6));
+  opacity: 0;
+}
+
+#burning {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40vh;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(255, 100, 0, 0.6), rgba(255, 190, 0, 0.25) 55%, transparent);
+  animation: flicker 0.2s infinite alternate;
+}
+
+@keyframes flicker {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+#sleep {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 22vh;
+  background: rgba(0, 0, 0, var(--dark, 0));
+  color: #fff;
+  font: 15px/1.4 ui-monospace, monospace;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+
+#eating {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 16px);
+  width: 40px;
+  height: 4px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#eating i {
+  display: block;
+  height: 100%;
+  width: calc(var(--eat, 0) * 100%);
+  background: #fff;
+}
+
+/* The death screen over a red-tinted world */
+#menu.dead {
+  background: linear-gradient(rgba(90, 0, 0, 0.45), rgba(160, 16, 16, 0.65));
+}
+
+#menu.dead h1 {
+  font-size: 40px;
 }
