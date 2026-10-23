@@ -25,7 +25,7 @@ export interface ShownOrb {
 }
 
 /** Block items drawn as cubes (the rest flat), and how big; orbs. */
-const CUBES: ReadonlySet<string> = new Set(["cube", "cactus", "stairs", "chest", "slab", "bed", "plate", "button", "repeater", "farmland"]);
+const CUBES: ReadonlySet<string> = new Set(["cube", "piston", "cactus", "stairs", "chest", "slab", "bed", "plate", "button", "repeater", "farmland"]);
 const CUBE_SIZE = 0.25;
 const FLAT_SIZE = 0.4;
 const ORB_SIZE = 0.35;
@@ -65,7 +65,7 @@ export function itemMesh(item: Item, atlas: { texture: Texture; uvs: TileUVs } |
   const block = info.block;
   if (!atlas) {
     return Mesh.box(CUBE_SIZE);
-  } else if (block !== null && CUBES.has(BLOCKS[block].shape)) {
+  } else if (block !== null && CUBES.has(BLOCKS[block].shape) && info.texture === null) {
     const quads = [0, 1, 2, 3, 4, 5].map((d) => {
       const corners: number[] = [];
       const uvs: number[] = [];
@@ -82,7 +82,7 @@ export function itemMesh(item: Item, atlas: { texture: Texture; uvs: TileUVs } |
     mesh = quadMesh(quads);
   } else {
     // A picture standing up, seen from both sides
-    const name = block !== null ? BLOCKS[block].textures[BLOCKS[block].shape === "tall" ? Face.Top : Face.Side] : `item_${info.texture}`;
+    const name = block !== null && info.texture === null ? BLOCKS[block].textures[BLOCKS[block].shape === "tall" ? Face.Top : Face.Side] : `item_${info.texture}`;
     const tile = atlasIndex(name);
     const s = FLAT_SIZE / 2;
     const tint = block !== null ? BLOCKS[block].tint : Tint.None;

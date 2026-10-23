@@ -235,6 +235,16 @@ export class Drops extends SimObject {
   }
 
   /** Hands a dropped item to a collector; what they can't take stays on the ground. Returns what they got. */
+  /** Takes up to `max` of a lying stack, whatever its pickup delay (a hopper takes it in): what was taken, or null. */
+  take(id: number, max: number): ItemStack | null {
+    const item = this.items.get(id);
+    if (!item || max <= 0) return null;
+    const n = Math.min(max, item.stack.count);
+    if (n === item.stack.count) this.items.delete(id);
+    else item.stack = { ...item.stack, count: item.stack.count - n };
+    return { ...item.stack, count: n };
+  }
+
   give(id: number, c: Collector, max: number = Infinity): ItemStack | null {
     const item = this.items.get(id);
     if (!item || item.delay > 0) return null;

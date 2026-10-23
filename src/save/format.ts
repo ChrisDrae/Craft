@@ -23,8 +23,9 @@ import type { SavedWeather } from "../weather.js";
  * 7. Mobs: chunks keep the animals in them.
  * 8. Commands: players and guests may have a game mode and a spawn point of their own.
  * 9. Weather: worlds keep theirs; animals may be babies.
+ * 10. Pistons and hoppers: chunks keep what hoppers hold and the blocks pistons are moving.
  */
-export const FORMAT_VERSION = 9;
+export const FORMAT_VERSION = 10;
 
 /** How a world is played: gathering and crafting, or with every block at hand. */
 export type GameMode = "survival" | "creative";
@@ -163,13 +164,13 @@ const own = (r: { format: number }) => ({ ...next(r), mode: null, spawn: null })
 
 const MIGRATIONS: Record<RecordKind, Migration<{ format: number }>[]> = {
   // Worlds from before game modes were played with every block at hand; from before difficulty, normal
-  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false }), next, next, (r) => ({ ...next(r), weather: null })],
+  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false }), next, next, (r) => ({ ...next(r), weather: null }), next],
   // Players from before the hotbar could change get the hotbar it had; their hotbar becomes their inventory
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh, next, own, next],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh, next, own, next, next],
   // Chunks from before biomes were all made like plains; from before items they hold none, nor animals
-  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next, (r) => ({ ...next(r), mobs: [] }), next, next],
+  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next, (r) => ({ ...next(r), mobs: [] }), next, next, next],
   // Guests came with format 4
-  guest: [next, next, next, hotbarInventory, fresh, next, own, next],
+  guest: [next, next, next, hotbarInventory, fresh, next, own, next, next],
 };
 
 export type RecordKind = "world" | "player" | "chunk" | "guest";

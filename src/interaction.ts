@@ -35,7 +35,7 @@ export function bowPower(seconds: number): number {
 const selectionOf = (state: number): Float64Array => SELECTION[state];
 
 /** Blocks that do something for the player when used: a crafting table, chest or furnace opens, a bed is slept in. */
-const OPENS = (block: number): boolean => block === Block.CraftingTable || block === Block.Chest || block === Block.Furnace || isBed(block);
+const OPENS = (block: number): boolean => block === Block.CraftingTable || block === Block.Chest || block === Block.Furnace || block === Block.Hopper || isBed(block);
 
 /**
  * Breaking, placing and using blocks: finds the block under the crosshair every frame (outlined by the
@@ -273,7 +273,7 @@ export class BlockInteraction extends SimObject {
     const t = this.target;
     if (!t) return null;
     const hy = this.hit ? this.hit.y - t.y : 0.5;
-    const a: Action = { act, x: t.x, y: t.y, z: t.z, nx: t.nx, ny: t.ny, nz: t.nz, hy, block: this.selectedBlock, yaw: this.player.yaw };
+    const a: Action = { act, x: t.x, y: t.y, z: t.z, nx: t.nx, ny: t.ny, nz: t.nz, hy, block: this.selectedBlock, yaw: this.player.yaw, pitch: this.player.pitch };
     // A hoe tills grass and dirt, bone meal makes what it can grow (and otherwise the block is just used)
     const held = this.inventory.held;
     if (act === "use" && held) {

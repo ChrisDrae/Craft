@@ -180,6 +180,32 @@ describe("saves from earlier versions, farms and weather", () => {
   });
 });
 
+describe("saves from earlier versions, pistons and hoppers", () => {
+  it("opens a world saved in format 10: a hopper's items, a piston pushed out, a block on its way", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-10.craftworld", import.meta.url))));
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const record = await store.getChunk("fixture-world-10", 0, 0);
+    expect(record!.entities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "hopper", x: 2, y: 128, z: 2, items: [{ item: "coal", count: 5 }, null, null, null, { item: "cobblestone", count: 64 }], cooldown: 0 }),
+        expect.objectContaining({ kind: "moving", x: 8, y: 128, z: 4, state: "oak_log[axis=x]", dir: 0, progress: 0.5, extending: true, head: false }),
+      ]),
+    );
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-10"))!);
+    await save.loadNow(8, 8, 1);
+    expect([5, 6, 8, 10, 12].map((x) => stateName(world.get(x, 128, x === 2 ? 2 : 4)))).toEqual([
+      "sticky_piston[facing=east,extended=true]",
+      "piston_head[facing=east,type=sticky]",
+      "moving_piston",
+      "comparator[facing=east,mode=subtract,power=7]",
+      "observer[facing=up,powered=false]",
+    ]);
+    expect(world.blockEntity(2, 128, 2)?.items[0]).toMatchObject({ item: itemByName("coal"), count: 5 });
+    expect(world.blockEntity(8, 128, 4)).toMatchObject({ kind: "moving", state: stateOf(Block.Log, { axis: "x" }), progress: 0.5 });
+  });
+});
+
 describe("settings", () => {
   it("come back as saved, with defaults for anything missing, damaged or out of range", () => {
     const kept = new Map<string, string>();

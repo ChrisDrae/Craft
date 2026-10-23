@@ -180,6 +180,7 @@ export class BlockUpdates {
       // feel it, so they are updated too
       for (let i = 0; i < this.queue.length; i += 4) {
         const [cx, cy, cz, was] = [this.queue[i], this.queue[i + 1], this.queue[i + 2], this.queue[i + 3]];
+        if (was !== this.world.get(cx, cy, cz)) this.redstone.observe(cx, cy, cz);
         this.update(cx, cy, cz, true);
         for (let d = 0; d < 6; d++) this.update(cx + DIR_X[d], cy + DIR_Y[d], cz + DIR_Z[d], false);
         if ((was >= 0 && isRedstone(was)) || isRedstone(this.world.get(cx, cy, cz))) {

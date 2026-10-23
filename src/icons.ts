@@ -8,7 +8,7 @@ import { overlay, tint } from "./textures.js";
 const SIZE = 48;
 
 /** How high each block shape stands in its icon (cubes are 1); shapes not listed are drawn flat. */
-const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, cactus: 1, stairs: 1, chest: 14 / 16, bed: 9 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16, plate: 1 / 16, button: 2 / 16, repeater: 2 / 16, farmland: 15 / 16 };
+const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, piston: 1, cactus: 1, stairs: 1, chest: 14 / 16, bed: 9 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16, plate: 1 / 16, button: 2 / 16, repeater: 2 / 16, farmland: 15 / 16 };
 
 /**
  * Item icons for the hotbar and inventory screens: blocks as small cubes seen from above at an angle,
@@ -66,12 +66,12 @@ export class Icons {
     const info = ITEMS[item];
     const block = info.block;
     const height = block !== null ? HEIGHTS[BLOCKS[block].shape] : undefined;
-    if (block !== null && height !== undefined) {
+    if (block !== null && height !== undefined && info.texture === null) {
       this.cube(g, block, height);
     } else {
       // Flat: the item's texture, or the block's (a plant's, a door's, the top of tall grass)
       const look = block !== null && BLOCKS[block].shape === "tall" ? Face.Top : Face.Side;
-      const tile = block !== null ? this.face(block, look) : this.tiles!.get(`item_${info.texture}`);
+      const tile = block !== null && info.texture === null ? this.face(block, look) : this.tiles!.get(`item_${info.texture}`);
       if (tile) g.drawImage(this.image(tile), 4, 4, SIZE - 8, SIZE - 8);
     }
     return canvas.toDataURL();

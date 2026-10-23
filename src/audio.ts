@@ -5,7 +5,7 @@ import type { SoundKind } from "./settings.js";
 export type SoundCategory = Exclude<SoundKind, "master">;
 
 /** How blocks sound, by Minecraft's sound groups. */
-export type SoundGroup = "stone" | "wood" | "gravel" | "grass" | "crop" | "sand" | "snow" | "wool" | "glass" | "ladder";
+export type SoundGroup = "stone" | "wood" | "gravel" | "grass" | "crop" | "sand" | "snow" | "wool" | "glass" | "ladder" | "metal";
 
 /** The sound group of a block, as Minecraft's: dirt and clay crunch like gravel, leaves and plants rustle like grass. */
 export function soundGroup(block: BlockId): SoundGroup | null {
@@ -15,6 +15,7 @@ export function soundGroup(block: BlockId): SoundGroup | null {
   if (n.endsWith("_wool") || n.endsWith("_carpet") || isBed(block)) return "wool";
   if (n.startsWith("glass") || block === Block.Ice || block === Block.Glowstone || block === Block.RedstoneLamp) return "glass";
   if (block === Block.Ladder) return "ladder";
+  if (block === Block.Hopper) return "metal";
   if (block === Block.Sand || block === Block.Sandstone) return "sand";
   if (block === Block.Snow || block === Block.SnowBlock) return "snow";
   if (block === Block.Dirt || block === Block.Gravel || block === Block.Clay || block === Block.Farmland) return "gravel";
@@ -105,6 +106,7 @@ const GROUP_BANDS: Record<SoundGroup, [number, number]> = {
   wool: [150, 700],
   glass: [2500, 9000],
   ladder: [300, 1600],
+  metal: [1500, 7000],
 };
 
 /** Craft's own sound for an event, where Minecraft's weren't imported (none for music and ambience). */

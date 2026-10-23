@@ -1,5 +1,6 @@
 import { SimObject } from "projector";
 import type { Action } from "../actions.js";
+import type { Move } from "../pistons.js";
 import type { SavedEntity } from "../blockEntities.js";
 import { decodeBiomes } from "../biomes.js";
 import { loadStack, saveStack, type ItemStack, type SavedStack } from "../items.js";
@@ -81,6 +82,8 @@ export class GuestSession extends SimObject {
   /** Called when it starts or stops raining or storming, and when lightning strikes. */
   onWeather: ((rain: boolean, thunder: boolean) => void) | null = null;
   onLightning: ((x: number, y: number, z: number) => void) | null = null;
+  /** Called when pistons start moving blocks. */
+  onMoving: ((moves: Move[]) => void) | null = null;
   /** Called when someone else broke, placed or used a block nearby. */
   onEffect: ((kind: "break" | "place" | "use" | "grow", x: number, y: number, z: number, state: number) => void) | null = null;
   /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
@@ -202,6 +205,9 @@ export class GuestSession extends SimObject {
         return;
       case "lightning":
         this.onLightning?.(msg.x, msg.y, msg.z);
+        return;
+      case "moving":
+        if (Array.isArray(msg.moves)) this.onMoving?.(msg.moves.map(([x, y, z, state, dir, flags]) => ({ x, y, z, state, dir, extending: (flags & 1) !== 0, head: (flags & 2) !== 0 })));
         return;
       case "container":
         this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);

@@ -98,9 +98,14 @@ const WOODEN: ReadonlySet<number> = new Set([
   Block.OakDoor,
 ]);
 
+/** Block items drawn as a picture of their own rather than as the block. */
+const PICTURED: ReadonlySet<number> = new Set([Block.Hopper, Block.Comparator]);
+
 function blockItem(b: (typeof BLOCKS)[number]): ItemInfo {
   const fuel = WOODEN.has(b.id) ? WOOD_FUEL : b.id === Block.OakSlab ? 150 : b.id === Block.Ladder ? WOOD_FUEL : b.id === Block.OakSapling ? 100 : 0;
-  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, places: null, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture: null, color: b.top };
+  // Hoppers and comparators show pictures of their own, as Minecraft's
+  const texture = PICTURED.has(b.id) ? b.name : null;
+  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, places: null, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture, color: b.top };
 }
 
 const extra: ItemInfo[] = [];
@@ -182,6 +187,7 @@ export const Items = {
   PumpkinSeeds: item("pumpkin_seeds", "pumpkin seeds", "#e8d8a0", { places: Block.PumpkinStem }),
   MelonSeeds: item("melon_seeds", "melon seeds", "#3a2a1a", { places: Block.MelonStem }),
   BoneMeal: item("bone_meal", "bone meal", "#f0f0e8"),
+  SlimeBall: item("slime_ball", "slimeball", "#7ac85a"),
 };
 
 /**
@@ -288,7 +294,7 @@ export function loadStack(s: SavedStack | null | undefined): ItemStack | null {
 }
 
 /** Blocks only ever there by other means: crops and stems (from seeds), dust (from redstone), farmland (tilled). */
-const NOT_ITEMS: ReadonlySet<number> = new Set([Block.Air, Block.Bedrock, Block.Farmland, Block.Wheat, Block.Carrots, Block.Potatoes, Block.PumpkinStem, Block.AttachedPumpkinStem, Block.MelonStem, Block.AttachedMelonStem, Block.RedstoneWire]);
+const NOT_ITEMS: ReadonlySet<number> = new Set([Block.Air, Block.Bedrock, Block.Farmland, Block.Wheat, Block.Carrots, Block.Potatoes, Block.PumpkinStem, Block.AttachedPumpkinStem, Block.MelonStem, Block.AttachedMelonStem, Block.RedstoneWire, Block.PistonHead, Block.MovingPiston]);
 
 /** The items the creative inventory offers: every block a player can have, then every other item. */
 export const CREATIVE: readonly Item[] = ITEMS.filter((i) => !NOT_ITEMS.has(i.id)).map((i) => i.id);

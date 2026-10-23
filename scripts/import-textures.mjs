@@ -150,6 +150,21 @@ const BLOCKS = [
   "redstone_lamp",
   "redstone_lamp_on",
   "smooth_stone",
+  "piston_top",
+  "piston_top_sticky",
+  "piston_side",
+  "piston_bottom",
+  "piston_inner",
+  "observer_front",
+  "observer_back",
+  "observer_back_on",
+  "observer_side",
+  "observer_top",
+  "hopper_outside",
+  "hopper_inside",
+  "hopper_top",
+  "comparator",
+  "comparator_on",
 ];
 /** The item textures Craft draws (src/items.ts), saved as item_<name>. */
 const ITEMS = [
@@ -205,6 +220,9 @@ const ITEMS = [
   "pumpkin_seeds",
   "melon_seeds",
   "bone_meal",
+  "slime_ball",
+  "hopper",
+  "comparator",
   ...["wooden", "stone", "iron", "golden", "diamond"].flatMap((m) => ["pickaxe", "axe", "shovel", "hoe", "sword"].map((t) => `${m}_${t}`)),
   ...["leather", "iron", "golden", "diamond"].flatMap((m) => ["helmet", "chestplate", "leggings", "boots"].map((p) => `${m}_${p}`)),
 ];
@@ -248,6 +266,8 @@ const WANTED = new Map([
   ["mob_sheep_wool", ["entity/sheep/sheep_wool.png", "entity/sheep/sheep_fur.png"]],
   ["mob_chicken", ["entity/chicken/chicken_temperate.png", "entity/chicken/temperate_chicken.png", "entity/chicken.png"]],
   ["mob_arrow", ["entity/projectiles/arrow.png"]],
+  ["mob_slime", ["entity/slime/slime.png"]],
+  ["mob_slime_outer", ["entity/slime/slime.png"]],
   // Players wear Minecraft's default skins
   ...["steve", "alex", "ari", "efe", "kai", "makena", "noor", "sunny", "zuri"].map((n) => [`mob_player_${n}`, [`entity/player/wide/${n}.png`, ...(n === "steve" ? ["entity/steve.png"] : [])]]),
   // Particles: smoke from large to small, splashes, a flame, a star, an explosion's puffs
@@ -410,6 +430,11 @@ const SOUND_EVENTS = [
   "block.stone_pressure_plate.click_off",
   "block.wooden_pressure_plate.click_on",
   "block.wooden_pressure_plate.click_off",
+  "block.piston.extend",
+  "block.piston.contract",
+  "block.comparator.click",
+  ...["jump", "squish", "hurt", "death"].flatMap((e) => [`entity.slime.${e}`, `entity.slime.${e}_small`]),
+  "entity.slime.attack",
   "music.game",
   "music.creative",
 ];

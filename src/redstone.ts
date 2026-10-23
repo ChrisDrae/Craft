@@ -1,4 +1,6 @@
-import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, OPAQUE, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING6_DIR, FACING_DIR, LEFT_OF, OPAQUE, RIGHT_OF, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { fillLevel, inventoryAt, type HopperWorld } from "./hoppers.js";
+import { Pistons, type PistonWorld } from "./pistons.js";
 import type { TickBehavior, WorldTicks } from "./ticks.js";
 
 /** What redstone needs of the world. */
@@ -17,9 +19,12 @@ const OAK_BUTTON = 30;
 const LAMP_OFF = 4;
 /** How often a pressed plate checks whether anything is still on it. */
 const PLATE_CHECK = 20;
+/** Game ticks an observer waits before its pulse, and its pulse lasts; a comparator's delay. */
+const OBSERVER_DELAY = 2;
+const COMPARATOR_DELAY = 2;
 
-/** Whether a block passes power on: a solid opaque cube. */
-const conductor = (state: number): boolean => OPAQUE[state] === 1;
+/** Whether a block passes power on: a solid opaque cube, but not pistons and observers. */
+const conductor = (state: number): boolean => OPAQUE[state] === 1 && STATE_BLOCK[state] !== Block.Piston && STATE_BLOCK[state] !== Block.StickyPiston && STATE_BLOCK[state] !== Block.Observer;
 const isOn = (state: number, name: string): boolean => propertyOf(state, name) === "true";
 
 /** The side a lever, button or torch hangs on: the block it powers through (Dir from it). */
@@ -36,17 +41,29 @@ function attachedDir(state: number): number {
 /** Whether a block takes part in redstone: changes to it reach two blocks around (see BlockUpdates). */
 export function isRedstone(state: number): boolean {
   const b = STATE_BLOCK[state];
-  return b === Block.RedstoneWire || b === Block.RedstoneTorch || b === Block.Lever || b === Block.StoneButton || b === Block.OakButton || b === Block.StonePressurePlate || b === Block.OakPressurePlate || b === Block.Repeater;
+  return (
+    b === Block.RedstoneWire ||
+    b === Block.RedstoneTorch ||
+    b === Block.Lever ||
+    b === Block.StoneButton ||
+    b === Block.OakButton ||
+    b === Block.StonePressurePlate ||
+    b === Block.OakPressurePlate ||
+    b === Block.Repeater ||
+    b === Block.Comparator ||
+    b === Block.Observer
+  );
 }
 
-/** Whether wire beside a block connects to it: wire, a power source, a repeater in line. */
+/** Whether wire beside a block (on side `side` of the wire) connects to it: wire, a power source, a repeater in line, a comparator, an observer's back. */
 function connectsTo(state: number, side: number): boolean {
   const b = STATE_BLOCK[state];
   if (b === Block.Repeater) {
     const f = FACING_DIR[propertyOf(state, "facing")];
     return f === side || f === (side ^ 1);
   }
-  return b === Block.RedstoneWire || b === Block.RedstoneTorch || b === Block.Lever || b === Block.StoneButton || b === Block.OakButton || b === Block.StonePressurePlate || b === Block.OakPressurePlate;
+  if (b === Block.Observer) return FACING6_DIR[propertyOf(state, "facing")] === side;
+  return b === Block.RedstoneWire || b === Block.RedstoneTorch || b === Block.Lever || b === Block.StoneButton || b === Block.OakButton || b === Block.StonePressurePlate || b === Block.OakPressurePlate || b === Block.Comparator;
 }
 
 /**
@@ -72,6 +89,11 @@ export function emitted(w: RedstoneWorld, x: number, y: number, z: number, d: nu
       return !strong || d === Dir.Up ? 15 : 0;
     case Block.Repeater:
       return isOn(s, "powered") && d === FACING_DIR[propertyOf(s, "facing")] ? 15 : 0;
+    case Block.Comparator:
+      return d === FACING_DIR[propertyOf(s, "facing")] ? Number(propertyOf(s, "power")) : 0;
+    case Block.Observer:
+      // Out of its back, through the block there too
+      return isOn(s, "powered") && d === (FACING6_DIR[propertyOf(s, "facing")] ^ 1) ? 15 : 0;
     case Block.RedstoneWire: {
       const p = Number(propertyOf(s, "power"));
       if (strong || p === 0 || d === Dir.Up) return 0;
@@ -154,6 +176,32 @@ function locked(w: RedstoneWorld, x: number, y: number, z: number, state: number
 /** A repeater's input: the power at its back. */
 const repeaterInput = (w: RedstoneWorld, x: number, y: number, z: number, state: number): number => powerFrom(w, x, y, z, FACING_DIR[propertyOf(state, "facing")] ^ 1);
 
+/**
+ * What a comparator sends on, as Minecraft's: the signal at its back (or how full a chest, furnace or
+ * hopper there is, or one behind a solid block there), kept if no side signal is stronger (compare) or less
+ * the stronger side signal (subtract). Sides take signals from dust, repeaters and comparators only.
+ * Also whether it reads an inventory (then it looks again now and then).
+ */
+export function comparatorOutput(w: HopperWorld, x: number, y: number, z: number, state: number): { power: number; reading: boolean } {
+  const facing = propertyOf(state, "facing");
+  const b = FACING_DIR[facing] ^ 1;
+  const [bx, bz] = [x + DIR_X[b], z + DIR_Z[b]];
+  let rear = powerFrom(w, x, y, z, b);
+  let inventory = inventoryAt(w, bx, y, bz);
+  if (!inventory && conductor(w.get(bx, y, bz)) && rear < 15) inventory = inventoryAt(w, bx + DIR_X[b], y, bz + DIR_Z[b]);
+  if (inventory) rear = Math.max(rear, fillLevel(inventory));
+  let side = 0;
+  for (const sideFacing of [LEFT_OF[facing], RIGHT_OF[facing]]) {
+    const d = FACING_DIR[sideFacing];
+    const n = w.get(x + DIR_X[d], y, z + DIR_Z[d]);
+    const nb = STATE_BLOCK[n];
+    if (nb === Block.RedstoneWire) side = Math.max(side, Number(propertyOf(n, "power")));
+    else if (nb === Block.Repeater || nb === Block.Comparator) side = Math.max(side, emitted(w, x + DIR_X[d], y, z + DIR_Z[d], d ^ 1, false));
+  }
+  const power = propertyOf(state, "mode") === "subtract" ? Math.max(0, rear - side) : rear >= side ? rear : 0;
+  return { power, reading: inventory !== null };
+}
+
 /** Whether a torch should be lit: the block it hangs on isn't powered. */
 function torchShouldLight(w: RedstoneWorld, x: number, y: number, z: number, state: number): boolean {
   const d = attachedDir(state);
@@ -166,17 +214,50 @@ function torchShouldLight(w: RedstoneWorld, x: number, y: number, z: number, sta
  */
 export class Redstone {
   occupied: (x: number, y: number, z: number, wood: boolean) => boolean = () => false;
+  /** Pistons pushing and pulling (they move blocks over a few ticks: their tick is the game's to call). */
+  readonly pistons: Pistons;
 
   constructor(
-    private readonly world: RedstoneWorld,
+    private readonly world: PistonWorld & HopperWorld,
     private readonly ticks: WorldTicks,
-  ) {}
+  ) {
+    this.pistons = new Pistons(
+      world,
+      (x, y, z, d) => powerFrom(world, x, y, z, d),
+      () => ticks.time,
+    );
+  }
+
+  /** A block changed at (x, y, z): observers watching it there pulse, after their delay. */
+  observe(x: number, y: number, z: number): void {
+    for (let d = 0; d < 6; d++) {
+      const [ox, oy, oz] = [x + DIR_X[d], y + DIR_Y[d], z + DIR_Z[d]];
+      const s = this.world.get(ox, oy, oz);
+      if (STATE_BLOCK[s] === Block.Observer && FACING6_DIR[propertyOf(s, "facing")] === (d ^ 1)) this.ticks.schedule(ox, oy, oz, Block.Observer, OBSERVER_DELAY);
+    }
+  }
 
   /** A block reacting to what is around it (BlockUpdates calls this for every update). */
   update(x: number, y: number, z: number, state: number): void {
     const w = this.world;
     const b = STATE_BLOCK[state];
     switch (b) {
+      case Block.Piston:
+      case Block.StickyPiston:
+      case Block.PistonHead:
+        this.pistons.update(x, y, z, state);
+        return;
+      case Block.Comparator: {
+        const { power, reading } = comparatorOutput(w, x, y, z, state);
+        if (reading || power !== Number(propertyOf(state, "power"))) this.ticks.schedule(x, y, z, b, COMPARATOR_DELAY);
+        return;
+      }
+      case Block.Hopper: {
+        // Powered, it stops
+        const on = powerAt(w, x, y, z) > 0;
+        if (on === isOn(state, "enabled")) w.set(x, y, z, withProperties(state, { enabled: String(!on) }));
+        return;
+      }
       case Block.RedstoneWire: {
         const next = wireState(w, x, y, z, state);
         if (next !== state) w.set(x, y, z, next);
@@ -224,10 +305,28 @@ export class Redstone {
     }
   }
 
-  /** A delay run out: a torch turns, a repeater passes its input on, a lamp goes out, a button pops up. */
+  /**
+   * A delay run out: a torch turns, a repeater passes its input on, a lamp goes out, a button pops up, an
+   * observer pulses (and ends its pulse), a comparator sends what it reads.
+   */
   scheduled(x: number, y: number, z: number, state: number): void {
     const w = this.world;
     switch (STATE_BLOCK[state]) {
+      case Block.Observer:
+        if (isOn(state, "powered")) {
+          w.set(x, y, z, withProperties(state, { powered: "false" }));
+        } else {
+          w.set(x, y, z, withProperties(state, { powered: "true" }));
+          this.ticks.schedule(x, y, z, Block.Observer, OBSERVER_DELAY);
+        }
+        return;
+      case Block.Comparator: {
+        const { power, reading } = comparatorOutput(w, x, y, z, state);
+        if (power !== Number(propertyOf(state, "power"))) w.set(x, y, z, withProperties(state, { power: String(power) }));
+        // An inventory changes without telling anyone: look again soon
+        if (reading) this.ticks.schedule(x, y, z, Block.Comparator, COMPARATOR_DELAY);
+        return;
+      }
       case Block.RedstoneTorch: {
         const lit = torchShouldLight(w, x, y, z, state);
         if (lit !== isOn(state, "lit")) w.set(x, y, z, withProperties(state, { lit: String(lit) }));
@@ -263,6 +362,6 @@ export class Redstone {
   /** The scheduled-tick behaviors of the blocks with delays, for WorldTicks. */
   behaviors(): Map<number, TickBehavior> {
     const tick: TickBehavior = { scheduled: (_w, x, y, z, state) => this.scheduled(x, y, z, state) };
-    return new Map([Block.RedstoneTorch, Block.Repeater, Block.RedstoneLamp, Block.StoneButton, Block.OakButton, Block.StonePressurePlate, Block.OakPressurePlate].map((b) => [b, tick]));
+    return new Map([Block.RedstoneTorch, Block.Repeater, Block.RedstoneLamp, Block.StoneButton, Block.OakButton, Block.StonePressurePlate, Block.OakPressurePlate, Block.Observer, Block.Comparator].map((b) => [b, tick]));
   }
 }

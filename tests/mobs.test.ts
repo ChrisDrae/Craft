@@ -5,7 +5,7 @@ import { Drops } from "../src/drops.js";
 import { blastOn, blastedBlocks } from "../src/explosion.js";
 import { BlockInteraction, bowPower } from "../src/interaction.js";
 import { ITEMS, TOOLS, stack } from "../src/items.js";
-import { Mobs, type MobPlayer } from "../src/mobs/mobs.js";
+import { Mobs, slimeChunk, type MobPlayer } from "../src/mobs/mobs.js";
 import { findPath } from "../src/mobs/path.js";
 import { memoryPair } from "../src/net/connection.js";
 import { GuestSession } from "../src/net/guest.js";
@@ -396,5 +396,32 @@ describe("mobs with friends", () => {
     expect(zombie.health).toBe(15);
     await run(80);
     expect(hurts[0]).toBe(3);
+  });
+});
+
+describe("slimes", () => {
+  it("hop after a player, hurt them by their size, and split when they die; the smallest drop slimeballs", () => {
+    const { mobs, drops, hurts, run } = arena({ x: 0.5, y: 10, z: 0.5 });
+    const big = mobs.spawn("slime", 6.5, 10, 0.5, 0, 4);
+    expect([big.health, big.halfWidth * 2, big.height]).toEqual([16, 2.08, 2.08]);
+    run(200);
+    expect(Math.abs(big.position.x - 0.5)).toBeLessThan(3);
+    expect(hurts.length).toBeGreaterThan(0);
+    expect(hurts[0]).toMatchObject({ amount: 4, source: "mob", by: "Slime" });
+    mobs.hurt(big, 100, "player", "host");
+    const medium = [...mobs.mobs.values()].filter((m) => m.kind === "slime" && m.alive);
+    expect(medium.map((m) => m.size)).toEqual([2, 2, 2]);
+    // The smallest: no harm, and slimeballs
+    const small = mobs.spawn("slime", 20.5, 10, 20.5, 0, 1);
+    mobs.hurt(small, 100, "player", "host");
+    expect([...drops.items.values()].map((d) => d.stack.count)).toEqual([1]);
+  });
+
+  it("live deep down in one chunk in ten, by the world's seed", () => {
+    let n = 0;
+    for (let cx = 0; cx < 100; cx++) for (let cz = 0; cz < 100; cz++) if (slimeChunk("seed", cx, cz)) n++;
+    expect(n / 10000).toBeGreaterThan(0.08);
+    expect(n / 10000).toBeLessThan(0.12);
+    expect(slimeChunk("seed", 3, 4)).toBe(slimeChunk("seed", 3, 4));
   });
 });

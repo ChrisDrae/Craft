@@ -68,6 +68,13 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.OakPressurePlate]: by("axe", 0.5),
   [Block.Repeater]: hand(0),
   [Block.RedstoneLamp]: hand(0.3),
+  [Block.Piston]: by("pickaxe", 1.5),
+  [Block.StickyPiston]: by("pickaxe", 1.5),
+  [Block.PistonHead]: by("pickaxe", 1.5),
+  [Block.MovingPiston]: hand(-1),
+  [Block.Observer]: by("pickaxe", 3, Tier.Wood),
+  [Block.Hopper]: by("pickaxe", 3, Tier.Wood),
+  [Block.Comparator]: hand(0),
   [Block.RedstoneWire]: hand(0),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
@@ -185,6 +192,11 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return held?.item === Items.Shears ? one(Block.Vine) : [];
     case Block.Farmland:
       return one(Block.Dirt);
+    case Block.PistonHead:
+      // Its piston, which goes with it
+      return one(propertyOf(state, "type") === "sticky" ? Block.StickyPiston : Block.Piston);
+    case Block.MovingPiston:
+      return [];
     case Block.RedstoneWire:
       return one(Items.Redstone);
     case Block.Wheat:

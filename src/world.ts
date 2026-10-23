@@ -215,6 +215,8 @@ export class VoxelWorld implements LightWorld {
       chunk.entities.delete(entityKey);
       this.onEntityRemoved?.(x, y, z, entity);
     }
+    // A hopper works without anyone opening it: it has its entity from the start
+    if (STATE_BLOCK[state] === Block.Hopper && !chunk.entities.has(entityKey)) chunk.entities.set(entityKey, entityFor(Block.Hopper)!);
     chunk.packed = null;
     chunk.sections[s].dirty = true;
     if (ly === 0 && s > 0) chunk.sections[s - 1].dirty = true;

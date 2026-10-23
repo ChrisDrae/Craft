@@ -105,6 +105,30 @@ function attached(quads: Quad[], boxes: Box[], face: string, facing: string): { 
   return { quads: turnQuads(moved, turns), boxes: boxes.map((b) => turn(onto(b, face), turns)) };
 }
 
+/** A model built pointing up, pointed to one of six facings (pistons). */
+function pointed(quads: Quad[], list: Box[], facing: string): { quads: Quad[]; boxes: Box[] } {
+  if (facing === "up") return { quads, boxes: list };
+  return facing === "down" ? attached(quads, list, "ceiling", "north") : attached(quads, list, "wall", facing);
+}
+
+/**
+ * A piston's arm: a rod 4 pixels square from 4 pixels into the base up to the head's plate, its sides
+ * showing the band at the top of the piston's side, turned to run along it (as Minecraft's).
+ */
+function rodQuads(tile: number): Quad[] {
+  const rod: Box = [px(6), px(-4), px(6), px(10), px(12), px(10)];
+  return boxQuads(rod, () => tile, [Dir.PosX, Dir.NegX, Dir.PosZ, Dir.NegZ]).map((q) => {
+    const c = q.corners;
+    const uvs = new Float64Array(8);
+    for (let k = 0; k < 4; k++) {
+      const along = c[k * 3 + 1] + px(4);
+      const across = (q.dir === Dir.PosX || q.dir === Dir.NegX ? c[k * 3 + 2] : c[k * 3]) - px(6);
+      uvs.set([along, across], k * 2);
+    }
+    return { ...q, uvs };
+  });
+}
+
 /** Four planes in a # (crops), each seen from both sides, sunk a pixel into the farmland below. */
 function hashQuads(tile: number): Quad[] {
   const quads: Quad[] = [];
@@ -218,6 +242,8 @@ function partsOf(state: number): Parts | null {
   const info = BLOCKS[b];
   const prop = (name: string): string => propertyOf(state, name);
   if (info.shape === "cube" || info.shape === "fluid") return null;
+  // A piston that hasn't pushed is a cube
+  if (info.shape === "piston" && prop("extended") === "false") return null;
   const t = info.textures.map(tileIndex);
   switch (info.shape) {
     case "cross":
@@ -420,6 +446,61 @@ function partsOf(state: number): Parts | null {
       const quads = turnQuads([...boxQuads(slab, (d) => (d === Dir.Up ? top : t[lookOf(d)])), ...torches], TURNS[prop("facing")]);
       return { quads, collision: [slab], selection: [slab] };
     }
+    case "piston": {
+      // The base without its head: 12 pixels deep, its inside showing where the head was (built pointing up)
+      const base: Box = [0, 0, 0, 1, px(12), 1];
+      const inner = tileIndex("piston_inner");
+      const { quads, boxes: list } = pointed(boxQuads(base, (d) => (d === Dir.Up ? inner : t[lookOf(d)])), [base], prop("facing"));
+      return { quads, collision: list, selection: list };
+    }
+    case "piston_head": {
+      // The plate, its face sticky or not, and the rod back into the base (built pointing up)
+      const plate: Box = [0, px(12), 0, 1, 1, 1];
+      const face = tileIndex(prop("type") === "sticky" ? "piston_top_sticky" : "piston_top");
+      const side = t[Face.Side];
+      const own = [...boxQuads(plate, (d) => (d === Dir.Up ? face : d === Dir.Down ? t[Face.Bottom] : side)), ...rodQuads(side)];
+      const { quads, boxes: list } = pointed(own, [plate, [px(6), 0, px(6), px(10), px(12), px(10)]], prop("facing"));
+      return { quads, collision: list, selection: list };
+    }
+    case "moving":
+      return { quads: [], collision: [], selection: [] };
+    case "hopper": {
+      // A bowl (its floor 10 pixels up, walls 2 thick round it), a narrower box under it, and a spout
+      const top = tileIndex("hopper_top");
+      const inside = tileIndex("hopper_inside");
+      const outside = t[Face.Side];
+      const floor: Box = [0, px(10), 0, 1, px(11), 1];
+      const walls: Box[] = [
+        [0, px(11), 0, px(2), 1, 1],
+        [px(14), px(11), 0, 1, 1, 1],
+        [px(2), px(11), 0, px(14), 1, px(2)],
+        [px(2), px(11), px(14), px(14), 1, 1],
+      ];
+      const middle: Box = [px(4), px(4), px(4), px(12), px(10), px(12)];
+      const facing = prop("facing");
+      const spout: Box = facing === "down" ? [px(6), 0, px(6), px(10), px(4), px(10)] : turn([px(6), px(4), 0, px(10), px(8), px(4)], TURNS[facing]);
+      const quads = [
+        ...boxQuads(floor, (d) => (d === Dir.Up ? inside : outside)),
+        ...walls.flatMap((b) => boxQuads(b, (d) => (d === Dir.Up ? top : outside))),
+        ...[middle, spout].flatMap((b) => boxQuads(b, () => outside)),
+      ];
+      const list = [floor, ...walls, middle, spout];
+      return { quads, collision: list, selection: [[0, px(10), 0, 1, 1, 1], middle, spout] };
+    }
+    case "comparator": {
+      // A thin slab with its arrow on top; two torches at the back lit while it sends power, one at the
+      // front lit when it subtracts (built facing north, the way it sends power)
+      const on = Number(prop("power")) > 0;
+      const slab: Box = [0, 0, 0, 1, px(2), 1];
+      const top = tileIndex(on ? "comparator_on" : "comparator");
+      const torch = (lit: boolean): number => tileIndex(lit ? "redstone_torch" : "redstone_torch_off");
+      const stick = (x: number, z: number, lit: boolean, h: number): Quad[] => boxQuads([px(x), px(2), px(z), px(x + 2), px(h), px(z + 2)], () => torch(lit), [Dir.PosX, Dir.NegX, Dir.Up, Dir.PosZ, Dir.NegZ]);
+      const quads = turnQuads(
+        [...boxQuads(slab, (d) => (d === Dir.Up ? top : t[lookOf(d)])), ...stick(3, 11, on, 7), ...stick(11, 11, on, 7), ...stick(7, 2, prop("mode") === "subtract", 5)],
+        TURNS[prop("facing")],
+      );
+      return { quads, collision: [slab], selection: [slab] };
+    }
     case "bed": {
       // Built facing north (the head toward -z), then turned. A side shows Minecraft's texture of the
       // opposite side: Craft's world is Minecraft's mirrored, and so the pillow stays at the head end
@@ -556,7 +637,7 @@ export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s)
     const face = propertyOf(s, "face");
     return face === "floor" ? Dir.Down : face === "ceiling" ? Dir.Up : FACING_DIR[propertyOf(s, "facing")] ^ 1;
   }
-  if (shape === "crop" || shape === "stem" || shape === "wire" || shape === "plate" || shape === "repeater") return Dir.Down;
+  if (shape === "crop" || shape === "stem" || shape === "wire" || shape === "plate" || shape === "repeater" || shape === "comparator") return Dir.Down;
   // A bed's halves hold each other: the head lies the way it faces from the foot
   if (shape === "bed") return FACING_DIR[propertyOf(s, "facing")] ^ (propertyOf(s, "part") === "foot" ? 0 : 1);
   if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door" || shape === "tall" || shape === "lilypad") return Dir.Down;

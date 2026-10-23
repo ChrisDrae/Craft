@@ -123,6 +123,15 @@ export const Block = {
   OakPressurePlate: 156,
   Repeater: 157,
   RedstoneLamp: 158,
+  Piston: 159,
+  StickyPiston: 160,
+  /** The arm of an extended piston, in the block in front of it. */
+  PistonHead: 161,
+  /** A block on its way somewhere, pushed or pulled by a piston (drawn moving, see pistons.ts). */
+  MovingPiston: 162,
+  Observer: 163,
+  Hopper: 164,
+  Comparator: 165,
 } as const;
 export type Block = number;
 
@@ -179,7 +188,16 @@ export type Shape =
   | "lever"
   | "button"
   | "plate"
-  | "repeater";
+  | "repeater"
+  /** A piston: a cube until it pushes, then its base, 12 pixels deep, and its head in front. */
+  | "piston"
+  | "piston_head"
+  /** A block being moved: drawn by itself as it goes, nothing in its place meanwhile. */
+  | "moving"
+  /** A hopper: a bowl with a spout down or to one side. */
+  | "hopper"
+  /** A comparator: a thin slab like a repeater's, with three torches. */
+  | "comparator";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
@@ -352,6 +370,14 @@ const ATTACH: Property = { name: "face", values: ["floor", "wall", "ceiling"] };
 const POWERED = bool("powered");
 const DELAY: Property = { name: "delay", values: ["1", "2", "3", "4"] };
 const LOCKED = bool("locked");
+/** Which of the six ways a block faces (pistons and observers): up first, as their items show them. */
+const FACING6: Property = { name: "facing", values: ["up", "down", "north", "south", "west", "east"] };
+const EXTENDED = bool("extended");
+const PISTON_TYPE: Property = { name: "type", values: ["normal", "sticky"] };
+/** Where a hopper passes its items: down, or into the side it points to. */
+const HOPPER_FACING: Property = { name: "facing", values: ["down", "north", "south", "west", "east"] };
+const ENABLED: Property = { name: "enabled", values: ["true", "false"] };
+const MODE: Property = { name: "mode", values: ["compare", "subtract"] };
 
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
@@ -485,6 +511,13 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.OakPressurePlate, "oak_pressure_plate", "oak pressure plate", { top: "#b38d55" }, { shape: "plate", textures: { all: "oak_planks" }, properties: [POWERED] }),
   block(Block.Repeater, "repeater", "repeater", { top: "#a8a8a8" }, { shape: "repeater", textures: { top: "repeater", side: "smooth_stone", bottom: "smooth_stone" }, properties: [FACING, DELAY, LOCKED, POWERED] }),
   block(Block.RedstoneLamp, "redstone_lamp", "redstone lamp", { top: "#8a5a2a" }, { textures: { all: "redstone_lamp" }, properties: [LIT] }),
+  block(Block.Piston, "piston", "piston", { top: "#a8905a", side: "#7a7a72" }, { shape: "piston", lightFilter: 15, textures: { top: "piston_top", side: "piston_side", bottom: "piston_bottom" }, properties: [FACING6, EXTENDED] }),
+  block(Block.StickyPiston, "sticky_piston", "sticky piston", { top: "#7aa85a", side: "#7a7a72" }, { shape: "piston", lightFilter: 15, textures: { top: "piston_top_sticky", side: "piston_side", bottom: "piston_bottom" }, properties: [FACING6, EXTENDED] }),
+  block(Block.PistonHead, "piston_head", "piston head", { top: "#a8905a", side: "#7a7a72" }, { shape: "piston_head", textures: { top: "piston_top", side: "piston_side", bottom: "piston_top" }, properties: [FACING6, PISTON_TYPE] }),
+  block(Block.MovingPiston, "moving_piston", "moving block", { top: "#7a7a72" }, { shape: "moving", opacity: "cutout", solid: false, breakable: false, textures: { all: "piston_side" } }),
+  block(Block.Observer, "observer", "observer", { top: "#5a5a5a", side: "#6a6a6a" }, { textures: { top: "observer_top", side: "observer_side", bottom: "observer_back", front: "observer_front" }, properties: [FACING6, POWERED] }),
+  block(Block.Hopper, "hopper", "hopper", { top: "#4a4a4e" }, { shape: "hopper", textures: { top: "hopper_top", side: "hopper_outside", bottom: "hopper_outside" }, properties: [HOPPER_FACING, ENABLED] }),
+  block(Block.Comparator, "comparator", "comparator", { top: "#a8a8a8" }, { shape: "comparator", textures: { top: "comparator", side: "smooth_stone", bottom: "smooth_stone" }, properties: [FACING, MODE, POWER] }),
 ];
 
 /** Whether a block is a crop (on farmland) or a stem. */
@@ -582,7 +615,8 @@ export function stateByName(text: string): number | null {
 /** The shape every state is drawn with (per block). */
 export const SHAPE: readonly Shape[] = stateBlock.map((b) => BLOCKS[b].shape);
 const isFluid = (b: number): boolean => BLOCKS[b].shape === "fluid";
-const isCube = (s: number): boolean => SHAPE[s] === "cube" || (SHAPE[s] === "slab" && propertyOf(s, "type") === "double");
+const isCube = (s: number): boolean =>
+  SHAPE[s] === "cube" || (SHAPE[s] === "slab" && propertyOf(s, "type") === "double") || (SHAPE[s] === "piston" && propertyOf(s, "extended") === "false");
 
 /** Lookup tables by state id for the hot loops: 1 where the flag is set. */
 export const SOLID: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].solid ? 1 : 0));
@@ -635,6 +669,11 @@ export const TILE_NAMES: readonly string[] = [
     "redstone_torch_off",
     "repeater_on",
     "redstone_lamp_on",
+    // The insides of pistons and hoppers, an observer's back while it pulses, a comparator sending power
+    "piston_inner",
+    "observer_back_on",
+    "hopper_inside",
+    "comparator_on",
   ]),
 ];
 const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
@@ -648,6 +687,10 @@ export function tileIndex(name: string): number {
 
 /** The direction (Dir) a facing value points to. */
 export const FACING_DIR: Readonly<Record<string, number>> = { north: Dir.NegZ, south: Dir.PosZ, east: Dir.PosX, west: Dir.NegX };
+/** The direction (Dir) of a facing of six (pistons, observers, hoppers' "down"). */
+export const FACING6_DIR: Readonly<Record<string, number>> = { ...FACING_DIR, up: Dir.Up, down: Dir.Down };
+/** The facing value of a direction (Dir), of six. */
+export const DIR_FACING: readonly string[] = ["east", "west", "up", "down", "south", "north"];
 /** The sides to the right and the left of a block's front, as seen by someone facing it (a double chest's halves). */
 export const RIGHT_OF: Readonly<Record<string, string>> = { north: "east", south: "west", east: "south", west: "north" };
 export const LEFT_OF: Readonly<Record<string, string>> = { north: "west", south: "east", east: "north", west: "south" };
@@ -657,10 +700,24 @@ export const FACE_LOOK: Uint8Array = new Uint8Array(STATE_COUNT * 6);
 /** The texture (TILE_NAMES index) of each cube face, at (state * 6 + dir). */
 export const FACE_TILE: Uint16Array = new Uint16Array(STATE_COUNT * 6);
 /**
- * Quarter turns of the texture on each face, at (state * 6 + dir): a log lying on its side turns its bark
- * so the grain runs along the log.
+ * Quarter turns of the texture on each face (0-3), at (state * 6 + dir): a log lying on its side turns its
+ * bark so the grain runs along the log; a piston's sides point to its front.
  */
 export const FACE_TURN: Uint8Array = new Uint8Array(STATE_COUNT * 6);
+/**
+ * The way a face's texture points up after 0 to 3 of FACE_TURN's quarter turns, by face (Dir), as the
+ * meshers turn (u, v) to (v, 1 - u) each time: a side's top to +y, then along its u axis, and so on.
+ */
+const UP_AFTER: readonly (readonly number[])[] = [
+  [Dir.Up, Dir.PosZ, Dir.Down, Dir.NegZ],
+  [Dir.Up, Dir.NegZ, Dir.Down, Dir.PosZ],
+  [Dir.NegZ, Dir.PosX, Dir.PosZ, Dir.NegX],
+  [Dir.PosZ, Dir.PosX, Dir.NegZ, Dir.NegX],
+  [Dir.Up, Dir.NegX, Dir.Down, Dir.PosX],
+  [Dir.Up, Dir.PosX, Dir.Down, Dir.NegX],
+];
+/** The quarter turns that point a face's texture up toward `want` (0 if it can't: it faces that way). */
+const turnToward = (d: number, want: number): number => Math.max(0, UP_AFTER[d].indexOf(want));
 /** The tint (Tint) of each cube face, at (state * 6 + dir). */
 export const FACE_TINT: Uint8Array = new Uint8Array(STATE_COUNT * 6);
 /**
@@ -692,6 +749,27 @@ for (let state = 0; state < STATE_COUNT; state++) {
     }
     if (info.id === Block.Furnace && look === Face.Front && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("furnace_front_on");
     if (info.id === Block.RedstoneLamp && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("redstone_lamp_on");
+    // Pistons and observers face six ways: a piston's sides point to its front, an observer's turn with it
+    if (info.properties.includes(FACING6) && isCube(state)) {
+      const f = FACING6_DIR[propertyOf(state, "facing")];
+      const up = f === Dir.Up ? Dir.PosZ : f === Dir.Down ? Dir.NegZ : Dir.Up;
+      const observer = info.id === Block.Observer;
+      let tile = info.textures[Face.Side];
+      let toward = observer ? up : f;
+      if (d === f) {
+        tile = info.textures[observer ? Face.Front : Face.Top];
+        toward = observer ? up : Dir.Up;
+      } else if (d === (f ^ 1)) {
+        tile = observer && propertyOf(state, "powered") === "true" ? "observer_back_on" : info.textures[Face.Bottom];
+        toward = observer ? up : Dir.Up;
+      } else if (observer && (d === up || d === (up ^ 1))) {
+        tile = info.textures[Face.Top];
+        toward = f;
+      }
+      FACE_LOOK[i] = d === f ? Face.Top : d === (f ^ 1) ? Face.Bottom : Face.Side;
+      FACE_TILE[i] = tileIndex(tile);
+      FACE_TURN[i] = d === f || d === (f ^ 1) ? (observer ? turnToward(d, toward) : 0) : turnToward(d, toward);
+    }
     FACE_TINT[i] = info.id === Block.Grass ? (d === Dir.Up ? info.tint : Tint.None) : info.tint;
   }
 }

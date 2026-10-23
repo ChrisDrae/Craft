@@ -29,6 +29,8 @@ export interface ShownMob {
   age: number;
   /** A baby: drawn half the size. */
   baby?: boolean;
+  /** A slime's size: drawn that many times as large. */
+  size?: number;
 }
 
 /** Minecraft's walk: legs swing by the distance walked, as far as the walking is fast. */
@@ -241,7 +243,11 @@ export class MobRenderer extends SimObject {
       const arrow = this.imported?.get("mob_arrow");
       const canvas = name === "arrow" ? (arrow ? skinOfImage(arrow) : paintArrow()) : skinOf(name, this.imported);
       const map = new Texture(canvas, { filter: "nearest", wrap: "clamp" });
-      m = new Material({ color: "#ffffff", shading: "unlit", map, alphaTest: 0.1, side: name === "arrow" || name === "sheep_wool" ? "double" : "front" });
+      // A slime's outside is see-through
+      m =
+        name === "slime_outer"
+          ? new Material({ color: "#ffffff", shading: "unlit", map, alphaTest: 0.05, opacity: 0.7 })
+          : new Material({ color: "#ffffff", shading: "unlit", map, alphaTest: 0.1, side: name === "arrow" || name === "sheep_wool" ? "double" : "front" });
     }
     this.materials.set(name, m);
     return m;
@@ -257,9 +263,11 @@ export class MobRenderer extends SimObject {
     const posed = new PosedModel(model, this.textured);
     const node = this.addNode(new MeshNode(posed.mesh, this.material(s.kind), new Transform()), false);
     let wool: Drawn["wool"] = null;
-    if (s.kind === "sheep") {
-      const woolPosed = new PosedModel(MODELS.sheep_wool, this.textured);
-      wool = { posed: woolPosed, node: this.addNode(new MeshNode(woolPosed.mesh, this.material("sheep_wool"), new Transform()), false) };
+    // A layer over it: a sheep's wool, a slime's outside
+    if (s.kind === "sheep" || s.kind === "slime") {
+      const layer = s.kind === "sheep" ? "sheep_wool" : "slime_outer";
+      const woolPosed = new PosedModel(MODELS[layer], this.textured);
+      wool = { posed: woolPosed, node: this.addNode(new MeshNode(woolPosed.mesh, this.material(layer), new Transform()), false) };
     }
     return { kind: s.kind, node, posed, wool };
   }
@@ -309,8 +317,9 @@ export class MobRenderer extends SimObject {
     // A creeper about to blow swells, and flashes white
     const swell = s.swell;
     const grow = 1 + Math.sin(swell * 100) * swell * 0.01;
-    const k = (1 + swell * 0.4 * grow) * (s.baby ? 0.5 : 1);
-    t.scale = { x: k, y: (1 + swell * 0.1 * grow) * (s.baby ? 0.5 : 1), z: k };
+    const size = (s.baby ? 0.5 : 1) * (s.size ?? 1);
+    const k = (1 + swell * 0.4 * grow) * size;
+    t.scale = { x: k, y: (1 + swell * 0.1 * grow) * size, z: k };
     const flash = swell > 0 && Math.floor(swell * 10) % 2 === 1 ? 1.6 : 1;
     const pose = poseOf(d.kind, s);
     d.posed!.pose(pose, brightness * flash, s.hurt);
@@ -320,7 +329,9 @@ export class MobRenderer extends SimObject {
       wt.scale = t.scale;
       quat.copy(wt.rotation, t.rotation);
       d.wool.node.visible = !s.sheared;
-      if (!s.sheared) {
+      if (d.kind === "slime") {
+        d.wool.posed.pose(pose, brightness, s.hurt);
+      } else if (!s.sheared) {
         const hex = BLOCKS[Block.WhiteWool + s.color].top;
         const tint = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
         d.wool.posed.pose(pose, brightness, s.hurt, tint);

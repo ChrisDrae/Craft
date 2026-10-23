@@ -79,14 +79,19 @@ export class Mob extends Entity {
   blocked: boolean = false;
   inWater: boolean = false;
   inLava: boolean = false;
+  /** A slime's size (1, 2 or 4; 1 for the rest): its box, health and hits grow with it. */
+  readonly size: number;
+  /** Ticks until a slime hops again. */
+  jumpDelay: number = 0;
 
-  constructor(world: VoxelWorld, id: number, kind: MobKind, position: Vec3) {
+  constructor(world: VoxelWorld, id: number, kind: MobKind, position: Vec3, size: number = 1) {
     const info = MOBS[kind];
-    super(world, position, info.width / 2, info.height);
+    super(world, position, (info.width * size) / 2, info.height * size);
     this.id = id;
     this.kind = kind;
     this.info = info;
-    this.health = info.health;
+    this.size = size;
+    this.health = info.health * size * size;
     this.prev = { ...position };
   }
 
@@ -99,7 +104,7 @@ export class Mob extends Entity {
   }
 
   get eyeY(): number {
-    return this.position.y + this.info.eyeHeight;
+    return this.position.y + this.info.eyeHeight * this.size;
   }
 
   /** One tick of moving: toward what it wants, with gravity, water and walls. Returns the distance walked. */

@@ -408,9 +408,12 @@ function build(chunk: Chunk, tiles: TileUVs, translucent: boolean, capacity: num
         // Sides show the part of the texture as high as they are, not squeezed
         const u = CORNER_UVS[(d * 4 + k) * 2];
         const v = d === 2 || d === 3 ? CORNER_UVS[(d * 4 + k) * 2 + 1] : 1 - cy;
-        const turned = FACE_TURN[state * 6 + d] === 1;
-        cornerU[k] = turned ? v : u;
-        cornerV[k] = turned ? 1 - u : v;
+        // Turned a quarter at a time: (u, v) to (v, 1 - u)
+        let tu = u;
+        let tv = v;
+        for (let t = FACE_TURN[state * 6 + d]; t > 0; t--) [tu, tv] = [tv, 1 - tu];
+        cornerU[k] = tu;
+        cornerV[k] = tv;
       }
       // Split the quad along the diagonal whose corners are least alike in occlusion, so it shades evenly
       const first = occlusion[0] + occlusion[2] > occlusion[1] + occlusion[3] ? 1 : 0;

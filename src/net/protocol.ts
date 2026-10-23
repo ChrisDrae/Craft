@@ -12,7 +12,7 @@ import type { DamageSource, Difficulty } from "../vitals.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
@@ -115,6 +115,8 @@ export type ToGuest =
   | { t: "weather"; rain: boolean; thunder: boolean }
   /** Lightning struck there. */
   | { t: "lightning"; x: number; y: number; z: number }
+  /** Blocks pistons started moving: [x, y, z, state, dir, extending + 2 for a head] each (where they go). */
+  | { t: "moving"; moves: Array<[number, number, number, number, number, number]> }
   /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
   | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };

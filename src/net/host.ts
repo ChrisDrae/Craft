@@ -1,5 +1,6 @@
 import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, touched, type Action } from "../actions.js";
+import type { Move } from "../pistons.js";
 import { FURNACE_OUTPUT, saveEntity, takeXp } from "../blockEntities.js";
 import { BLOCKS, HOTBAR, PLACEABLE } from "../blocks.js";
 import { CHUNK_SIZE } from "../chunk.js";
@@ -187,6 +188,12 @@ export class HostSession extends SimObject {
   /** Lightning struck: every guest sees and hears it. */
   lightning(x: number, y: number, z: number): void {
     for (const v of this.visitors.values()) this.send(v, { t: "lightning", x, y, z });
+  }
+
+  /** Pistons started moving blocks: every guest draws them on their way. */
+  moving(moves: readonly Move[]): void {
+    const list = moves.map((m): [number, number, number, number, number, number] => [m.x, m.y, m.z, m.state, m.dir, (m.extending ? 1 : 0) + (m.head ? 2 : 0)]);
+    for (const v of this.visitors.values()) this.send(v, { t: "moving", moves: list });
   }
 
   /** Tells the guests the time now (it was set). */
@@ -425,7 +432,7 @@ export class HostSession extends SimObject {
    * survival, for the tool they held); put right on their side if not.
    */
   private act(v: Visitor, msg: Action & { held?: SavedStack | null }): void {
-    const a: Action = { act: msg.act, x: msg.x | 0, y: msg.y | 0, z: msg.z | 0, nx: msg.nx | 0, ny: msg.ny | 0, nz: msg.nz | 0, hy: Number(msg.hy) || 0, block: msg.block | 0, yaw: Number(msg.yaw) || 0 };
+    const a: Action = { act: msg.act, x: msg.x | 0, y: msg.y | 0, z: msg.z | 0, nx: msg.nx | 0, ny: msg.ny | 0, nz: msg.nz | 0, hy: Number(msg.hy) || 0, block: msg.block | 0, yaw: Number(msg.yaw) || 0, pitch: Number(msg.pitch) || 0 };
     if (msg.use === "till" || msg.use === "fertilize" || msg.use === "trample") a.use = msg.use;
     const p = v.state.position;
     const reach = Math.hypot(a.x + 0.5 - p.x, a.y + 0.5 - (p.y + EYE_HEIGHT), a.z + 0.5 - p.z) <= REACH + 1.5;

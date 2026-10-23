@@ -12,8 +12,8 @@ glowstone; a 20-minute day with the sun, the moon in its phases, stars and cloud
 thunderstorms. In survival you gather: blocks take time to break and drop as items, tools in five tiers
 break them faster, and you craft, smelt in furnaces and keep things in chests; you get hungry, falls and
 lava hurt, and a bed brings you back. Fields grow wheat, carrots, potatoes, pumpkins and melons, animals
-breed, and redstone carries power from levers, buttons and plates to lamps and doors. In creative every
-block is at hand and you fly. Friends can join any world.
+breed, and redstone carries power from levers, buttons and plates to lamps, doors and pistons, while
+hoppers move items between chests and furnaces. In creative every block is at hand and you fly. Friends can join any world.
 
 ```sh
 npm install
@@ -62,9 +62,9 @@ the inventory's 2×2 grid, then sticks and a wooden pickaxe at the table's 3×3 
 to drop anything, iron ore a stone one, diamonds an iron one. Tools wear out. A furnace smelts ores, sand
 and logs with coal, charcoal or wood; a chest holds 27 stacks, two side by side 54. Items move as in
 Minecraft: the left button picks up and puts down stacks, the right one halves a stack or puts down one,
-shift moves a stack across, a double click gathers. About 120 recipes: planks, sticks, tables, furnaces,
+shift moves a stack across, a double click gathers. Recipes: planks, sticks, tables, furnaces,
 chests, torches, tools and armor in every material, beds in 16 colors, doors, stairs, slabs, panes, ladders,
-fences, walls, bowls and stew and more.
+fences, walls, bowls and stew, redstone's parts and more (about 135).
 
 Staying alive goes as in Minecraft. Ten hearts: falls of more than three blocks hurt (half as much onto a
 bed, not at all into water), lava burns and sets you burning until water puts it out, you drown when your
@@ -114,10 +114,17 @@ fifteen blocks; repeaters pass it on at full strength after a delay of their own
 it around, and lamps, doors and trapdoors answer it. A torch feeding its own block back through a
 repeater makes a clock.
 
+Pistons push up to twelve blocks out of their way and break plants and the like at the end of the line;
+sticky ones, made with a slimeball, pull a block back. Slimes hop about swamps at night and deep down in
+some places; the big ones split when killed, the smallest drop slimeballs. Observers pulse when the block
+they watch changes, which makes farms that harvest themselves. Hoppers pass items from chests and
+furnaces above, or from the ground over them, into whatever they point at; comparators read how full a
+chest is, and compare or subtract signals.
+
 ## Worlds and saves
 
-Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests and furnaces
-hold and the items lying in it, the player and their inventory, the guests who played in it, and the
+Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests, furnaces and
+hoppers hold and the items lying in it, the player and their inventory, the guests who played in it, and the
 world's clock and weather. Craft saves every 30 seconds, when you open the game menu or switch tabs, and when you quit
 to the title. A world open in one tab can't be opened in a second one. From the title screen you can
 rename, copy and delete worlds, and export one to a `.craftworld` file (or import such a file), to keep it
@@ -176,7 +183,7 @@ flowchart LR
     subgraph Sim["Projector Simulation"]
       Player["Player<br/>(physics)"]
       Hands["BlockInteraction<br/>(break, place, use)"]
-      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays"]
+      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays,<br/>pistons, hoppers"]
       Updates["BlockUpdates<br/>neighbors react,<br/>redstone"]
       Drops["Dropped items"]
       Terrain["Terrain<br/>(chunk meshes)"]

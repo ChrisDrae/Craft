@@ -44,6 +44,9 @@ import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
 import type { Action } from "./actions.js";
 import { Precipitation } from "./rain.js";
+import { tickHoppers } from "./hoppers.js";
+import { MovingBlocks, type ShownMove } from "./moving.js";
+import { MOVE_TICKS, type Move } from "./pistons.js";
 import { Weather, lightningStrikes, rainTop, rainsOn } from "./weather.js";
 import { formatWhen, h } from "./ui/dom.js";
 import { debugLines } from "./ui/debug.js";
@@ -316,6 +319,7 @@ export async function startGame(options: GameOptions): Promise<void> {
         world,
         drops,
         players: () => mobPlayers(),
+        seed,
         difficulty: () => difficulty,
         time: () => ticks.time,
         onHurtPlayer: (id, amount, source, by, push) => (id === LOCAL ? hurtHere(amount, source, by, push) : host?.hurt(id, amount, source, by, push)),
@@ -377,6 +381,7 @@ export async function startGame(options: GameOptions): Promise<void> {
         sheared: m.sheared,
         age: m.age + k,
         baby: m.baby,
+        size: m.size,
       };
     }
     for (const a of mobs!.arrows.values()) {
@@ -409,7 +414,9 @@ export async function startGame(options: GameOptions): Promise<void> {
         m.headYaw = headYaw;
         m.pitch = pitch;
         m.hurt = flags & Flag.Hurt ? 1 : 0;
-        m.dying = flags & Flag.Dying ? Math.max(m.dying, extra) : 0;
+        // A slime's extra is its size; the rest send how long they have been dying
+        m.size = name === "slime" ? extra : 1;
+        m.dying = flags & Flag.Dying ? Math.max(m.dying, name === "slime" ? 1 : extra) : 0;
         m.swell = name === "creeper" ? extra / 30 : 0;
         m.color = name === "sheep" ? extra : 0;
         m.sheared = (flags & Flag.Sheared) !== 0;
@@ -506,12 +513,14 @@ export async function startGame(options: GameOptions): Promise<void> {
     if (xp > 0) drops.spawnXp(x + 0.5, y + 0.5, z + 0.5, xp);
   };
   if (!joined) world.onEntityRemoved = (x, y, z, e) => drops.spill(x, y, z, e.items);
-  // Every game tick, where the world runs, furnaces burn, the weather turns (snow settling, ice freezing),
-  // plates go down under what stands on them and lightning strikes; everywhere the player's vitals change,
-  // sleepers sleep, and animals in love show it
+  // Every game tick, where the world runs, pistons move blocks, hoppers pass items on, furnaces burn, the
+  // weather turns (snow settling, ice freezing), plates go down under what stands on them and lightning
+  // strikes; everywhere the player's vitals change, sleepers sleep, and animals in love show it
   ticks.onTick = () => {
     if (joined) weather.fade();
     else {
+      updates!.redstone.pistons.tick();
+      tickHoppers(world, drops);
       tickFurnaces(world);
       weather.tick();
       precipitationTick(world, weather);
@@ -597,8 +606,16 @@ export async function startGame(options: GameOptions): Promise<void> {
   function changeSound(x: number, y: number, z: number, old: number): void {
     const now = world.get(x, y, z);
     const b = STATE_BLOCK[now];
-    if (STATE_BLOCK[old] !== b || propertyOf(old, "powered") === propertyOf(now, "powered")) return;
-    const on = propertyOf(now, "powered") === "true";
+    if (STATE_BLOCK[old] !== b || old === now) return;
+    // A property of the block, if it has one
+    const prop = (s: number, name: string): string | null => (BLOCKS[b].properties.some((p) => p.name === name) ? propertyOf(s, name) : null);
+    if (b === Block.Comparator) {
+      if (prop(old, "mode") !== prop(now, "mode")) sounds.play("block.comparator.click", "blocks", at(x, y, z), 0.3, prop(now, "mode") === "subtract" ? 0.55 : 0.5);
+      return;
+    }
+    const powered = prop(now, "powered");
+    if (powered === null || powered === prop(old, "powered")) return;
+    const on = powered === "true";
     const shape = SHAPE[now];
     const where = at(x, y, z);
     const wood = b === Block.OakButton || b === Block.OakPressurePlate;
@@ -621,6 +638,43 @@ export async function startGame(options: GameOptions): Promise<void> {
       for (const [p, living] of pressing()) if ((living || wood) && Math.floor(p.x) === x && Math.floor(p.y) === y && Math.floor(p.z) === z) return true;
       return false;
     };
+  }
+  if (updates) {
+    const pistons = updates.redstone.pistons;
+    // A push breaks fragile things at the end of its line: they drop and crumble
+    pistons.onBreak = (x, y, z, state) => {
+      drops.spill(x, y, z, dropsOf(state, null, Math.random, true));
+      blockEffect("break", x, y, z, state);
+      host?.effect("break", x, y, z, state);
+    };
+    pistons.onMove = (moves) => {
+      pistonSound(moves);
+      host?.moving(moves);
+    };
+    pistons.onCarry = (box, dx, dy, dz) => carry(box, dx, dy, dz);
+  }
+  /** A piston's sound as it pushes out or comes back in: once for each piston that moved. */
+  function pistonSound(moves: readonly Move[]): void {
+    for (const m of moves) {
+      if (m.extending && !m.head) continue;
+      sounds.play(m.extending ? "block.piston.extend" : "block.piston.contract", "blocks", at(m.x, m.y, m.z), 0.5, 0.6 + Math.random() * (m.extending ? 0.25 : 0.15));
+    }
+  }
+  /** What a moving block carries along: whoever and whatever is in its way. */
+  function carry(box: readonly [number, number, number, number, number, number], dx: number, dy: number, dz: number): void {
+    const hit = (p: { x: number; y: number; z: number }, half: number, height: number): boolean =>
+      p.x + half > box[0] && p.x - half < box[3] && p.y + height > box[1] && p.y < box[4] && p.z + half > box[2] && p.z - half < box[5];
+    const move = (p: { x: number; y: number; z: number }): void => {
+      p.x += dx;
+      p.y += dy;
+      p.z += dz;
+    };
+    if (hit(player.position, 0.3, 1.8)) {
+      move(player.position);
+      if (dy > 0) player.velocity.y = Math.max(0, player.velocity.y);
+    }
+    for (const m of mobs?.mobs.values() ?? []) if (hit(m.position, m.info.width / 2, m.info.height)) move(m.position);
+    for (const d of drops.items.values()) if (hit(d.position, 0.125, 0.25)) move(d.position);
   }
   /** Plates go down under what stands on them (and come up by themselves when nothing does: see Redstone). */
   function pressPlates(): void {
@@ -731,6 +785,11 @@ export async function startGame(options: GameOptions): Promise<void> {
       weather.thundering = thunder;
     };
     session.onLightning = (x, y, z) => lightningEffect(x, y, z);
+    session.onMoving = (moves) => {
+      const now = performance.now();
+      for (const move of moves) guestMoves.push({ move, at: now });
+      pistonSound(moves);
+    };
     session.onNotice = (text) => notice(text);
     session.onRules = (d) => {
       difficulty = d;
@@ -783,6 +842,30 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Rain and snow falling around the camera, and lightning's bolts (WebGL only, as the sky)
   const precipitation = textured ? sim.add(new Precipitation(world, lightMap, { rain: imported?.sky?.rain ?? null, snow: imported?.sky?.snow ?? null })) : null;
   if (precipitation) precipitation.weather = () => weather;
+  // Blocks on their way, pushed or pulled by pistons (WebGL only): the moving blocks of the world here, or
+  // what the host said started moving, for as long as a move takes
+  const moving = textures ? sim.add(new MovingBlocks(world, lightMap, { texture: textures.texture, uvs: textures.uvs })) : null;
+  const guestMoves: Array<{ move: Move; at: number }> = [];
+  if (moving) moving.moves = () => (guest ? hostMoves() : localMoves());
+  function* localMoves(): Iterable<ShownMove> {
+    for (const chunk of world.chunks.values()) {
+      if (chunk.entities.size === 0) continue;
+      for (const [key, e] of chunk.entities) {
+        if (e.kind !== "moving") continue;
+        const x = chunk.cx * 16 + (key & 15);
+        const z = chunk.cz * 16 + ((key >> 4) & 15);
+        yield { x, y: key >> 8, z, state: e.state, dir: e.dir, progress: Math.min(1, e.progress + ticks.partial / MOVE_TICKS) };
+      }
+    }
+  }
+  function* hostMoves(): Iterable<ShownMove> {
+    const now = performance.now();
+    for (let i = guestMoves.length - 1; i >= 0; i--) {
+      const progress = (now - guestMoves[i].at) / ((MOVE_TICKS * 1000) / TICKS_PER_SECOND);
+      if (progress >= 1 || STATE_BLOCK[world.get(guestMoves[i].move.x, guestMoves[i].move.y, guestMoves[i].move.z)] !== Block.MovingPiston) guestMoves.splice(i, 1);
+      else yield { ...guestMoves[i].move, progress };
+    }
+  }
   // The hand in front of the view
   const hand = sim.add(new Hand(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null, avatars.skinFor(selfId), textured));
   hand.held = () => inventory.held;
@@ -1644,7 +1727,10 @@ export async function startGame(options: GameOptions): Promise<void> {
       sounds.play("block.chest.open", "blocks", at(x, y, z), 0.5, Math.random() * 0.1 + 0.9);
       const slots = chestSlots(x, y, z, state, e);
       showItems(() => items.showChest(slots, slots.length > 27 ? "Large chest" : "Chest"));
-    } else {
+    } else if (e.kind === "hopper") {
+      const slots = entitySlots(x, y, z, e);
+      showItems(() => items.showChest(slots, "Hopper"));
+    } else if (e.kind === "furnace") {
       const slots = entitySlots(x, y, z, e);
       showItems(() => items.showFurnace([slots[FURNACE_INPUT], slots[FURNACE_FUEL], slots[FURNACE_OUTPUT]], e));
     }

@@ -23,8 +23,9 @@ export interface Action {
   hy: number;
   /** The block placed. */
   block: Block;
-  /** Where the player looked (stairs and doors face that way). */
+  /** Where the player looked (stairs and doors face that way), and how far up or down (pistons, observers). */
   yaw: number;
+  pitch?: number;
   /** What the held item does to the block used (a hoe tills, bone meal makes things grow), or landing hard on farmland. */
   use?: "till" | "fertilize" | "trample";
 }
@@ -59,7 +60,8 @@ export function breakBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z">):
 
 /**
  * Uses a block: a hoe tills grass or dirt with air above into farmland; bone meal makes a crop, sapling or
- * grass grow (fertilize); a lever flips, a button is pressed, a repeater's delay goes round; a door (both
+ * grass grow (fertilize); a lever flips, a button is pressed, a repeater's delay goes round, a comparator
+ * changes between comparing and subtracting; a door (both
  * halves) or a trapdoor opens or shuts. Farmland landed on hard is trampled back to dirt. Returns whether
  * anything happened.
  */
@@ -76,6 +78,7 @@ export function useBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z"> & {
   if (block === Block.Lever) return world.set(a.x, a.y, a.z, withProperties(state, { powered: propertyOf(state, "powered") === "true" ? "false" : "true" }));
   if (block === Block.StoneButton || block === Block.OakButton) return propertyOf(state, "powered") === "false" && world.set(a.x, a.y, a.z, withProperties(state, { powered: "true" }));
   if (block === Block.Repeater) return world.set(a.x, a.y, a.z, withProperties(state, { delay: String((Number(propertyOf(state, "delay")) % 4) + 1) }));
+  if (block === Block.Comparator) return world.set(a.x, a.y, a.z, withProperties(state, { mode: propertyOf(state, "mode") === "compare" ? "subtract" : "compare" }));
   if (shape !== "door" && shape !== "trapdoor") return false;
   const open = propertyOf(state, "open") === "true" ? "false" : "true";
   if (shape === "door") {
@@ -115,7 +118,7 @@ export function placeBlock(world: VoxelWorld, a: Action, standing: readonly { x:
     if (layers < 8) return world.set(a.x, a.y, a.z, withProperties(aimed, { layers: String(layers + 1) }));
   }
 
-  const state = placementState(block, { nx: a.nx, ny: a.ny, nz: a.nz, hy: a.hy }, a.yaw);
+  const state = placementState(block, { nx: a.nx, ny: a.ny, nz: a.nz, hy: a.hy }, a.yaw, a.pitch ?? 0);
   if (state === null) return false;
   // Short grass gives way: the block goes in its place
   const inPlace = BLOCKS[target].replaceable;

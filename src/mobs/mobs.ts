@@ -10,7 +10,7 @@ import { celestialAngle, daylightAt } from "../sky.js";
 import { byDifficulty, type DamageSource, type Difficulty } from "../vitals.js";
 import { VoxelWorld } from "../world.js";
 import { Arrow, segmentHitsBox, type Shooter } from "./arrow.js";
-import { MOBS, MOB_KINDS, sheepColor, type MobKind } from "./kinds.js";
+import { MOBS, MOB_KINDS, SLIME_SIZES, sheepColor, type MobKind } from "./kinds.js";
 import { Mob } from "./mob.js";
 import { findPath, standing } from "./path.js";
 
@@ -61,6 +61,8 @@ export interface MobsOptions {
   onArrowPickup?: (playerId: string) => boolean;
   /** How hard it rains and storms now (0-1): rain keeps mobs from burning, and storms darken the day. */
   weather?: () => { rain: number; thunder: number; rainedOn: (x: number, y: number, z: number) => boolean };
+  /** The world's seed: which chunks slimes live deep down in. */
+  seed?: string;
   /** A sound at a point (Minecraft's event names): mobs calling, hurt, dying, arrows striking. */
   onSound?: (event: string, x: number, y: number, z: number, category: "hostile" | "friendly" | "players") => void;
   random?: () => number;
@@ -96,7 +98,15 @@ const MONSTERS: ReadonlyArray<readonly [MobKind, number]> = [
   ["skeleton", 100],
   ["creeper", 100],
   ["spider", 100],
+  ["slime", 100],
 ];
+
+/** Whether slimes live deep down in a chunk: one in ten, by the world's seed (Minecraft's slime chunks). */
+export function slimeChunk(seed: string, cx: number, cz: number): boolean {
+  let h = 2166136261;
+  for (const c of `${seed}:${cx}:${cz}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return (h >>> 0) % 10 === 0;
+}
 const ANIMALS: ReadonlyArray<readonly [MobKind, number]> = [
   ["sheep", 12],
   ["pig", 10],
@@ -140,8 +150,8 @@ export class Mobs {
   }
 
   /** A mob of a kind at a point (a sheep's wool colored by chance). */
-  spawn(kind: MobKind, x: number, y: number, z: number, yaw: number = this.random() * Math.PI * 2): Mob {
-    const mob = new Mob(this.world, this.nextId++, kind, { x, y, z });
+  spawn(kind: MobKind, x: number, y: number, z: number, yaw: number = this.random() * Math.PI * 2, size: number = kind === "slime" ? SLIME_SIZES[Math.floor(this.random() * 3)] : 1): Mob {
+    const mob = new Mob(this.world, this.nextId++, kind, { x, y, z }, size);
     mob.yaw = mob.headYaw = mob.prevYaw = yaw;
     if (kind === "sheep") mob.color = sheepColor(this.random());
     if (kind === "chicken") mob.eggTime = 6000 + Math.floor(this.random() * 6000);
@@ -239,7 +249,18 @@ export class Mobs {
   canSpawn(kind: MobKind, x: number, y: number, z: number, players: readonly MobPlayer[]): boolean {
     if (standing(this.world, x, y, z, Math.ceil(MOBS[kind].height)) !== "walk") return false;
     if (this.nearAnyPlayer(players, x, y, z, SPAWN_NEAR)) return false;
+    if (kind === "slime") return this.slimesThere(x, y, z);
     return MOBS[kind].hostile ? this.darkEnough(x, y, z) : STATE_BLOCK[this.world.get(x, y - 1, z)] === Block.Grass;
+  }
+
+  /**
+   * Where slimes appear, as Minecraft's: in swamps between y 51 and 69 in the dark, and deep down (below y
+   * 40) in one chunk in ten, chosen by the world's seed, whatever the light.
+   */
+  private slimesThere(x: number, y: number, z: number): boolean {
+    const biome = this.world.chunk(x >> 4, z >> 4)?.biomes[(z & 15) * CHUNK_SIZE + (x & 15)];
+    if (biome === Biome.Swamp && y > 50 && y < 70 && this.random() < 0.5) return this.darkEnough(x, y, z);
+    return y < 40 && slimeChunk(this.options.seed ?? "", x >> 4, z >> 4) && this.random() < 0.1;
   }
 
   /** One to four of a kind (two to four animals) around a spot that suits them. */
@@ -448,6 +469,10 @@ export class Mobs {
 
   private think(mob: Mob, players: readonly MobPlayer[], difficulty: Difficulty): void {
     const info = mob.info;
+    if (mob.kind === "slime") {
+      this.hop(mob, this.targetFor(mob, players), difficulty);
+      return;
+    }
     if (info.hostile) {
       // Spiders only go after players in the dark, or one that hit them
       const target = this.targetFor(mob, players);
@@ -507,6 +532,40 @@ export class Mobs {
     const near = players.find((pl) => this.distance(mob, pl.position) < 6);
     if (near && this.random() < 0.02) mob.lookAt(near.position);
     this.wander(mob, info.speed);
+  }
+
+  /**
+   * A slime hops, now and then (three times as often after a target): toward its target, or any way. One
+   * of size 2 or more hurts a target it touches, by its size.
+   */
+  private hop(mob: Mob, target: MobPlayer | null, difficulty: Difficulty): void {
+    mob.target = target ? { id: target.id, position: target.position } : null;
+    if (mob.onGround) {
+      mob.want.x = mob.want.z = 0;
+      if (mob.jumpDelay > 0) {
+        mob.jumpDelay--;
+      } else {
+        const way = target ? Math.atan2(target.position.x - mob.position.x, target.position.z - mob.position.z) : mob.yaw + (this.random() - 0.5) * 2;
+        mob.yaw = mob.headYaw = way;
+        const speed = 1.5 + mob.size * 0.5;
+        mob.want.x = mob.velocity.x = Math.sin(way) * speed;
+        mob.want.z = mob.velocity.z = Math.cos(way) * speed;
+        mob.velocity.y = 8;
+        mob.jumpDelay = 10 + Math.floor(this.random() * 20);
+        if (target) mob.jumpDelay = Math.floor(mob.jumpDelay / 3);
+        this.sound(mob, "jump");
+      }
+    }
+    if (!target || mob.size < 2 || mob.cooldown > 0) return;
+    const t = target.position;
+    const dx = t.x - mob.position.x;
+    const dz = t.z - mob.position.z;
+    const flat = Math.hypot(dx, dz);
+    if (flat < mob.halfWidth + 0.6 && t.y < mob.position.y + mob.height && t.y + 1.8 > mob.position.y) {
+      mob.cooldown = 10;
+      this.sound(mob, "attack");
+      this.options.onHurtPlayer(target.id, byDifficulty(mob.size, difficulty), "mob", mob.info.label, { x: (dx / (flat || 1)) * KNOCKBACK, y: 6, z: (dz / (flat || 1)) * KNOCKBACK });
+    }
   }
 
   /** A monster after its target: strike, shoot or blow up. */
@@ -717,20 +776,35 @@ export class Mobs {
       if (n > 0 && item !== null) stacks.push({ item, count: n, damage: 0 });
     }
     if (mob.kind === "sheep" && !mob.sheared) stacks.push({ item: Block.WhiteWool + mob.color, count: 1, damage: 0 });
+    // A slime: the smallest drop slimeballs; bigger ones split into two to four of the next size down
+    if (mob.kind === "slime") {
+      if (mob.size === 1) {
+        const balls = Math.floor(this.random() * 3);
+        if (balls > 0) stacks.push({ item: itemByName("slime_ball")!, count: balls, damage: 0 });
+      } else {
+        const n = 2 + Math.floor(this.random() * 3);
+        for (let i = 0; i < n; i++) {
+          const off = mob.size / 4;
+          this.spawn("slime", mob.position.x + ((i % 2) - 0.5) * off, mob.position.y + 0.5, mob.position.z + (Math.floor(i / 2) - 0.5) * off, this.random() * Math.PI * 2, mob.size / 2);
+        }
+      }
+    }
     // A zombie's rare drop, one in forty: iron, a carrot or a potato
     if (mob.kind === "zombie" && byPlayer && this.random() < 0.025) stacks.push({ item: itemByName(["iron_ingot", "carrot", "potato"][Math.floor(this.random() * 3)])!, count: 1, damage: 0 });
     const p = mob.position;
     this.options.drops.spill(p.x - 0.5, p.y, p.z - 0.5, stacks);
     if (byPlayer) {
       const [lo, hi] = mob.info.xp;
-      this.options.drops.spawnXp(p.x, p.y + 0.5, p.z, lo + Math.floor(this.random() * (hi - lo + 1)));
+      this.options.drops.spawnXp(p.x, p.y + 0.5, p.z, (lo + Math.floor(this.random() * (hi - lo + 1))) * mob.size);
     }
   }
 
   /** A mob's sound (its kind's event: "entity.zombie.hurt"), from where it is. */
   private sound(mob: Mob, what: string): void {
     const p = mob.position;
-    this.options.onSound?.(`entity.${mob.kind}.${what}`, p.x, p.y + mob.height / 2, p.z, mob.info.hostile ? "hostile" : "friendly");
+    // The smallest slimes have sounds of their own
+    const small = mob.kind === "slime" && mob.size === 1 && what !== "attack" ? "_small" : "";
+    this.options.onSound?.(`entity.${mob.kind}.${what}${small}`, p.x, p.y + mob.height / 2, p.z, mob.info.hostile ? "hostile" : "friendly");
   }
 
   private remove(mob: Mob): void {
@@ -860,7 +934,7 @@ export class Mobs {
       const p = m.position;
       if (Math.abs(p.x - x) > range || Math.abs(p.z - z) > range) continue;
       const flags = (m.hurt > 0 ? Flag.Hurt : 0) | (m.fire > 0 ? Flag.Fire : 0) | (m.alive ? 0 : Flag.Dying) | (m.sheared ? Flag.Sheared : 0) | (m.fuse > 0 ? Flag.Swell : 0) | (m.love > 0 ? Flag.Love : 0) | (m.baby ? Flag.Baby : 0);
-      const extra = m.kind === "sheep" ? m.color : m.kind === "creeper" ? m.fuse : m.dying;
+      const extra = m.kind === "sheep" ? m.color : m.kind === "creeper" ? m.fuse : m.kind === "slime" ? m.size : m.dying;
       out.push([m.id, MOB_KINDS.indexOf(m.kind), round(p.x), round(p.y), round(p.z), round(m.yaw), round(m.headYaw), round(m.pitch), flags, extra]);
     }
     for (const a of this.arrows.values()) {

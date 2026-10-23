@@ -85,6 +85,7 @@ after the IndustrialCraft mods (added on 2026-10-23). Written on 2026-10-22 agai
 | | AI and pathfinding | — | 7 |
 | | Combat: melee, bows, knockback, explosions | — | 7 |
 | | Breeding, taming | — | 9, L |
+| | Slimes | — | 10 |
 | | Villagers and trading | — | L |
 | Simulation | Game ticks: scheduled and random | — | 0 |
 | | Growth, spreading, leaf decay, farming | — | 9 |
@@ -712,6 +713,39 @@ Parts of this phase can come at any point; sound in particular depends on nothin
 
 ### Phase 10: Pistons, hoppers and comparators (M)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Pistons and sticky pistons (`src/pistons.ts`): powered from any side but their front (without
+  Minecraft's quasi-connectivity), they push up to 12 blocks and break what is fragile at the end of the
+  line (plants, torches, redstone's parts, doors, beds, snow, cacti, pumpkins and melons, which drop). They
+  can't push obsidian, bedrock, spawners, blocks that hold things (chests, furnaces, hoppers) or pistons
+  pushed out. A move takes 2 game ticks: the blocks become moving blocks, kept with their chunk (by name),
+  drawn sliding (`src/moving.ts`) and carrying the player, mobs and items along. A pulse shorter than a
+  move finishes it at once (and a sticky piston then pulls its block back). Breaking the head breaks the
+  piston. The sides' textures turn toward the front (cube faces now take any of four quarter turns).
+- Observers: two ticks after the block in front of them changes, they pulse for two ticks out of their
+  back. Craft makes them, and comparators, with an iron ingot where Minecraft takes Nether quartz, until
+  there is a Nether.
+- Hoppers (`src/hoppers.ts`): five slots. Every 8 ticks they pass an item into what they point at (down or
+  a side) and take one from the container above, or what lies in their bowl (without waiting out its
+  pickup delay). They fill a furnace's input from above and its fuel from the sides, and take its output
+  from below. Powered, they stop. A double chest counts as two halves (Minecraft fills it as one).
+- Comparators compare or subtract (using one switches), taking side signals from dust, repeaters and
+  comparators. They read how full a chest, furnace or hopper behind them is (or one behind a solid block),
+  looking again every 2 ticks while they do.
+- Slimes, for sticky pistons' slimeballs: sizes 1, 2 and 4. They hop after players; those of size 2 and 4
+  hurt by their size. They split when they die, and the smallest drop slimeballs. They appear in swamps at
+  night and deep down (below y 40) in one chunk in ten, chosen by the world's seed. Minecraft's texture and
+  sounds when imported, their outsides see-through.
+- Sounds: pistons, comparators clicking, slimes, hoppers' metal.
+- Multiplayer (protocol 7): guests see blocks move and open hoppers. Pistons carry only the host's
+  player: guests move themselves.
+- Save format 10 (hoppers' items, moving blocks) with a fixture.
+- Fixed on the way: the clicks of levers, buttons and plates looked for a "powered" property on every
+  block that changed, and threw for the rest (a furnace lighting up, Phase 9). The in-memory test
+  connection could deliver a frame forever to nobody.
+- Not done: quasi-connectivity, slime blocks, dispensers and droppers. Not yet checked in a browser: the
+  dev server was stopped by the system for low memory.
+
 The rest of redstone that the industry phases build on: things moved by redstone, items moved between
 blocks, and blocks read by redstone.
 
@@ -1017,5 +1051,5 @@ Settled on 2026-10-22, all as recommended:
    16 before the "Later" list. Mechanics follow IndustrialCraft 2 where they fit Craft, with numbers
    tuned when each phase starts; plain names where the mod's are its own; Craft's own textures.
 
-Phases 0 to 9 and M are done; next is Phase 10 (pistons, hoppers and comparators), then the industry
-phases.
+Phases 0 to 10 and M are done; next is Phase 11, the first of the industry phases: energy, cables and
+the first machines.

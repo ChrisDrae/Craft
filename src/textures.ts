@@ -1,5 +1,5 @@
 import { Random, Texture } from "projector";
-import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, farmTiles, redstoneTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
+import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, farmTiles, pistonTiles, redstoneTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
 import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
@@ -454,7 +454,7 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
     if (tile) tiles.set(name, untint(tile, tintColor(kind, Biome.Plains)));
   }
   tiles.set("furnace_front_on", furnaceOn(tiles.get("furnace_front")!));
-  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles(), ...farmTiles(), ...redstoneTiles()]) tiles.set(name, tile);
+  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles(), ...farmTiles(), ...redstoneTiles(), ...pistonTiles()]) tiles.set(name, tile);
   for (const name of TILES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
   return tiles;
 }

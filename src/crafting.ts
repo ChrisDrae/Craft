@@ -107,6 +107,12 @@ export const SHAPED: readonly Shaped[] = [
   shaped(["##"], { "#": "#planks" }, "oak_pressure_plate"),
   shaped(["T#T", "SSS"], { T: "redstone_torch", "#": "redstone", S: "stone" }, "repeater"),
   shaped([" R ", "RGR", " R "], { R: "redstone", G: "glowstone" }, "redstone_lamp"),
+  shaped(["###", "CIC", "CRC"], { "#": "#planks", C: "cobblestone", I: "iron_ingot", R: "redstone" }, "piston"),
+  shaped(["S", "P"], { S: "slime_ball", P: "piston" }, "sticky_piston"),
+  shaped(["I I", "ICI", " I "], { I: "iron_ingot", C: "chest" }, "hopper"),
+  // Minecraft's observers and comparators take Nether quartz; until Craft has a Nether, an iron ingot
+  shaped(["CCC", "RRI", "CCC"], { C: "cobblestone", R: "redstone", I: "iron_ingot" }, "observer"),
+  shaped([" T ", "TIT", "SSS"], { T: "redstone_torch", I: "iron_ingot", S: "stone" }, "comparator"),
   shaped(["###", "###", "###"], { "#": "melon_slice" }, "melon"),
 ];
 

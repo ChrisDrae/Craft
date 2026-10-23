@@ -180,6 +180,23 @@ export const MODELS = {
       { name: "left_wing", pivot: [4, 13, 0], cubes: [cube(24, 13, -1, 0, -3, 1, 4, 6, "#e8e8e8")] },
     ],
   },
+  /** A slime's insides: a cube, two eyes and a mouth (the outer cube is slime_outer, drawn see-through). */
+  slime: {
+    width: 64,
+    height: 32,
+    parts: [
+      {
+        name: "body",
+        pivot: [0, 0, 0],
+        cubes: [cube(0, 16, -3, 17, -3, 6, 6, 6, "#5aa84a"), cube(32, 0, -3.25, 18, -3.5, 2, 2, 2, "#1a2a1a"), cube(32, 4, 1.25, 18, -3.5, 2, 2, 2, "#1a2a1a"), cube(32, 8, 0, 21, -3.5, 1, 1, 1, "#1a2a1a")],
+      },
+    ],
+  },
+  slime_outer: {
+    width: 64,
+    height: 32,
+    parts: [{ name: "body", pivot: [0, 0, 0], cubes: [cube(0, 0, -4, 16, -4, 8, 8, 8, "#7ad86a")] }],
+  },
 } satisfies Record<string, Model>;
 
 export type ModelName = keyof typeof MODELS;

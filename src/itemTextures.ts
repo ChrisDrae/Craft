@@ -179,6 +179,21 @@ function drawItem(info: ItemInfo): TilePixels {
       if (name === "mushroom_stew") layers.push([(x, y) => y === 8 && Math.abs(x - 7.5) <= 5.5, color], [(x, y) => y === 7 && Math.abs(x - 7.5) <= 4, scale(color, 1.15) as Rgb]);
       return layered(name, layers);
     }
+    case "slime_ball": {
+      const ball = disc(8, 8, 4.5);
+      return layered(name, [[ball, color, 0.1], [disc(6.5, 6.5, 1.5), [190, 240, 170], 0.05], [edge(ball), dark, 0.05]]);
+    }
+    case "hopper": {
+      // A funnel: a wide bowl over a narrow spout
+      const funnel = (x: number, y: number): boolean => (y >= 2 && y <= 7 && x >= 1 && x <= 14) || (y > 7 && y <= 11 && x >= 4 && x <= 11) || (y > 11 && y <= 14 && x >= 6 && x <= 9);
+      return layered(name, [[funnel, color, 0.1], [(x, y) => y >= 3 && y <= 5 && x >= 3 && x <= 12, scale(color, 0.55) as Rgb], [edge(funnel), dark, 0.05]]);
+    }
+    case "comparator": {
+      // Seen from above at a slant: the slab, two torches at the back, one at the front
+      const slab = (x: number, y: number): boolean => y >= 7 && y <= 13 && x >= 1 && x <= 14;
+      const torches = any(rect(3, 3, 4, 9), rect(11, 3, 12, 9), rect(7, 8, 8, 12));
+      return layered(name, [[slab, hex("#a8a8a8")], [edge(slab), hex("#6a6a6a")], [torches, hex("#8a6a3a")], [any(rect(3, 3, 4, 4), rect(11, 3, 12, 4), rect(7, 8, 8, 9)), [200, 40, 30]]]);
+    }
     default: {
       // Lumps: coal, ores, flint, clay, leather, lapis
       const lump = any(disc(7, 8, 4.5), disc(10, 7, 3), disc(8, 11, 3));
@@ -191,6 +206,68 @@ function drawItem(info: ItemInfo): TilePixels {
 export function itemTiles(): Map<string, TilePixels> {
   const out = new Map<string, TilePixels>();
   for (const info of ITEMS) if (info.texture !== null) out.set(`item_${info.texture}`, drawItem(info));
+  return out;
+}
+
+/** Pistons, observers, hoppers and comparators, as Craft draws them. */
+export function pistonTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  const stone = hex("#7a7a72");
+  const wood = hex("#b0905a");
+  const iron = hex("#c8c8c8");
+  const rim = (x: number, y: number): boolean => x === 0 || y === 0 || x === 15 || y === 15;
+  const rock = (rnd: Parameters<Parameters<typeof paint>[1]>[2], k: number = 1): [number, number, number] => scale(stone, k * jitter(rnd, 0.12) * (rnd.next() < 0.1 ? 0.85 : 1));
+  // The face: planks round an iron plate (slime over it on a sticky one)
+  const face = (sticky: boolean) =>
+    paint(sticky ? "piston top sticky" : "piston top", (x, y, rnd) => {
+      if (sticky && Math.hypot(x - 7.5, y - 7.5) < 5.5 && rnd.next() < 0.9) return scale(hex("#7ac85a"), jitter(rnd, 0.15));
+      if (x >= 5 && x <= 10 && y >= 5 && y <= 10) return scale(iron, (x === 5 || y === 5 || x === 10 || y === 10 ? 0.75 : 1) * jitter(rnd, 0.05));
+      return scale(wood, (y % 4 === 3 ? 0.78 : 1) * (rim(x, y) ? 0.8 : 1) * jitter(rnd, 0.1));
+    });
+  out.set("piston_top", face(false));
+  out.set("piston_top_sticky", face(true));
+  // The side: the head's wooden band on top, stone below with an iron strip down the middle
+  out.set(
+    "piston_side",
+    paint("piston side", (x, y, rnd) => {
+      if (y < 4) return scale(wood, (y === 3 ? 0.7 : 1) * (x % 8 === 0 ? 0.85 : 1) * jitter(rnd, 0.1));
+      if (x >= 6 && x <= 9 && y >= 5) return scale(iron, (x === 6 || x === 9 ? 0.8 : 0.95) * jitter(rnd, 0.05));
+      return rock(rnd, rim(x, y) ? 0.8 : 1);
+    }),
+  );
+  out.set("piston_bottom", paint("piston bottom", (x, y, rnd) => (Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) < 3 ? scale(iron, 0.8 * jitter(rnd, 0.05)) : rock(rnd, rim(x, y) ? 0.8 : 1))));
+  out.set("piston_inner", paint("piston inner", (x, y, rnd) => (Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) < 2.5 ? scale(stone, 0.35) : rock(rnd, rim(x, y) ? 0.8 : 1))));
+  // An observer: a face looking out, a red dot at its back, arrows along its sides toward the face
+  const dark = hex("#5a5a5e");
+  const plate = (rnd: Parameters<Parameters<typeof paint>[1]>[2], x: number, y: number): [number, number, number] => scale(dark, (rim(x, y) ? 0.75 : 1) * jitter(rnd, 0.08));
+  out.set(
+    "observer_front",
+    paint("observer front", (x, y, rnd) => {
+      const eye = y >= 5 && y <= 6 && ((x >= 3 && x <= 6) || (x >= 9 && x <= 12));
+      const mouth = y >= 10 && y <= 11 && x >= 4 && x <= 11;
+      return eye || mouth ? scale(hex("#1a1a1e"), jitter(rnd, 0.1)) : plate(rnd, x, y);
+    }),
+  );
+  const back = (on: boolean) => paint(on ? "observer back on" : "observer back", (x, y, rnd) => (Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)) < 1.5 ? scale(on ? [255, 60, 40] : [110, 30, 30], jitter(rnd, 0.1)) : plate(rnd, x, y)));
+  out.set("observer_back", back(false));
+  out.set("observer_back_on", back(true));
+  out.set("observer_side", paint("observer side", (x, y, rnd) => (x >= 6 && x <= 9 && !rim(x, y) ? scale(dark, 0.6 * jitter(rnd, 0.08)) : plate(rnd, x, y))));
+  // The top: an arrow up the tile, toward the face
+  out.set("observer_top", paint("observer top", (x, y, rnd) => ((Math.abs(x - 7.5) < 1 && y >= 3 && y <= 12) || (y >= 3 && y < 8 && Math.abs(x - 7.5) <= y - 2 && Math.abs(x - 7.5) > y - 4) ? scale(hex("#2a2a2e"), jitter(rnd, 0.1)) : plate(rnd, x, y))));
+  // A hopper: dark iron outside, darker in its bowl, the rim lighter on top
+  const metal = hex("#4a4a50");
+  out.set("hopper_outside", paint("hopper outside", (x, y, rnd) => scale(metal, (rim(x, y) ? 0.75 : x % 5 === 2 && y % 5 === 2 ? 1.3 : 1) * jitter(rnd, 0.08))));
+  out.set("hopper_inside", paint("hopper inside", (x, y, rnd) => scale(metal, 0.55 * jitter(rnd, 0.08))));
+  out.set("hopper_top", paint("hopper top", (x, y, rnd) => scale(metal, (x < 2 || y < 2 || x > 13 || y > 13 ? 1.35 : 0.5) * jitter(rnd, 0.08))));
+  // A comparator: smooth stone, two lines from the back's torches meeting at the front, red while it sends
+  const smooth = hex("#a8a8a8");
+  const comparator = (on: boolean) =>
+    paint(on ? "comparator on" : "comparator", (x, y, rnd) => {
+      const lines = (y >= 4 && y <= 12 && (Math.abs(x - (4 + (12 - y) * 0.45)) < 0.8 || Math.abs(x - (11 - (12 - y) * 0.45)) < 0.8)) || (y < 4 && Math.abs(x - 7.5) < 1);
+      return lines ? scale(on ? [230, 40, 30] : [110, 30, 30], jitter(rnd, 0.15)) : scale(smooth, (rim(x, y) ? 0.85 : 1) * jitter(rnd, 0.06));
+    });
+  out.set("comparator", comparator(false));
+  out.set("comparator_on", comparator(true));
   return out;
 }
 
