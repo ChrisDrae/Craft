@@ -1,5 +1,6 @@
 import { BLOCKS, Block, DIR_X, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
+import { canFertilize, fertilize } from "./growth.js";
 import { placementState } from "./placement.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT } from "./player.js";
 import { standsOn, sturdy, supported } from "./updates.js";
@@ -24,6 +25,8 @@ export interface Action {
   block: Block;
   /** Where the player looked (stairs and doors face that way). */
   yaw: number;
+  /** What the held item does to the block used (a hoe tills, bone meal makes things grow), or landing hard on farmland. */
+  use?: "till" | "fertilize" | "trample";
 }
 
 /** A block placing takes the place of: air, fluid, or a replaceable one (short grass). */
@@ -54,10 +57,25 @@ export function breakBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z">):
   return world.set(a.x, a.y, a.z, Block.Air);
 }
 
-/** Opens or shuts a door (both halves) or a trapdoor. Returns whether it was one. */
-export function useBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z">): boolean {
+/**
+ * Uses a block: a hoe tills grass or dirt with air above into farmland; bone meal makes a crop, sapling or
+ * grass grow (fertilize); a lever flips, a button is pressed, a repeater's delay goes round; a door (both
+ * halves) or a trapdoor opens or shuts. Farmland landed on hard is trampled back to dirt. Returns whether
+ * anything happened.
+ */
+export function useBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z"> & { use?: Action["use"]; ny?: number }): boolean {
   const state = world.get(a.x, a.y, a.z);
   const shape = SHAPE[state];
+  const block = blockOf(state);
+  if (a.use === "till" && (block === Block.Grass || block === Block.Dirt) && world.get(a.x, a.y + 1, a.z) === Block.Air && (a.ny ?? 1) >= 0) return world.set(a.x, a.y, a.z, Block.Farmland);
+  if (a.use === "trample") return block === Block.Farmland && world.set(a.x, a.y, a.z, Block.Dirt);
+  if (a.use === "fertilize" && canFertilize(state)) {
+    fertilize(world, a.x, a.y, a.z);
+    return true;
+  }
+  if (block === Block.Lever) return world.set(a.x, a.y, a.z, withProperties(state, { powered: propertyOf(state, "powered") === "true" ? "false" : "true" }));
+  if (block === Block.StoneButton || block === Block.OakButton) return propertyOf(state, "powered") === "false" && world.set(a.x, a.y, a.z, withProperties(state, { powered: "true" }));
+  if (block === Block.Repeater) return world.set(a.x, a.y, a.z, withProperties(state, { delay: String((Number(propertyOf(state, "delay")) % 4) + 1) }));
   if (shape !== "door" && shape !== "trapdoor") return false;
   const open = propertyOf(state, "open") === "true" ? "false" : "true";
   if (shape === "door") {

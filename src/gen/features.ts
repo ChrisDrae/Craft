@@ -1,7 +1,7 @@
 import { Biome } from "../biomes.js";
 import { Block, stateOf } from "../blocks.js";
 import { Rng } from "./noise.js";
-import type { ChunkWriter } from "./writer.js";
+import type { BlockWriter } from "./writer.js";
 
 /** The kinds of trees, by the shape they grow in. */
 export type TreeKind = "oak" | "big_oak" | "swamp_oak" | "birch" | "spruce" | "jungle" | "mega_jungle" | "acacia" | "dark_oak";
@@ -76,7 +76,7 @@ export function plantFor(biome: Biome, pick: number): Block | null {
 const log = (block: Block, axis: string = "y"): number => stateOf(block, { axis });
 
 /** Leaves in a rough ball (or a flat disc when `flat`), only into air, corners left out at random. */
-function blob(w: ChunkWriter, rng: Rng, cx: number, cy: number, cz: number, r: number, leaves: number, flat: boolean = false): void {
+function blob(w: BlockWriter, rng: Rng, cx: number, cy: number, cz: number, r: number, leaves: number, flat: boolean = false): void {
   const ry = flat ? 1 : Math.ceil(r);
   for (let dy = -ry; dy <= ry; dy++) {
     for (let dz = -Math.ceil(r); dz <= Math.ceil(r); dz++) {
@@ -90,7 +90,7 @@ function blob(w: ChunkWriter, rng: Rng, cx: number, cy: number, cz: number, r: n
 }
 
 /** Layers of leaves around a trunk top, Minecraft's oak crown: two wide layers, two narrow ones. */
-function crown(w: ChunkWriter, rng: Rng, x: number, top: number, z: number, leaves: number, wide: number = 2): void {
+function crown(w: BlockWriter, rng: Rng, x: number, top: number, z: number, leaves: number, wide: number = 2): void {
   for (let dy = -2; dy <= 1; dy++) {
     const r = dy < 0 ? wide : 1;
     for (let dz = -r; dz <= r; dz++) {
@@ -103,7 +103,7 @@ function crown(w: ChunkWriter, rng: Rng, x: number, top: number, z: number, leav
   }
 }
 
-function trunk(w: ChunkWriter, x: number, y: number, z: number, height: number, wood: Block, thick: boolean = false): void {
+function trunk(w: BlockWriter, x: number, y: number, z: number, height: number, wood: Block, thick: boolean = false): void {
   for (let k = 0; k < height; k++) {
     w.set(x, y + k, z, log(wood));
     if (thick) {
@@ -123,7 +123,7 @@ function trunk(w: ChunkWriter, x: number, y: number, z: number, height: number, 
  * Vines on a tree, as Minecraft's jungles and swamps have them: hanging from the sides of its leaves (and
  * climbing its trunk), one to four blocks down, on about a quarter of the open sides.
  */
-function hangVines(w: ChunkWriter, rng: Rng, x: number, y0: number, z: number, r: number, h: number, leaves: Block, wood: Block): void {
+function hangVines(w: BlockWriter, rng: Rng, x: number, y0: number, z: number, r: number, h: number, leaves: Block, wood: Block): void {
   const sides: ReadonlyArray<readonly [number, number, string]> = [
     [1, 0, "east"],
     [-1, 0, "west"],
@@ -147,7 +147,7 @@ function hangVines(w: ChunkWriter, rng: Rng, x: number, y0: number, z: number, r
   }
 }
 
-export function growTree(w: ChunkWriter, kind: TreeKind, x: number, y: number, z: number, seed: number): void {
+export function growTree(w: BlockWriter, kind: TreeKind, x: number, y: number, z: number, seed: number): void {
   const rng = new Rng(seed);
   switch (kind) {
     case "oak":

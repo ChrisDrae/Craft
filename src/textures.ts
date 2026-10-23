@@ -1,5 +1,5 @@
 import { Random, Texture } from "projector";
-import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
+import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, farmTiles, redstoneTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
 import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
@@ -454,7 +454,7 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
     if (tile) tiles.set(name, untint(tile, tintColor(kind, Biome.Plains)));
   }
   tiles.set("furnace_front_on", furnaceOn(tiles.get("furnace_front")!));
-  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles()]) tiles.set(name, tile);
+  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles(), ...farmTiles(), ...redstoneTiles()]) tiles.set(name, tile);
   for (const name of TILES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
   return tiles;
 }
@@ -552,6 +552,9 @@ export interface SkyImages {
   /** One per phase (MOON_PHASES order), or null. */
   moon: ImageBitmap[] | null;
   clouds: ImageBitmap | null;
+  /** Rain and snow falling (environment/rain.png, snow.png). */
+  rain: ImageBitmap | null;
+  snow: ImageBitmap | null;
 }
 
 /**
@@ -583,7 +586,7 @@ export async function importedTextures(): Promise<{
     }),
   );
   const files = new Map<string, TilePixels>();
-  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity|experience_orb|hud_|mob_)/.test(name)) files.set(name, firstFrame(image));
+  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity|experience_orb|hud_|mob_|weather_)/.test(name)) files.set(name, firstFrame(image));
   const tiles = proceduralTiles();
   for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
   // The chest's faces come out of its model's texture, and the orbs out of their sheet, at their own size
@@ -614,6 +617,8 @@ export async function importedTextures(): Promise<{
       sun: images.get("sun") ?? null,
       moon: phases.every((p) => p) ? (phases as ImageBitmap[]) : moons ? await moonSheet(moons) : null,
       clouds: images.get("clouds") ?? null,
+      rain: images.get("weather_rain") ?? null,
+      snow: images.get("weather_snow") ?? null,
     },
     hud: new Map([...images].filter(([name]) => name.startsWith("hud_"))),
     mobs: new Map([...images].filter(([name]) => name.startsWith("mob_"))),

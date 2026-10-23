@@ -45,7 +45,7 @@ function toggle(label: string, value: boolean, set: (v: boolean) => void): HTMLE
   return button;
 }
 
-const SOUND_LABELS: Readonly<Record<SoundKind, string>> = { master: "Master volume", music: "Music", blocks: "Blocks", hostile: "Monsters", friendly: "Animals", players: "Players", ambient: "Ambient" };
+const SOUND_LABELS: Readonly<Record<SoundKind, string>> = { master: "Master volume", music: "Music", weather: "Weather", blocks: "Blocks", hostile: "Monsters", friendly: "Animals", players: "Players", ambient: "Ambient" };
 const KEY_LABELS: Readonly<Record<KeyAction, string>> = {
   forward: "Forward",
   back: "Back",

@@ -60,6 +60,15 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.Pumpkin]: by("axe", 1),
   [Block.Melon]: by("axe", 1),
   [Block.Vine]: by("axe", 0.2),
+  [Block.Farmland]: by("shovel", 0.6),
+  [Block.Lever]: hand(0.5),
+  [Block.StoneButton]: by("pickaxe", 0.5),
+  [Block.OakButton]: by("axe", 0.5),
+  [Block.StonePressurePlate]: by("pickaxe", 0.5, Tier.Wood),
+  [Block.OakPressurePlate]: by("axe", 0.5),
+  [Block.Repeater]: hand(0),
+  [Block.RedstoneLamp]: hand(0.3),
+  [Block.RedstoneWire]: hand(0),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
   [Block.Glowstone]: hand(0.3),
@@ -77,7 +86,7 @@ for (const b of BLOCKS) {
   else if (n.endsWith("_carpet")) TABLE[b.id] = hand(0.1);
   else if (b.shape === "bed") TABLE[b.id] = hand(0.2);
   else if (b.shape === "slab" || b.shape === "stairs" || b.shape === "wall") TABLE[b.id] = n.startsWith("oak") ? WOOD_LIKE : by("pickaxe", 2, Tier.Wood);
-  else if (b.shape === "cross" || b.shape === "tall" || b.shape === "torch" || b.shape === "lilypad" || n === "sugar_cane") TABLE[b.id] = hand(0);
+  else if (b.shape === "cross" || b.shape === "tall" || b.shape === "torch" || b.shape === "lilypad" || b.shape === "crop" || b.shape === "stem" || n === "sugar_cane") TABLE[b.id] = hand(0);
 }
 
 /** Mining for every block (a hand and a second's worth of hardness for anything not listed). */
@@ -174,6 +183,31 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return one(Items.MelonSlice, between(3, 7));
     case Block.Vine:
       return held?.item === Items.Shears ? one(Block.Vine) : [];
+    case Block.Farmland:
+      return one(Block.Dirt);
+    case Block.RedstoneWire:
+      return one(Items.Redstone);
+    case Block.Wheat:
+    case Block.Carrots:
+    case Block.Potatoes: {
+      // Ripe: the harvest and seeds by Minecraft's chances (three tries at 4 in 7); green: what was planted
+      const ripe = propertyOf(state, "age") === "7";
+      const extra = (): number => [0, 1, 2].filter(() => random() < 4 / 7).length;
+      if (block === Block.Wheat) return ripe ? [...one(Items.Wheat), ...one(Items.WheatSeeds, 1 + extra())] : one(Items.WheatSeeds);
+      return one(block === Block.Carrots ? Items.Carrot : Items.Potato, ripe ? 1 + extra() : 1);
+    }
+    case Block.PumpkinStem:
+    case Block.MelonStem:
+    case Block.AttachedPumpkinStem:
+    case Block.AttachedMelonStem: {
+      const age = block === Block.PumpkinStem || block === Block.MelonStem ? Number(propertyOf(state, "age")) : 7;
+      const seeds = [0, 1, 2].filter(() => random() < (age + 1) / 15).length;
+      return seeds > 0 ? one(block === Block.PumpkinStem || block === Block.AttachedPumpkinStem ? Items.PumpkinSeeds : Items.MelonSeeds, seeds) : [];
+    }
+    case Block.ShortGrass:
+    case Block.Fern:
+      // Seeds now and then, as Minecraft's grass gives them
+      return random() < 0.125 ? one(Items.WheatSeeds) : [];
     case Block.Bookshelf:
       return one(Items.Book, 3);
     case Block.DeadBush:
@@ -182,8 +216,6 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
     case Block.GlassPane:
     case Block.Ice:
     case Block.Spawner:
-    case Block.ShortGrass:
-    case Block.Fern:
     case Block.TallGrass:
     case Block.LargeFern:
     case Block.Bedrock:

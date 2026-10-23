@@ -149,8 +149,8 @@ describe("doors and trapdoors", () => {
   it("doors stand two high, open and shut both halves together, and come off whole", () => {
     const { world, name, place, use } = site();
     expect(place(Block.OakDoor, 0, 9, 0, [0, 1, 0], { look: "north" })).toBe(true);
-    expect(name(0, 10, 0)).toBe("oak_door[facing=north,half=lower,open=false,hinge=left]");
-    expect(name(0, 11, 0)).toBe("oak_door[facing=north,half=upper,open=false,hinge=left]");
+    expect(name(0, 10, 0)).toBe("oak_door[facing=north,half=lower,open=false,hinge=left,powered=false]");
+    expect(name(0, 11, 0)).toBe("oak_door[facing=north,half=upper,open=false,hinge=left,powered=false]");
     use(0, 11, 0);
     expect(propertyOf(world.get(0, 10, 0), "open")).toBe("true");
     expect(propertyOf(world.get(0, 11, 0), "open")).toBe("true");
@@ -166,7 +166,7 @@ describe("doors and trapdoors", () => {
   it("trapdoors go in the top or bottom half and open in place", () => {
     const { world, name, place, use } = site();
     place(Block.OakTrapdoor, 0, 9, 0, [0, 1, 0], { look: "east" });
-    expect(name(0, 10, 0)).toBe("oak_trapdoor[facing=east,half=bottom,open=false]");
+    expect(name(0, 10, 0)).toBe("oak_trapdoor[facing=east,half=bottom,open=false,powered=false]");
     use(0, 10, 0);
     expect(propertyOf(world.get(0, 10, 0), "open")).toBe("true");
     world.set(0, 10, 3, Block.Stone);

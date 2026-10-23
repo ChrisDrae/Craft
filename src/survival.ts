@@ -23,6 +23,8 @@ export class Survival {
   readonly vitals: Vitals = new Vitals();
   mode: PlayMode = "survival";
   difficulty: Difficulty = "normal";
+  /** Whether it rains on the player where they are (it puts fire out). */
+  rainedOn: () => boolean = () => false;
   /** Called once when the player dies (vitals.cause says how). */
   onDeath: (() => void) | null = null;
   private died: boolean = false;
@@ -75,6 +77,7 @@ export class Survival {
         }
       }
     }
+    if (this.rainedOn()) out.inWater = true;
     const eyes = this.world.get(Math.floor(p.x), Math.floor(p.y + EYE_HEIGHT), Math.floor(p.z));
     out.eyesInWater = FLUID[eyes] === 1;
     out.inWall = OPAQUE[eyes] === 1;

@@ -59,6 +59,8 @@ export interface MobsOptions {
   onExplosion?: (x: number, y: number, z: number, power: number) => void;
   /** An arrow stuck where a player can take it: give it to them if they can (returns whether they did). */
   onArrowPickup?: (playerId: string) => boolean;
+  /** How hard it rains and storms now (0-1): rain keeps mobs from burning, and storms darken the day. */
+  weather?: () => { rain: number; thunder: number; rainedOn: (x: number, y: number, z: number) => boolean };
   /** A sound at a point (Minecraft's event names): mobs calling, hurt, dying, arrows striking. */
   onSound?: (event: string, x: number, y: number, z: number, category: "hostile" | "friendly" | "players") => void;
   random?: () => number;
@@ -74,13 +76,19 @@ export interface SavedMob {
   health: number;
   color?: number;
   sheared?: boolean;
+  /** A baby's ticks until it grows up. */
+  growUp?: number;
 }
 
 /** A mob or arrow as guests see it: id, kind (index in MOB_KINDS, or ARROW), where, which way, its state. */
 export type MobView = [id: number, kind: number, x: number, y: number, z: number, yaw: number, headYaw: number, pitch: number, flags: number, extra: number];
 export const ARROW = MOB_KINDS.length;
-/** MobView flags: hit, burning, dying, sheared, swelling (a creeper's fuse), stuck (an arrow). */
-export const Flag = { Hurt: 1, Fire: 2, Dying: 4, Sheared: 8, Swell: 16, Stuck: 32 } as const;
+/** MobView flags: hit, burning, dying, sheared, swelling (a creeper's fuse), stuck (an arrow), in love, a baby. */
+export const Flag = { Hurt: 1, Fire: 2, Dying: 4, Sheared: 8, Swell: 16, Stuck: 32, Love: 64, Baby: 128 } as const;
+/** Ticks a baby takes to grow up (20 minutes), in love, and between breedings. */
+const GROW_UP = 24000;
+const LOVE = 600;
+const BREED_COOLDOWN = 6000;
 
 /** Kinds by weight, for spawning. */
 const MONSTERS: ReadonlyArray<readonly [MobKind, number]> = [
@@ -159,7 +167,8 @@ export class Mobs {
   private darkEnough(x: number, y: number, z: number): boolean {
     const light = this.world.getLight(x, y, z);
     if ((light & 15) > 0) return false;
-    const daylight = daylightAt(celestialAngle(this.options.time()));
+    const w = this.options.weather?.();
+    const daylight = daylightAt(celestialAngle(this.options.time())) * (1 - (w?.rain ?? 0) * 0.3125) * (1 - (w?.thunder ?? 0) * 0.3125);
     const sky = Math.round((light >> 4) - 11 * (1 - daylight));
     return sky <= Math.floor(this.random() * 8);
   }
@@ -411,6 +420,7 @@ export class Mobs {
     const fall = mob.fallDistance;
     mob.step(DT);
     if (mob.onGround && !wasOnGround && fall > 3) this.hurt(mob, Math.ceil(fall - 3), "fall", null);
+    if (mob.onGround && !wasOnGround && fall > 0.5) this.trample(mob, fall);
     this.surroundings(mob);
     if (p.y < -64) this.remove(mob);
     this.trackChunk(mob);
@@ -422,9 +432,10 @@ export class Mobs {
       this.hurt(mob, 4, "lava", null);
       mob.fire = Math.max(mob.fire, 300);
     }
-    if (mob.inWater) mob.fire = 0;
-    // Zombies and skeletons catch fire under the open sky by day
-    if (mob.info.burns && !mob.inWater && mob.fire === 0) {
+    const rainedOn = (mob.fire > 0 || mob.info.burns) && (this.options.weather?.().rainedOn(Math.floor(mob.position.x), Math.floor(mob.eyeY), Math.floor(mob.position.z)) ?? false);
+    if (mob.inWater || rainedOn) mob.fire = 0;
+    // Zombies and skeletons catch fire under the open sky by day (not in the rain)
+    if (mob.info.burns && !mob.inWater && !rainedOn && mob.fire === 0) {
       const daylight = daylightAt(celestialAngle(this.options.time()));
       const sky = this.world.getLight(Math.floor(mob.position.x), Math.floor(mob.eyeY), Math.floor(mob.position.z)) >> 4;
       if (daylight > 0.5 && sky === 15 && this.random() * 30 < (daylight - 0.4) * 2) mob.fire = 160;
@@ -454,7 +465,13 @@ export class Mobs {
       this.attack(mob, target, difficulty);
       return;
     }
-    // Animals
+    // Animals: growing up, in love
+    if (mob.growUp > 0) mob.growUp--;
+    if (mob.breedCooldown > 0) mob.breedCooldown--;
+    if (mob.love > 0) {
+      mob.love--;
+      if (this.breed(mob)) return;
+    }
     if (mob.panic > 0) {
       mob.panic--;
       if (mob.path.length === 0 || mob.panic % 30 === 0) {
@@ -700,6 +717,8 @@ export class Mobs {
       if (n > 0 && item !== null) stacks.push({ item, count: n, damage: 0 });
     }
     if (mob.kind === "sheep" && !mob.sheared) stacks.push({ item: Block.WhiteWool + mob.color, count: 1, damage: 0 });
+    // A zombie's rare drop, one in forty: iron, a carrot or a potato
+    if (mob.kind === "zombie" && byPlayer && this.random() < 0.025) stacks.push({ item: itemByName(["iron_ingot", "carrot", "potato"][Math.floor(this.random() * 3)])!, count: 1, damage: 0 });
     const p = mob.position;
     this.options.drops.spill(p.x - 0.5, p.y, p.z - 0.5, stacks);
     if (byPlayer) {
@@ -721,9 +740,63 @@ export class Mobs {
     this.chunkOf.delete(mob.id);
   }
 
+  /**
+   * Feeds an animal its food (what it follows): a grown one falls in love (and looks for a partner), a baby
+   * grows up a tenth sooner. Returns whether it took it.
+   */
+  feed(mob: Mob, item: string): boolean {
+    if (mob.info.hostile || !mob.alive || !mob.info.tempt.includes(item)) return false;
+    if (mob.baby) {
+      mob.growUp = Math.max(0, mob.growUp - Math.ceil(GROW_UP / 10));
+      return true;
+    }
+    if (mob.love > 0 || mob.breedCooldown > 0) return false;
+    mob.love = LOVE;
+    return true;
+  }
+
+  /**
+   * A mob landing hard on farmland may trample it back to dirt, the harder the likelier, if it's big enough
+   * (as Minecraft's: not chickens, nor babies).
+   */
+  private trample(mob: Mob, fall: number): void {
+    const k = mob.baby ? 0.5 : 1;
+    if ((mob.info.width * k) ** 2 * mob.info.height * k <= 0.512) return;
+    const x = Math.floor(mob.position.x);
+    const y = Math.floor(mob.position.y - 0.01);
+    const z = Math.floor(mob.position.z);
+    if (STATE_BLOCK[this.world.get(x, y, z)] === Block.Farmland && this.random() < fall - 0.5) this.world.set(x, y, z, Block.Dirt);
+  }
+
+  /** An animal in love goes to another of its kind in love nearby; when they meet, a baby comes. */
+  private breed(mob: Mob): boolean {
+    let partner: Mob | null = null;
+    for (const m of this.mobs.values()) {
+      if (m === mob || m.kind !== mob.kind || m.love <= 0 || m.baby || !m.alive) continue;
+      if (this.distance(mob, m.position) < 8 && (!partner || this.distance(mob, m.position) < this.distance(mob, partner.position))) partner = m;
+    }
+    if (!partner) return false;
+    if (this.distance(mob, partner.position) > 1.5) {
+      this.goTo(mob, partner.position.x, partner.position.y, partner.position.z, mob.info.speed);
+      mob.lookAt(partner.position);
+      return true;
+    }
+    for (const m of [mob, partner]) {
+      m.love = 0;
+      m.breedCooldown = BREED_COOLDOWN;
+    }
+    const p = mob.position;
+    const q = partner.position;
+    const baby = this.spawn(mob.kind, (p.x + q.x) / 2, Math.max(p.y, q.y), (p.z + q.z) / 2);
+    baby.growUp = GROW_UP;
+    if (mob.kind === "sheep") baby.color = this.random() < 0.5 ? mob.color : partner.color;
+    this.options.drops.spawnXp(p.x, p.y + 0.5, p.z, 1 + Math.floor(this.random() * 7));
+    return true;
+  }
+
   /** Shears a sheep: 1 to 3 wool of its color. Returns whether it had wool to give. */
   shear(mob: Mob): boolean {
-    if (mob.kind !== "sheep" || mob.sheared || !mob.alive) return false;
+    if (mob.kind !== "sheep" || mob.sheared || !mob.alive || mob.baby) return false;
     mob.sheared = true;
     this.sound(mob, "shear");
     const p = mob.position;
@@ -786,7 +859,7 @@ export class Mobs {
     for (const m of this.mobs.values()) {
       const p = m.position;
       if (Math.abs(p.x - x) > range || Math.abs(p.z - z) > range) continue;
-      const flags = (m.hurt > 0 ? Flag.Hurt : 0) | (m.fire > 0 ? Flag.Fire : 0) | (m.alive ? 0 : Flag.Dying) | (m.sheared ? Flag.Sheared : 0) | (m.fuse > 0 ? Flag.Swell : 0);
+      const flags = (m.hurt > 0 ? Flag.Hurt : 0) | (m.fire > 0 ? Flag.Fire : 0) | (m.alive ? 0 : Flag.Dying) | (m.sheared ? Flag.Sheared : 0) | (m.fuse > 0 ? Flag.Swell : 0) | (m.love > 0 ? Flag.Love : 0) | (m.baby ? Flag.Baby : 0);
       const extra = m.kind === "sheep" ? m.color : m.kind === "creeper" ? m.fuse : m.dying;
       out.push([m.id, MOB_KINDS.indexOf(m.kind), round(p.x), round(p.y), round(p.z), round(m.yaw), round(m.headYaw), round(m.pitch), flags, extra]);
     }
@@ -823,6 +896,7 @@ export class Mobs {
       if (!m.info.hostile && m.alive) {
         const saved: SavedMob = { kind: m.kind, x: round(p.x), y: round(p.y), z: round(p.z), yaw: round(m.yaw), health: m.health };
         if (m.kind === "sheep") Object.assign(saved, { color: m.color, sheared: m.sheared });
+        if (m.baby) saved.growUp = m.growUp;
         out.push(saved);
       }
       if (take) {
@@ -847,6 +921,7 @@ export class Mobs {
         mob.color = Math.max(0, Math.min(COLORS.length - 1, Math.floor(Number(s.color) || 0)));
         mob.sheared = s.sheared === true;
       }
+      mob.growUp = Math.max(0, Math.min(GROW_UP, Math.floor(Number(s.growUp) || 0)));
     }
   }
 }

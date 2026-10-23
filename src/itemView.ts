@@ -25,7 +25,7 @@ export interface ShownOrb {
 }
 
 /** Block items drawn as cubes (the rest flat), and how big; orbs. */
-const CUBES: ReadonlySet<string> = new Set(["cube", "cactus", "stairs", "chest", "slab", "bed"]);
+const CUBES: ReadonlySet<string> = new Set(["cube", "cactus", "stairs", "chest", "slab", "bed", "plate", "button", "repeater", "farmland"]);
 const CUBE_SIZE = 0.25;
 const FLAT_SIZE = 0.4;
 const ORB_SIZE = 0.35;

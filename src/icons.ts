@@ -8,7 +8,7 @@ import { overlay, tint } from "./textures.js";
 const SIZE = 48;
 
 /** How high each block shape stands in its icon (cubes are 1); shapes not listed are drawn flat. */
-const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, cactus: 1, stairs: 1, chest: 14 / 16, bed: 9 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16 };
+const HEIGHTS: Readonly<Record<string, number>> = { cube: 1, cactus: 1, stairs: 1, chest: 14 / 16, bed: 9 / 16, slab: 0.5, snow: 2 / 16, carpet: 1 / 16, plate: 1 / 16, button: 2 / 16, repeater: 2 / 16, farmland: 15 / 16 };
 
 /**
  * Item icons for the hotbar and inventory screens: blocks as small cubes seen from above at an angle,

@@ -19,7 +19,7 @@ import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
 import { LightMap } from "./lightmap.js";
-import { MOBS, MOB_KINDS } from "./mobs/kinds.js";
+import { MOBS, MOB_KINDS, type MobKind } from "./mobs/kinds.js";
 import { ARROW, Flag, Mobs, type MobPlayer } from "./mobs/mobs.js";
 import { segmentHitsBox } from "./mobs/arrow.js";
 import { MobRenderer, type ShownMob } from "./mobs/view.js";
@@ -38,9 +38,13 @@ import { DAY, Sky, css } from "./sky.js";
 import { BREAKING, Survival } from "./survival.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { blockBehaviors } from "./fluids.js";
+import { growthBehaviors, precipitationTick } from "./growth.js";
 import { AtlasTexture, animatedFrames, atlasIndex, blockAtlas, importedTextures, proceduralTiles } from "./textures.js";
 import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
+import type { Action } from "./actions.js";
+import { Precipitation } from "./rain.js";
+import { Weather, lightningStrikes, rainTop, rainsOn } from "./weather.js";
 import { formatWhen, h } from "./ui/dom.js";
 import { debugLines } from "./ui/debug.js";
 import { Hud, hudSprites } from "./ui/hud.js";
@@ -213,18 +217,18 @@ export async function startGame(options: GameOptions): Promise<void> {
     }
   }
   sim.add(player);
-  // Fluids flow and sand falls on scheduled ticks; every block change updates the blocks around it (on a
-  // guest's side the host does all that, and the changes come from there)
-  const ticks = sim.add(new WorldTicks(world, joined ? new Map() : blockBehaviors(), seed));
+  // Rain, snow and thunderstorms where the world runs (alone, or the host); a guest is told how it is
+  const weather = new Weather();
+  if (saved) weather.load(saved.meta.weather);
+  // Fluids flow and sand falls on scheduled ticks, and things grow on random ones; every block change
+  // updates the blocks around it, redstone's a little further (on a guest's side the host does all that,
+  // and the changes come from there). Levers, buttons and plates click as they change, on every side
+  const growth = growthBehaviors({ weather: () => weather, drop: (x, y, z, stacks) => drops.spill(x, y, z, stacks) });
+  const ticks = sim.add(new WorldTicks(world, joined ? new Map() : new Map([...blockBehaviors(), ...growth]), seed));
   /** This world shared with friends, once opened to them. */
   let host: HostSession | null = null;
-  if (!joined) {
-    const updates = new BlockUpdates(world, ticks);
-    world.onChanged = (x, y, z) => {
-      updates.changed(x, y, z);
-      host?.changed(x, y, z);
-    };
-  }
+  weather.onChange = () => host?.weatherChanged();
+  const updates = joined ? null : new BlockUpdates(world, ticks);
   if (atlasTexture) {
     const animated = atlasTexture;
     sim.onUpdate(() => animated.animate((ticks.time + ticks.partial) / TICKS_PER_SECOND));
@@ -236,6 +240,17 @@ export async function startGame(options: GameOptions): Promise<void> {
   let hardcore = saved ? saved.meta.hardcore : false;
   // Health, hunger and the rest, ticked with the world (paused with it)
   const survival = new Survival(world, player, inventory);
+  survival.rainedOn = () => rainsOn(world, weather, Math.floor(player.position.x), Math.floor(player.eyeY), Math.floor(player.position.z));
+  // Landing hard on farmland may trample it back to dirt, the harder the likelier (the host does a guest's)
+  const landed = player.onLand;
+  player.onLand = (distance, below) => {
+    landed?.(distance, below);
+    if (STATE_BLOCK[below] !== Block.Farmland || interaction.mode === "spectator" || Math.random() >= distance - 0.5) return;
+    const p = player.position;
+    const [x, y, z] = [Math.floor(p.x), Math.floor(p.y - 0.01), Math.floor(p.z)];
+    if (guest) guest.act({ act: "use", x, y, z, nx: 0, ny: 1, nz: 0, hy: 1, block: Block.Air, yaw: player.yaw, use: "trample" }, inventory.held);
+    else world.set(x, y, z, Block.Dirt);
+  };
   /** The bed the player last slept in (its head): where they come back after dying. */
   let bed: Position | null = null;
   /** Died in hardcore: looking on. */
@@ -313,6 +328,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           host?.sound(event, x, y, z, category);
         },
         onArrowPickup: (id) => (id === LOCAL ? inventory.add(stack(Items.Arrow)) === null : (host?.give(id, { item: "arrow", count: 1 }) ?? false)),
+        weather: () => ({ rain: weather.rain, thunder: weather.thunder, rainedOn: (x, y, z) => rainsOn(world, weather, x, y, z) }),
       });
   /** The players as mobs see them: the one here and the guests. */
   function mobPlayers(): MobPlayer[] {
@@ -360,15 +376,17 @@ export async function startGame(options: GameOptions): Promise<void> {
         color: m.color,
         sheared: m.sheared,
         age: m.age + k,
+        baby: m.baby,
       };
     }
     for (const a of mobs!.arrows.values()) {
       yield { ...STILL, id: a.id, kind: "arrow", x: lerp(a.prev.x, a.position.x, k), y: lerp(a.prev.y, a.position.y, k), z: lerp(a.prev.z, a.position.z, k), yaw: a.yaw, pitch: a.pitch };
     }
   }
-  const STILL: Omit<ShownMob, "id" | "kind" | "x" | "y" | "z" | "yaw" | "pitch"> = { headYaw: 0, limbSwing: 0, limbAmount: 0, hurt: 0, dying: 0, swell: 0, color: 0, sheared: false, age: 0 };
+  const STILL: Omit<ShownMob, "id" | "kind" | "x" | "y" | "z" | "yaw" | "pitch"> = { headYaw: 0, limbSwing: 0, limbAmount: 0, hurt: 0, dying: 0, swell: 0, color: 0, sheared: false, age: 0, baby: false };
   /** A guest's mobs: moved from where they were shown toward where the host last said, over its update. */
   interface GuestMob extends ShownMob {
+    love: boolean;
     from: [number, number, number, number];
     to: [number, number, number, number];
     at: number;
@@ -384,7 +402,7 @@ export async function startGame(options: GameOptions): Promise<void> {
       for (const [id, kind, x, y, z, yaw, headYaw, pitch, flags, extra] of session.mobs) {
         fresh.add(id);
         const name = kind === ARROW ? "arrow" : MOB_KINDS[kind];
-        const m: GuestMob = shownMobs.get(id) ?? { ...STILL, id, kind: name, x, y, z, yaw, pitch, from: [x, y, z, yaw], to: [x, y, z, yaw], at: now };
+        const m: GuestMob = shownMobs.get(id) ?? { ...STILL, love: false, id, kind: name, x, y, z, yaw, pitch, from: [x, y, z, yaw], to: [x, y, z, yaw], at: now };
         m.from = [m.x, m.y, m.z, m.yaw];
         m.to = [x, y, z, yaw];
         m.at = now;
@@ -395,6 +413,8 @@ export async function startGame(options: GameOptions): Promise<void> {
         m.swell = name === "creeper" ? extra / 30 : 0;
         m.color = name === "sheep" ? extra : 0;
         m.sheared = (flags & Flag.Sheared) !== 0;
+        m.baby = (flags & Flag.Baby) !== 0;
+        m.love = (flags & Flag.Love) !== 0;
         shownMobs.set(id, m);
       }
       for (const id of [...shownMobs.keys()]) if (!fresh.has(id)) shownMobs.delete(id);
@@ -446,16 +466,21 @@ export async function startGame(options: GameOptions): Promise<void> {
     const mob = mobs!.mobs.get(id);
     if (mob) mobs!.strike(mob, damage, mobPlayers()[0], knockback);
   };
+  // Shears shear sheep; an animal's food makes a grown one fall in love and a baby grow up sooner
   interaction.onUseMob = (id, held) => {
-    if (!held || held.item !== Items.Shears) return false;
+    if (!held) return false;
+    const item = ITEMS[held.item].name;
+    const shears = held.item === Items.Shears;
     if (guest) {
       const m = shownMobs.get(id);
-      if (m?.kind !== "sheep" || m.sheared) return false;
-      guest.useMob(id, held);
-      return true;
+      if (!m || m.kind === "arrow" || m.dying > 0) return false;
+      const takes = shears ? m.kind === "sheep" && !m.sheared && !m.baby : MOBS[m.kind].tempt.includes(item) && (m.baby || !m.love);
+      if (takes) guest.useMob(id, held);
+      return takes;
     }
     const mob = mobs!.mobs.get(id);
-    return mob ? mobs!.shear(mob) : false;
+    if (!mob) return false;
+    return shears ? mobs!.shear(mob) : mobs!.feed(mob, item);
   };
   interaction.onShoot = (power) => {
     const d = sim.camera.getForward({ x: 0, y: 0, z: 0 });
@@ -481,12 +506,22 @@ export async function startGame(options: GameOptions): Promise<void> {
     if (xp > 0) drops.spawnXp(x + 0.5, y + 0.5, z + 0.5, xp);
   };
   if (!joined) world.onEntityRemoved = (x, y, z, e) => drops.spill(x, y, z, e.items);
-  // Every game tick furnaces burn (where the world runs), the player's vitals change, and sleepers sleep
+  // Every game tick, where the world runs, furnaces burn, the weather turns (snow settling, ice freezing),
+  // plates go down under what stands on them and lightning strikes; everywhere the player's vitals change,
+  // sleepers sleep, and animals in love show it
   ticks.onTick = () => {
-    if (!joined) tickFurnaces(world);
+    if (joined) weather.fade();
+    else {
+      tickFurnaces(world);
+      weather.tick();
+      precipitationTick(world, weather);
+      pressPlates();
+      lightningTick();
+    }
     mobs?.tick();
     survival.tick();
     sleepTick();
+    loveHearts();
   };
   // Eating: when hungry, held for EAT_TIME
   interaction.canEat = () => interaction.mode === "survival" && survival.vitals.hungry;
@@ -504,39 +539,127 @@ export async function startGame(options: GameOptions): Promise<void> {
   const particles = textures ? sim.add(new Particles(world, lightMap, { texture: textures.texture, uvs: textures.uvs })) : null;
   if (particles) particles.amount = PARTICLES[settings.particles];
   const at = (x: number, y: number, z: number): { x: number; y: number; z: number } => ({ x: x + 0.5, y: y + 0.5, z: z + 0.5 });
+  // Block changes from here on (nothing changes before the game starts, but a guest may hear from its host
+  // while the sounds load)
+  world.onChanged = (x, y, z, old) => {
+    if (updates) {
+      updates.changed(x, y, z, old);
+      host?.changed(x, y, z);
+    }
+    changeSound(x, y, z, old);
+  };
   /** A block's sound of an action (break, place, step, hit), as Minecraft plays them: breaking a little louder and lower. */
   function blockSound(state: number, action: "break" | "place" | "step" | "hit" | "fall", where: { x: number; y: number; z: number }, volume: number = 1, pitch: number = 1): void {
     const group = soundGroup(STATE_BLOCK[state]);
-    if (group) sounds.play(`block.${group}.${action}`, action === "step" ? "players" : "blocks", where, volume, pitch);
+    if (!group) return;
+    // Crops break and are planted with sounds of their own, and otherwise sound like grass
+    const event = group !== "crop" ? `block.${group}.${action}` : action === "break" ? "block.crop.break" : action === "place" ? "item.crop.plant" : `block.grass.${action}`;
+    sounds.play(event, action === "step" ? "players" : "blocks", where, volume, pitch);
   }
-  /** Someone broke, placed or used a block: its pieces, and its sound. */
-  function blockEffect(kind: "break" | "place" | "use", x: number, y: number, z: number, state: number): void {
+  /** Someone broke, placed or used a block, or made it grow: its pieces, and its sound. */
+  function blockEffect(kind: "break" | "place" | "use" | "grow", x: number, y: number, z: number, state: number): void {
     if (kind === "break") {
       particles?.breakBlock(x, y, z, state);
       blockSound(state, "break", at(x, y, z), 1, 0.8);
     } else if (kind === "place") {
       blockSound(state, "place", at(x, y, z), 1, 0.8);
+    } else if (kind === "grow") {
+      particles?.glint(x, y, z);
+      sounds.play("item.bone_meal.use", "blocks", at(x, y, z));
     } else {
       const shape = SHAPE[state];
       if (shape === "door" || shape === "trapdoor") sounds.play(`block.wooden_${shape}.${propertyOf(state, "open") === "true" ? "open" : "close"}`, "blocks", at(x, y, z), 1, Math.random() * 0.1 + 0.9);
+      else if (STATE_BLOCK[state] === Block.Farmland) sounds.play("item.hoe.till", "blocks", at(x, y, z));
     }
   }
   /** The player's own placing and using (breaking goes through onBroken): heard and seen here and by the guests. */
-  function actionEffect(a: { act: "break" | "place" | "use"; x: number; y: number; z: number; nx: number; ny: number; nz: number }): void {
+  function actionEffect(a: Pick<Action, "act" | "x" | "y" | "z" | "nx" | "ny" | "nz" | "use">): void {
     hand.swing();
     if (a.act === "break") return;
     const [x, y, z] = a.act === "place" ? [a.x + a.nx, a.y + a.ny, a.z + a.nz] : [a.x, a.y, a.z];
     let state = world.get(x, y, z);
     // Short grass gives way to what is placed: then it went in the block aimed at
     if (a.act === "place" && state === Block.Air) state = world.get(a.x, a.y, a.z);
-    blockEffect(a.act, x, y, z, state);
-    host?.effect(a.act, x, y, z, state);
+    const kind = a.use === "fertilize" ? "grow" : a.act;
+    blockEffect(kind, x, y, z, state);
+    host?.effect(kind, x, y, z, state);
   }
   /** A guest's action, here on the host. */
-  function guestActed(a: { act: "break" | "place" | "use"; x: number; y: number; z: number; nx: number; ny: number; nz: number }, before: number): void {
+  function guestActed(a: Pick<Action, "act" | "x" | "y" | "z" | "nx" | "ny" | "nz" | "use">, before: number): void {
     if (a.act === "break") blockEffect("break", a.x, a.y, a.z, before);
     else if (a.act === "place") blockEffect("place", a.x + a.nx, a.y + a.ny, a.z + a.nz, world.get(a.x + a.nx, a.y + a.ny, a.z + a.nz));
-    else blockEffect("use", a.x, a.y, a.z, world.get(a.x, a.y, a.z));
+    else blockEffect(a.use === "fertilize" ? "grow" : "use", a.x, a.y, a.z, world.get(a.x, a.y, a.z));
+  }
+  /**
+   * A block changed (on any side): levers, buttons and pressure plates click going down and coming up, and
+   * doors and trapdoors that redstone moved sound as if opened by hand.
+   */
+  function changeSound(x: number, y: number, z: number, old: number): void {
+    const now = world.get(x, y, z);
+    const b = STATE_BLOCK[now];
+    if (STATE_BLOCK[old] !== b || propertyOf(old, "powered") === propertyOf(now, "powered")) return;
+    const on = propertyOf(now, "powered") === "true";
+    const shape = SHAPE[now];
+    const where = at(x, y, z);
+    const wood = b === Block.OakButton || b === Block.OakPressurePlate;
+    if (b === Block.Lever) sounds.play("block.lever.click", "blocks", where, 0.3, on ? 0.6 : 0.5);
+    else if (shape === "button") sounds.play(`block.${wood ? "wooden" : "stone"}_button.click_${on ? "on" : "off"}`, "blocks", where, 0.3, on ? 0.6 : 0.5);
+    else if (shape === "plate") sounds.play(`block.${wood ? "wooden" : "stone"}_pressure_plate.click_${on ? "on" : "off"}`, "blocks", where, 0.3, (on ? 0.6 : 0.5) + (wood ? 0.2 : 0));
+    else if ((shape === "door" || shape === "trapdoor") && propertyOf(old, "open") !== propertyOf(now, "open")) blockEffect("use", x, y, z, now);
+  }
+  /** What presses pressure plates where it stands: players and mobs (living) press any, items and arrows wooden ones. */
+  function* pressing(): Iterable<[{ x: number; y: number; z: number }, boolean]> {
+    if (!survival.vitals.dead && interaction.mode !== "spectator") yield [player.position, true];
+    for (const g of host?.guests ?? []) if (!g.state.spectating && g.state.vitals.health > 0) yield [g.state.position, true];
+    if (!mobs) return;
+    for (const m of mobs.mobs.values()) if (m.alive) yield [m.position, true];
+    for (const a of mobs.arrows.values()) yield [a.position, false];
+    for (const d of drops.items.values()) yield [d.position, false];
+  }
+  if (updates) {
+    updates.redstone.occupied = (x, y, z, wood) => {
+      for (const [p, living] of pressing()) if ((living || wood) && Math.floor(p.x) === x && Math.floor(p.y) === y && Math.floor(p.z) === z) return true;
+      return false;
+    };
+  }
+  /** Plates go down under what stands on them (and come up by themselves when nothing does: see Redstone). */
+  function pressPlates(): void {
+    for (const [p, living] of pressing()) {
+      const [x, y, z] = [Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)];
+      const s = world.get(x, y, z);
+      if (SHAPE[s] === "plate" && (living || STATE_BLOCK[s] === Block.OakPressurePlate)) updates!.redstone.step(x, y, z);
+    }
+  }
+  /** Lightning in a thunderstorm: everyone sees and hears it, and it hurts (5) and sets on fire whoever is close. */
+  function lightningTick(): void {
+    for (const s of lightningStrikes(world, weather)) {
+      host?.lightning(s.x, s.y, s.z);
+      lightningEffect(s.x, s.y, s.z);
+      const near = (p: { x: number; y: number; z: number }): boolean => Math.abs(p.x - s.x - 0.5) < 3 && Math.abs(p.z - s.z - 0.5) < 3 && p.y > s.y - 3 && p.y < s.y + 6;
+      if (near(player.position) && survival.hurt(5, "lightning", null)) survival.vitals.fire = Math.max(survival.vitals.fire, 160);
+      for (const g of host?.guests ?? []) if (near(g.state.position)) host!.hurt(g.id, 5, "lightning", "", { x: 0, y: 0, z: 0 });
+      for (const m of mobs?.mobs.values() ?? []) if (m.alive && near(m.position) && mobs!.hurt(m, 5, "lightning", null)) m.fire = Math.max(m.fire, 160);
+    }
+  }
+  /** Lightning seen and heard: the bolt, the sky lit up, thunder from far off and the crack where it struck. */
+  function lightningEffect(x: number, y: number, z: number): void {
+    precipitation?.strike(x + 0.5, y, z + 0.5);
+    sky.flash = 1;
+    sounds.play("entity.lightning_bolt.thunder", "weather", null, 1, 0.8 + Math.random() * 0.2);
+    sounds.play("entity.lightning_bolt.impact", "weather", at(x, y, z), 1, 0.5 + Math.random() * 0.2);
+  }
+  /** Hearts over animals in love, twice a second. */
+  function loveHearts(): void {
+    const heart = (kind: MobKind, x: number, y: number, z: number, baby: boolean): void => {
+      const info = MOBS[kind];
+      const k = baby ? 0.5 : 1;
+      particles?.heart(x + (Math.random() - 0.5) * info.width * k, y + 0.5 + Math.random() * info.height * k, z + (Math.random() - 0.5) * info.width * k);
+    };
+    if (mobs) {
+      for (const m of mobs.mobs.values()) if (m.love > 0 && m.love % 10 === 0) heart(m.kind, m.position.x, m.position.y, m.position.z, m.baby);
+    } else {
+      for (const m of shownMobs.values()) if (m.love && m.kind !== "arrow" && Math.random() < 0.1) heart(m.kind, m.x, m.y, m.z, m.baby ?? false);
+    }
   }
   function explosionEffect(x: number, y: number, z: number, power: number): void {
     sounds.play("entity.generic.explode", "blocks", { x, y, z }, 4, (1 + (Math.random() - Math.random()) * 0.2) * 0.7);
@@ -603,6 +726,11 @@ export async function startGame(options: GameOptions): Promise<void> {
     session.onSound = (event, x, y, z, category) => sounds.play(event, category as SoundCategory, { x, y, z });
     session.onEffect = (kind, x, y, z, state) => blockEffect(kind, x, y, z, state);
     session.onExplosion = (x, y, z, power) => explosionEffect(x, y, z, power);
+    session.onWeather = (rain, thunder) => {
+      weather.raining = rain;
+      weather.thundering = thunder;
+    };
+    session.onLightning = (x, y, z) => lightningEffect(x, y, z);
     session.onNotice = (text) => notice(text);
     session.onRules = (d) => {
       difficulty = d;
@@ -650,6 +778,11 @@ export async function startGame(options: GameOptions): Promise<void> {
   // After the player, so it follows the camera where the player put it; drawn on WebGL only
   const sky = sim.add(new Sky(ticks, lightMap, imported?.sky ?? null));
   sky.visible = textured;
+  sky.weather = () => weather;
+  sim.onUpdate((dt) => (sky.flash = Math.max(0, sky.flash - dt * 4)));
+  // Rain and snow falling around the camera, and lightning's bolts (WebGL only, as the sky)
+  const precipitation = textured ? sim.add(new Precipitation(world, lightMap, { rain: imported?.sky?.rain ?? null, snow: imported?.sky?.snow ?? null })) : null;
+  if (precipitation) precipitation.weather = () => weather;
   // The hand in front of the view
   const hand = sim.add(new Hand(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null, avatars.skinFor(selfId), textured));
   hand.held = () => inventory.held;
@@ -664,6 +797,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   let eatTimer = 0;
   let wasWet = false;
   let caveTimer = 60;
+  let rainTimer = 0;
   sim.onUpdate((dt) => {
     const c = sim.camera;
     const f = c.getForward({ x: 0, y: 0, z: 0 });
@@ -742,6 +876,19 @@ export async function startGame(options: GameOptions): Promise<void> {
       caveTimer = 60 + Math.random() * 120;
       if (world.getLight(Math.floor(p.x), Math.floor(player.eyeY), Math.floor(p.z)) >> 4 === 0 && Math.random() < 0.5) sounds.play("ambient.cave", "ambient", { x: p.x + (Math.random() - 0.5) * 16, y: p.y, z: p.z + (Math.random() - 0.5) * 16 }, 0.7, 0.8 + Math.random() * 0.2);
     }
+    // Rain on the ground around, a spot every few ticks (as Minecraft's); muffled, from above, on a roof overhead
+    rainTimer -= dt;
+    if (weather.rain > 0.2 && rainTimer <= 0) {
+      rainTimer = 0.1 + Math.random() * 0.15;
+      const x = Math.floor(p.x + (Math.random() - 0.5) * 20);
+      const z = Math.floor(p.z + (Math.random() - 0.5) * 20);
+      const y = rainTop(world, x, z) + 1;
+      if (world.isLoaded(x, z) && Math.abs(y - p.y) < 10 && rainsOn(world, weather, x, y, z)) {
+        const above = y > p.y + 1 && !rainsOn(world, weather, Math.floor(p.x), Math.floor(player.eyeY), Math.floor(p.z));
+        if (above) sounds.play("weather.rain.above", "weather", at(x, y, z), 0.1, 0.5);
+        else sounds.play("weather.rain", "weather", at(x, y, z), 0.2);
+      }
+    }
   });
 
   // Guests who left since the last save, kept for it (and for when they come back before then)
@@ -776,6 +923,7 @@ export async function startGame(options: GameOptions): Promise<void> {
         guests: guestRecords,
         drops,
         mobs: mobs ?? undefined,
+        extra: () => ({ weather: weather.save() }),
       }),
     );
     terrain.supply = save;
@@ -817,6 +965,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     difficulty = welcome.difficulty;
     hardcore = welcome.hardcore;
     guestSpawn = welcome.spawn;
+    weather.show(welcome.weather.rain, welcome.weather.thunder);
     const you = welcome.you;
     Object.assign(player.position, you.position);
     player.yaw = you.yaw;
@@ -1077,6 +1226,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           },
           onNotice: (text) => notice(text),
           onAct: (_id, a, before) => guestActed(a, before),
+          weather: () => ({ rain: weather.raining, thunder: weather.thundering }),
         }),
       );
       const session = host;
@@ -1347,6 +1497,10 @@ export async function startGame(options: GameOptions): Promise<void> {
     summon: (kind, x, y, z) => {
       if (!mobs) return false;
       mobs.spawn(kind, x, y, z);
+      return true;
+    },
+    weather: (kind) => {
+      weather.set(kind);
       return true;
     },
   };
@@ -1648,8 +1802,8 @@ export async function startGame(options: GameOptions): Promise<void> {
     if (!bed || bed.x !== head.x || bed.y !== head.y || bed.z !== head.z) notice("Respawn point set");
     bed = head;
     const time = ticks.time % DAY;
-    if (time < NIGHT_START || time > NIGHT_END) {
-      notice("You can sleep only at night");
+    if ((time < NIGHT_START || time > NIGHT_END) && !weather.storm) {
+      notice("You can sleep only at night or during thunderstorms");
       return;
     }
     const monsters = mobs
@@ -1685,6 +1839,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     // When everyone has slept long enough, morning comes (the host decides for its guests)
     if (guest || sleepTicks < SLEEP_TICKS || (host && !host.allAsleep)) return;
     ticks.time += DAY - (ticks.time % DAY);
+    weather.clearUp();
     host?.wake();
     wakeUp();
   }
@@ -1753,6 +1908,7 @@ export async function startGame(options: GameOptions): Promise<void> {
       interaction,
       terrain,
       ticks,
+      weather,
       save,
       get host() {
         return host;

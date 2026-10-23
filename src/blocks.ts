@@ -106,6 +106,23 @@ export const Block = {
   BrownMushroom: 139,
   RedMushroom: 140,
   Vine: 141,
+  Farmland: 142,
+  Wheat: 143,
+  Carrots: 144,
+  Potatoes: 145,
+  PumpkinStem: 146,
+  AttachedPumpkinStem: 147,
+  MelonStem: 148,
+  AttachedMelonStem: 149,
+  RedstoneWire: 150,
+  RedstoneTorch: 151,
+  Lever: 152,
+  StoneButton: 153,
+  OakButton: 154,
+  StonePressurePlate: 155,
+  OakPressurePlate: 156,
+  Repeater: 157,
+  RedstoneLamp: 158,
 } as const;
 export type Block = number;
 
@@ -149,13 +166,26 @@ export type Shape =
   /** Half of a bed: a mattress 9 pixels high on two legs, the head and the foot each a block. */
   | "bed"
   /** Vines: a sheet of leaves on the wall behind, climbed like a ladder, walked through. */
-  | "vine";
+  | "vine"
+  /** Farmland: dirt a pixel lower, tilled. */
+  | "farmland"
+  /** Crops: four planes in a # (wheat, carrots, potatoes). */
+  | "crop"
+  /** A pumpkin's or melon's stem: crossed planes as high as it has grown, or bent toward its fruit. */
+  | "stem"
+  /** Redstone dust: flat on the ground, lines toward what it connects to. */
+  | "wire"
+  /** A lever, a button, a pressure plate, a repeater: small boxes on a face. */
+  | "lever"
+  | "button"
+  | "plate"
+  | "repeater";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
  * by the biome's grass, foliage or water color (blended between biomes), or by a fixed color.
  */
-export const Tint = { None: 0, Grass: 1, Foliage: 2, Water: 3, Birch: 4, Spruce: 5, LilyPad: 6 } as const;
+export const Tint = { None: 0, Grass: 1, Foliage: 2, Water: 3, Birch: 4, Spruce: 5, LilyPad: 6, /** + age 0-7 */ Stem: 8, /** + power 0-15 */ Redstone: 16 } as const;
 
 /** Which of a block's looks (textures and colors) a face shows. */
 export const Face = { Top: 0, Side: 1, Bottom: 2, Front: 3 } as const;
@@ -249,7 +279,7 @@ function materialFor(color: string, opacity: number): Material {
 }
 
 /** Shapes without collision: you walk through plants, torches and fluids. */
-const PASSABLE: readonly Shape[] = ["cross", "torch", "fluid", "tall", "vine"];
+const PASSABLE: readonly Shape[] = ["cross", "torch", "fluid", "tall", "vine", "crop", "stem", "wire", "lever", "button", "plate"];
 
 function block(id: Block, name: string, label: string, colors: Colors, options: BlockOptions = {}): BlockInfo {
   const top = colors.top;
@@ -311,6 +341,17 @@ const LIT = bool("lit");
 const CHEST_TYPE: Property = { name: "type", values: ["single", "left", "right"] };
 /** A bed's halves: the foot, where it was placed, and the head, the way it faces from there. */
 const BED_PART: Property = { name: "part", values: ["foot", "head"] };
+/** Leaves a player placed, which never decay. */
+const PERSISTENT = bool("persistent");
+/** How wet farmland is (7 near water), how far a crop has grown, redstone's power. */
+const MOISTURE: Property = { name: "moisture", values: ["0", "1", "2", "3", "4", "5", "6", "7"] };
+const AGE: Property = { name: "age", values: ["0", "1", "2", "3", "4", "5", "6", "7"] };
+const POWER: Property = { name: "power", values: Array.from({ length: 16 }, (_, i) => String(i)) };
+/** Which face a lever or button is on: the floor, a wall, the ceiling. */
+const ATTACH: Property = { name: "face", values: ["floor", "wall", "ceiling"] };
+const POWERED = bool("powered");
+const DELAY: Property = { name: "delay", values: ["1", "2", "3", "4"] };
+const LOCKED = bool("locked");
 
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
@@ -327,7 +368,7 @@ function wood(log: Block, name: string, bark: string, rings: string, leaves: str
   const label = name.replace("_", " ");
   return [
     block(log, `${name}_log`, `${label} log`, { top: rings, side: bark }, { textures: { top: `${name}_log_top`, side: `${name}_log` }, properties: [AXIS] }),
-    block(log + 1, `${name}_leaves`, `${label} leaves`, { top: leaves }, { opacity: "cutout", lightFilter: 1, leafy: true, tint }),
+    block(log + 1, `${name}_leaves`, `${label} leaves`, { top: leaves }, { opacity: "cutout", lightFilter: 1, leafy: true, tint, properties: [PERSISTENT] }),
     block(log + 2, `${name}_planks`, `${label} planks`, { top: planks }),
   ];
 }
@@ -345,7 +386,7 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Sand, "sand", "sand", { top: "#dcd29c" }, { gravity: true }),
   block(Block.Water, "water", "water", { top: "#3d6fdc" }, { shape: "fluid", opacity: "translucent", breakable: false, lightFilter: 1, textures: { all: "water_still" }, properties: [LEVEL, FALLING], tint: Tint.Water }),
   block(Block.Log, "oak_log", "log", { top: "#a8895a", side: "#664f31" }, { textures: { top: "oak_log_top", side: "oak_log" }, properties: [AXIS] }),
-  block(Block.Leaves, "oak_leaves", "leaves", { top: "#3e8a2a" }, { opacity: "cutout", lightFilter: 1, leafy: true, tint: Tint.Foliage }),
+  block(Block.Leaves, "oak_leaves", "leaves", { top: "#3e8a2a" }, { opacity: "cutout", lightFilter: 1, leafy: true, tint: Tint.Foliage, properties: [PERSISTENT] }),
   block(Block.Planks, "oak_planks", "planks", { top: "#b38d55" }),
   block(Block.Cobblestone, "cobblestone", "cobblestone", { top: "#6c6c6c" }),
   block(Block.Bricks, "bricks", "bricks", { top: "#985040" }),
@@ -367,8 +408,8 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Bookshelf, "bookshelf", "bookshelf", { top: "#b38d55", side: "#7a5a3a" }, { textures: { top: "oak_planks", side: "bookshelf" } }),
   block(Block.Ladder, "ladder", "ladder", { top: "#8a6a3a" }, { shape: "ladder", opacity: "cutout", properties: [FACING] }),
   block(Block.Lava, "lava", "lava", { top: "#d4600e" }, { shape: "fluid", breakable: false, emission: 15, lightFilter: 1, textures: { all: "lava_still" }, properties: [LEVEL, FALLING] }),
-  block(Block.OakDoor, "oak_door", "door", { top: "#8a6a3a" }, { shape: "door", opacity: "cutout", textures: { top: "oak_door_top", side: "oak_door_bottom" }, properties: [FACING, DOOR_HALF, OPEN, HINGE] }),
-  block(Block.OakTrapdoor, "oak_trapdoor", "trapdoor", { top: "#8a6a3a" }, { shape: "trapdoor", opacity: "cutout", properties: [FACING, HALF, OPEN] }),
+  block(Block.OakDoor, "oak_door", "door", { top: "#8a6a3a" }, { shape: "door", opacity: "cutout", textures: { top: "oak_door_top", side: "oak_door_bottom" }, properties: [FACING, DOOR_HALF, OPEN, HINGE, POWERED] }),
+  block(Block.OakTrapdoor, "oak_trapdoor", "trapdoor", { top: "#8a6a3a" }, { shape: "trapdoor", opacity: "cutout", properties: [FACING, HALF, OPEN, POWERED] }),
   block(Block.GlassPane, "glass_pane", "glass pane", { top: "#c0e0e8" }, { shape: "pane", opacity: "cutout", textures: { side: "glass", top: "glass_pane_top" }, properties: CONNECTIONS }),
   block(Block.OakFence, "oak_fence", "fence", { top: "#b38d55" }, { shape: "fence", textures: { all: "oak_planks" }, properties: CONNECTIONS }),
   block(Block.CobblestoneWall, "cobblestone_wall", "cobblestone wall", { top: "#6c6c6c" }, { shape: "wall", textures: { all: "cobblestone" }, properties: CONNECTIONS }),
@@ -427,7 +468,27 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.BrownMushroom, "brown_mushroom", "brown mushroom", { top: "#9a7558" }, { ...PLANT, emission: 1 }),
   block(Block.RedMushroom, "red_mushroom", "red mushroom", { top: "#c8322a" }, PLANT),
   block(Block.Vine, "vine", "vines", { top: "#3a7a2a" }, { shape: "vine", opacity: "cutout", replaceable: true, tint: Tint.Foliage, properties: [FACING] }),
+  block(Block.Farmland, "farmland", "farmland", { top: "#5a3c22", side: "#86603f" }, { shape: "farmland", lightFilter: 15, textures: { top: "farmland", side: "dirt" }, properties: [MOISTURE] }),
+  block(Block.Wheat, "wheat", "wheat crops", { top: "#b8a040" }, { shape: "crop", opacity: "cutout", solid: false, textures: { all: "wheat_stage7" }, properties: [AGE] }),
+  block(Block.Carrots, "carrots", "carrots", { top: "#4a9a2a" }, { shape: "crop", opacity: "cutout", solid: false, textures: { all: "carrots_stage3" }, properties: [AGE] }),
+  block(Block.Potatoes, "potatoes", "potatoes", { top: "#4a9a2a" }, { shape: "crop", opacity: "cutout", solid: false, textures: { all: "potatoes_stage3" }, properties: [AGE] }),
+  block(Block.PumpkinStem, "pumpkin_stem", "pumpkin stem", { top: "#7a9a2a" }, { shape: "stem", opacity: "cutout", solid: false, textures: { all: "pumpkin_stem" }, properties: [AGE] }),
+  block(Block.AttachedPumpkinStem, "attached_pumpkin_stem", "pumpkin stem", { top: "#9a8a2a" }, { shape: "stem", opacity: "cutout", solid: false, textures: { all: "attached_pumpkin_stem" }, properties: [FACING] }),
+  block(Block.MelonStem, "melon_stem", "melon stem", { top: "#7a9a2a" }, { shape: "stem", opacity: "cutout", solid: false, textures: { all: "melon_stem" }, properties: [AGE] }),
+  block(Block.AttachedMelonStem, "attached_melon_stem", "melon stem", { top: "#9a8a2a" }, { shape: "stem", opacity: "cutout", solid: false, textures: { all: "attached_melon_stem" }, properties: [FACING] }),
+  block(Block.RedstoneWire, "redstone_wire", "redstone dust", { top: "#a01010" }, { shape: "wire", opacity: "cutout", textures: { all: "redstone_dust_dot" }, properties: [POWER, ...CONNECTIONS] }),
+  block(Block.RedstoneTorch, "redstone_torch", "redstone torch", { top: "#e02020", side: "#8a6a3a" }, { shape: "torch", opacity: "cutout", properties: [TORCH_FACING, LIT] }),
+  block(Block.Lever, "lever", "lever", { top: "#8a6a3a" }, { shape: "lever", opacity: "cutout", textures: { all: "lever" }, properties: [ATTACH, FACING, POWERED] }),
+  block(Block.StoneButton, "stone_button", "stone button", { top: "#8a8a8a" }, { shape: "button", textures: { all: "stone" }, properties: [ATTACH, FACING, POWERED] }),
+  block(Block.OakButton, "oak_button", "oak button", { top: "#b38d55" }, { shape: "button", textures: { all: "oak_planks" }, properties: [ATTACH, FACING, POWERED] }),
+  block(Block.StonePressurePlate, "stone_pressure_plate", "stone pressure plate", { top: "#8a8a8a" }, { shape: "plate", textures: { all: "stone" }, properties: [POWERED] }),
+  block(Block.OakPressurePlate, "oak_pressure_plate", "oak pressure plate", { top: "#b38d55" }, { shape: "plate", textures: { all: "oak_planks" }, properties: [POWERED] }),
+  block(Block.Repeater, "repeater", "repeater", { top: "#a8a8a8" }, { shape: "repeater", textures: { top: "repeater", side: "smooth_stone", bottom: "smooth_stone" }, properties: [FACING, DELAY, LOCKED, POWERED] }),
+  block(Block.RedstoneLamp, "redstone_lamp", "redstone lamp", { top: "#8a5a2a" }, { textures: { all: "redstone_lamp" }, properties: [LIT] }),
 ];
+
+/** Whether a block is a crop (on farmland) or a stem. */
+export const isCrop = (block: Block): boolean => block >= Block.Wheat && block <= Block.AttachedMelonStem;
 
 /** Whether a block is a bed (of any color). */
 export const isBed = (block: Block): boolean => block >= Block.WhiteBed && block < Block.WhiteBed + COLORS.length;
@@ -538,7 +599,13 @@ export const CUBE_SHAPED: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (is
  */
 export const LIGHT_SINK = 16;
 /** Light each state gives off (0-15), and how much it dims light passing into it (15 stops it, see LIGHT_SINK). */
-export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (b === Block.Furnace && propertyOf(s, "lit") === "true" ? 13 : BLOCKS[b].emission));
+export const EMISSION: Uint8Array = Uint8Array.from(stateBlock, (b, s) => {
+  // A burning furnace, a lit redstone torch, a lit lamp
+  if (b === Block.Furnace) return propertyOf(s, "lit") === "true" ? 13 : 0;
+  if (b === Block.RedstoneTorch) return propertyOf(s, "lit") === "true" ? 7 : 0;
+  if (b === Block.RedstoneLamp) return propertyOf(s, "lit") === "true" ? 15 : 0;
+  return BLOCKS[b].emission;
+});
 export const LIGHT_FILTER: Uint8Array = Uint8Array.from(stateBlock, (b, s) => (BLOCKS[b].lightFilter >= 15 && !OPAQUE[s] ? LIGHT_SINK : BLOCKS[b].lightFilter));
 /** See BlockInfo. */
 export const CULL_SAME: Uint8Array = Uint8Array.from(stateBlock, (b) => (BLOCKS[b].cullSame ? 1 : 0));
@@ -558,6 +625,16 @@ export const TILE_NAMES: readonly string[] = [
     "furnace_front_on",
     ...COLORS.flatMap((c) => [`${c}_bed_head_east`, `${c}_bed_foot_up`, `${c}_bed_foot_east`, `${c}_bed_foot_west`]),
     "bed_head_north",
+    // Crops by stage, farmland wet, redstone's other looks
+    "farmland_moist",
+    ...Array.from({ length: 7 }, (_, i) => `wheat_stage${i}`),
+    ...[0, 1, 2].flatMap((i) => [`carrots_stage${i}`, `potatoes_stage${i}`]),
+    "redstone_dust_line0",
+    "redstone_dust_line1",
+    "redstone_torch",
+    "redstone_torch_off",
+    "repeater_on",
+    "redstone_lamp_on",
   ]),
 ];
 const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
@@ -614,6 +691,7 @@ for (let state = 0; state < STATE_COUNT; state++) {
       else FACE_OVERLAY[i] = tileIndex("grass_block_side_overlay");
     }
     if (info.id === Block.Furnace && look === Face.Front && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("furnace_front_on");
+    if (info.id === Block.RedstoneLamp && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("redstone_lamp_on");
     FACE_TINT[i] = info.id === Block.Grass ? (d === Dir.Up ? info.tint : Tint.None) : info.tint;
   }
 }
@@ -641,5 +719,5 @@ export const HOTBAR: readonly Block[] = [
   Block.OakDoor,
 ];
 
-/** Blocks the player can pick for the hotbar: everything but air and bedrock. */
+/** Blocks a player can place (guests' too): everything but air and bedrock. */
 export const PLACEABLE: readonly Block[] = BLOCKS.filter((b) => b.id !== Block.Air && b.id !== Block.Bedrock).map((b) => b.id);

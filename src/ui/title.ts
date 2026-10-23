@@ -31,6 +31,7 @@ export function newWorld(name: string, seed: string, mode: GameMode = "survival"
     mode: hardcore ? "survival" : mode,
     difficulty: hardcore ? "hard" : difficulty,
     hardcore,
+    weather: null,
   };
 }
 

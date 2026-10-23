@@ -87,6 +87,14 @@ const FIXED: Readonly<Record<number, Rgb>> = {
   [Tint.Birch]: hex("#80a755"),
   [Tint.Spruce]: hex("#619961"),
   [Tint.LilyPad]: hex("#208030"),
+  // A stem yellows as it grows; redstone glows brighter the more power it carries (Minecraft's colors)
+  ...Object.fromEntries(Array.from({ length: 8 }, (_, a) => [Tint.Stem + a, [a * 32, 255 - a * 8, a * 4] as Rgb])),
+  ...Object.fromEntries(
+    Array.from({ length: 16 }, (_, p) => {
+      const f = p / 15;
+      return [Tint.Redstone + p, [Math.round((f * 0.6 + (p > 0 ? 0.4 : 0.3)) * 255), Math.round(Math.max(0, f * f * 0.7 - 0.5) * 255), Math.round(Math.max(0, f * f * 0.6 - 0.7) * 255)] as Rgb];
+    }),
+  ),
 };
 
 /** The color of a tint (Tint) in a biome; white for none. */

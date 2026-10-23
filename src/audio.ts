@@ -5,7 +5,7 @@ import type { SoundKind } from "./settings.js";
 export type SoundCategory = Exclude<SoundKind, "master">;
 
 /** How blocks sound, by Minecraft's sound groups. */
-export type SoundGroup = "stone" | "wood" | "gravel" | "grass" | "sand" | "snow" | "wool" | "glass" | "ladder";
+export type SoundGroup = "stone" | "wood" | "gravel" | "grass" | "crop" | "sand" | "snow" | "wool" | "glass" | "ladder";
 
 /** The sound group of a block, as Minecraft's: dirt and clay crunch like gravel, leaves and plants rustle like grass. */
 export function soundGroup(block: BlockId): SoundGroup | null {
@@ -13,11 +13,12 @@ export function soundGroup(block: BlockId): SoundGroup | null {
   const n = info.name;
   if (block === Block.Air || FLUID[block] !== 0) return null;
   if (n.endsWith("_wool") || n.endsWith("_carpet") || isBed(block)) return "wool";
-  if (n.startsWith("glass") || block === Block.Ice || block === Block.Glowstone) return "glass";
+  if (n.startsWith("glass") || block === Block.Ice || block === Block.Glowstone || block === Block.RedstoneLamp) return "glass";
   if (block === Block.Ladder) return "ladder";
   if (block === Block.Sand || block === Block.Sandstone) return "sand";
   if (block === Block.Snow || block === Block.SnowBlock) return "snow";
-  if (block === Block.Dirt || block === Block.Gravel || block === Block.Clay) return "gravel";
+  if (block === Block.Dirt || block === Block.Gravel || block === Block.Clay || block === Block.Farmland) return "gravel";
+  if (SHAPE[block] === "crop" || SHAPE[block] === "stem") return "crop";
   if (block === Block.Grass || info.leafy || SHAPE[block] === "cross" || SHAPE[block] === "tall" || SHAPE[block] === "lilypad" || n.includes("mushroom") || block === Block.Cactus) return "grass";
   if (n.includes("log") || n.includes("planks") || n.startsWith("oak") || n.includes("crafting") || block === Block.Chest || block === Block.Bookshelf || block === Block.Pumpkin || block === Block.Melon) return "wood";
   return "stone";
@@ -98,6 +99,7 @@ const GROUP_BANDS: Record<SoundGroup, [number, number]> = {
   wood: [250, 1400],
   gravel: [1200, 6000],
   grass: [1800, 7000],
+  crop: [1800, 7000],
   sand: [2500, 9000],
   snow: [2000, 6000],
   wool: [150, 700],
@@ -237,7 +239,7 @@ export class Sounds {
     this.ctx = new Ctx();
     this.master = this.ctx.createGain();
     this.master.connect(this.ctx.destination);
-    for (const c of ["music", "blocks", "hostile", "friendly", "players", "ambient"] as SoundCategory[]) {
+    for (const c of ["music", "weather", "blocks", "hostile", "friendly", "players", "ambient"] as SoundCategory[]) {
       const g = this.ctx.createGain();
       g.connect(this.master);
       this.gains[c] = g;

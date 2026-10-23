@@ -4,6 +4,7 @@ import type { SavedDrop } from "../drops.js";
 import type { SavedMob } from "../mobs/mobs.js";
 import type { SavedStack } from "../items.js";
 import { FRESH_VITALS, type Difficulty, type PlayMode, type SavedVitals } from "../vitals.js";
+import type { SavedWeather } from "../weather.js";
 
 /**
  * Version of the save format. Every record carries the version that wrote it: older records are migrated
@@ -21,8 +22,9 @@ import { FRESH_VITALS, type Difficulty, type PlayMode, type SavedVitals } from "
  *    orbs of experience lying in them, and furnaces the experience they keep.
  * 7. Mobs: chunks keep the animals in them.
  * 8. Commands: players and guests may have a game mode and a spawn point of their own.
+ * 9. Weather: worlds keep theirs; animals may be babies.
  */
-export const FORMAT_VERSION = 8;
+export const FORMAT_VERSION = 9;
 
 /** How a world is played: gathering and crafting, or with every block at hand. */
 export type GameMode = "survival" | "creative";
@@ -55,6 +57,8 @@ export interface WorldMeta {
   difficulty: Difficulty;
   /** One life: a player who dies looks on, and the difficulty stays hard. */
   hardcore: boolean;
+  /** Rain and storms, and when they come and go; null for weather still to be decided. */
+  weather: SavedWeather | null;
 }
 
 /** What a player is besides where they are and what they carry. */
@@ -159,13 +163,13 @@ const own = (r: { format: number }) => ({ ...next(r), mode: null, spawn: null })
 
 const MIGRATIONS: Record<RecordKind, Migration<{ format: number }>[]> = {
   // Worlds from before game modes were played with every block at hand; from before difficulty, normal
-  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false }), next, next],
+  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false }), next, next, (r) => ({ ...next(r), weather: null })],
   // Players from before the hotbar could change get the hotbar it had; their hotbar becomes their inventory
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh, next, own],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh, next, own, next],
   // Chunks from before biomes were all made like plains; from before items they hold none, nor animals
-  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next, (r) => ({ ...next(r), mobs: [] }), next],
+  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next, (r) => ({ ...next(r), mobs: [] }), next, next],
   // Guests came with format 4
-  guest: [next, next, next, hotbarInventory, fresh, next, own],
+  guest: [next, next, next, hotbarInventory, fresh, next, own, next],
 };
 
 export type RecordKind = "world" | "player" | "chunk" | "guest";

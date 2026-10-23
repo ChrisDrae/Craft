@@ -43,8 +43,8 @@ describe("saves from earlier versions", () => {
     const { world, ticks, save } = await openWorld(store, (await store.getWorld("fixture-world-2"))!);
     await save.loadNow(8, 8, 1);
     expect(stateName(world.get(3, 100, 3))).toBe("oak_stairs[facing=east,half=top,shape=inner_left]");
-    expect(stateName(world.get(4, 100, 4))).toBe("oak_door[facing=west,half=lower,open=true,hinge=right]");
-    expect(stateName(world.get(4, 101, 4))).toBe("oak_door[facing=west,half=upper,open=true,hinge=right]");
+    expect(stateName(world.get(4, 100, 4))).toBe("oak_door[facing=west,half=lower,open=true,hinge=right,powered=false]");
+    expect(stateName(world.get(4, 101, 4))).toBe("oak_door[facing=west,half=upper,open=true,hinge=right,powered=false]");
     expect(stateName(world.get(5, 100, 3))).toBe("stone_slab[type=double]");
     expect(stateName(world.get(-5, 90, 20))).toBe("red_wool");
     expect(stateName(world.get(6, 100, 6))).toBe("water[level=3,falling=false]");
@@ -155,6 +155,28 @@ describe("saves from earlier versions, commands", () => {
     // Players from before commands play the world's way
     const old = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-7.craftworld", import.meta.url))));
     expect(old.player).toMatchObject({ mode: null, spawn: null });
+  });
+});
+
+describe("saves from earlier versions, farms and weather", () => {
+  it("opens a world saved in format 9: its weather, a baby animal, a farm and redstone", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-9.craftworld", import.meta.url))));
+    expect(data.meta.weather).toEqual({ raining: true, thundering: true, rainTime: 4000, thunderTime: 3000 });
+    const store = await freshStore();
+    await store.writeWorld(data);
+    expect((await store.getChunk("fixture-world-9", 0, 0))!.mobs).toEqual([{ kind: "cow", x: 6.5, y: 130, z: 6.5, yaw: 0, health: 10, growUp: 12000 }]);
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-9"))!);
+    await save.loadNow(8, 8, 1);
+    expect([2, 4, 5, 6].map((x) => stateName(world.get(x, 129, x === 2 ? 2 : 4)))).toEqual([
+      "wheat[age=5]",
+      "lever[face=floor,facing=north,powered=true]",
+      "redstone_wire[power=14,north=false,east=true,south=false,west=true]",
+      "redstone_lamp[lit=true]",
+    ]);
+    expect(stateName(world.get(2, 128, 2))).toBe("farmland[moisture=7]");
+    // Worlds from before weather have theirs decided when opened
+    const old = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-8.craftworld", import.meta.url))));
+    expect(old.meta.weather).toBeNull();
   });
 });
 

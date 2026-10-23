@@ -25,7 +25,7 @@ export interface Settings {
 }
 
 /** Kinds of sound with a volume of their own, "master" for all of them. */
-export const SOUND_KINDS = ["master", "music", "blocks", "hostile", "friendly", "players", "ambient"] as const;
+export const SOUND_KINDS = ["master", "music", "weather", "blocks", "hostile", "friendly", "players", "ambient"] as const;
 export type SoundKind = (typeof SOUND_KINDS)[number];
 
 /** Actions with a key of their own. */
@@ -57,7 +57,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   fov: 70,
   sensitivity: 1,
   name: "",
-  volume: { master: 1, music: 0.5, blocks: 1, hostile: 1, friendly: 1, players: 1, ambient: 1 },
+  volume: { master: 1, music: 0.5, weather: 1, blocks: 1, hostile: 1, friendly: 1, players: 1, ambient: 1 },
   guiScale: 1,
   bobbing: true,
   fovEffects: true,

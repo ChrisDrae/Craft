@@ -57,6 +57,13 @@ export function placementState(block: Block, aim: Aim, yaw: number): number | nu
       return stateOf(block, { facing: look });
     case "bed":
       return stateOf(block, { facing: look, part: "foot" });
+    case "lever":
+    case "button":
+      // On the floor or ceiling facing the way the player looks, on a wall facing out of it
+      if (ny !== 0) return stateOf(block, { face: ny > 0 ? "floor" : "ceiling", facing: look });
+      return stateOf(block, { face: "wall", facing: normalFacing(nx, nz) });
+    case "repeater":
+      return stateOf(block, { facing: look });
   }
   if (has("axis")) return stateOf(block, { axis: nx !== 0 ? "x" : nz !== 0 ? "z" : "y" });
   if (has("facing")) return stateOf(block, { facing: OPPOSITE[look] });

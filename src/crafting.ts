@@ -101,6 +101,12 @@ export const SHAPED: readonly Shaped[] = [
   shaped([" #S", "# S", " #S"], { "#": "stick", S: "string" }, "bow"),
   shaped(["F", "S", "E"], { F: "flint", S: "stick", E: "feather" }, "arrow", 4),
   shaped([" #", "# "], { "#": "iron_ingot" }, "shears"),
+  shaped(["R", "S"], { R: "redstone", S: "stick" }, "redstone_torch"),
+  shaped(["S", "C"], { S: "stick", C: "cobblestone" }, "lever"),
+  shaped(["##"], { "#": "stone" }, "stone_pressure_plate"),
+  shaped(["##"], { "#": "#planks" }, "oak_pressure_plate"),
+  shaped(["T#T", "SSS"], { T: "redstone_torch", "#": "redstone", S: "stone" }, "repeater"),
+  shaped([" R ", "RGR", " R "], { R: "redstone", G: "glowstone" }, "redstone_lamp"),
   shaped(["###", "###", "###"], { "#": "melon_slice" }, "melon"),
 ];
 
@@ -108,6 +114,11 @@ export const SHAPELESS: readonly Shapeless[] = [
   ...WOODS.map((w) => shapeless([`${w}_log`], `${w}_planks`, 4)),
   shapeless(["paper", "paper", "paper", "leather"], "book"),
   shapeless(["brown_mushroom", "red_mushroom", "bowl"], "mushroom_stew"),
+  shapeless(["stone"], "stone_button"),
+  shapeless(["#planks"], "oak_button"),
+  shapeless(["bone"], "bone_meal", 3),
+  shapeless(["pumpkin"], "pumpkin_seeds", 4),
+  shapeless(["melon_slice"], "melon_seeds"),
 ];
 
 /** Whether an item fits an ingredient (a name or a #tag). */
@@ -199,6 +210,7 @@ const SMELTING: Readonly<Record<string, string>> = {
   beef: "cooked_beef",
   chicken: "cooked_chicken",
   mutton: "cooked_mutton",
+  potato: "baked_potato",
   ...Object.fromEntries(TAGS.logs.map((log) => [log, "charcoal"])),
 };
 
@@ -221,6 +233,7 @@ const SMELT_XP: Readonly<Record<string, number>> = {
   cooked_beef: 0.35,
   cooked_chicken: 0.35,
   cooked_mutton: 0.35,
+  baked_potato: 0.35,
 };
 
 /** The experience smelting gives per item made. */

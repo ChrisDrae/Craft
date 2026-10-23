@@ -21,7 +21,7 @@ export class VoxelWorld implements LightWorld {
    */
   fancyLeaves: boolean = false;
   /** Called after every block change with its position (BlockUpdates.changed). */
-  onChanged: ((x: number, y: number, z: number) => void) | null = null;
+  onChanged: ((x: number, y: number, z: number, old: number) => void) | null = null;
   /** Called when a chest or furnace goes with its block, with what it held (the game drops it). */
   onEntityRemoved: ((x: number, y: number, z: number, entity: BlockEntity) => void) | null = null;
 
@@ -206,6 +206,7 @@ export class VoxelWorld implements LightWorld {
     const ly = y & 15;
     const lz = z & 15;
     const s = y >> 4;
+    const old = chunk.get(lx, y, lz);
     chunk.set(lx, y, lz, state);
     chunk.unsaved = true;
     const entityKey = (y << 8) | (lz << 4) | lx;
@@ -223,7 +224,7 @@ export class VoxelWorld implements LightWorld {
     if (lz === 0) this.markDirty(cx, cz - 1, s);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1, s);
     relight(this, x, y, z);
-    this.onChanged?.(x, y, z);
+    this.onChanged?.(x, y, z, old);
     return true;
   }
 

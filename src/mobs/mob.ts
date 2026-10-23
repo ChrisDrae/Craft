@@ -66,6 +66,10 @@ export class Mob extends Entity {
   sheared: boolean = false;
   /** A chicken's ticks until it lays an egg. */
   eggTime: number = 6000;
+  /** Ticks left in love (fed its food: it looks for a partner), until it may breed again, until a baby grows up. */
+  love: number = 0;
+  breedCooldown: number = 0;
+  growUp: number = 0;
   /** The tick (age) a player last hit it: it leaves experience if killed within 5 seconds of that. */
   hitByPlayer: number = -1000;
   /** Ticks with no player near (monsters go away after a while), and a stuck counter for paths. */
@@ -88,6 +92,10 @@ export class Mob extends Entity {
 
   get alive(): boolean {
     return this.dying === 0;
+  }
+
+  get baby(): boolean {
+    return this.growUp > 0;
   }
 
   get eyeY(): number {

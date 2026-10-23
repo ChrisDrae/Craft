@@ -12,7 +12,7 @@ import type { DamageSource, Difficulty } from "../vitals.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
@@ -83,7 +83,7 @@ export type ToHost =
   | { t: "dropped"; chunks: Array<[number, number]> };
 
 export type ToGuest =
-  | { t: "welcome"; id: string; world: string; time: number; mode: GameMode; difficulty: Difficulty; hardcore: boolean; spawn: { x: number; y: number; z: number }; you: GuestState }
+  | { t: "welcome"; id: string; world: string; time: number; mode: GameMode; difficulty: Difficulty; hardcore: boolean; spawn: { x: number; y: number; z: number }; weather: { rain: boolean; thunder: boolean }; you: GuestState }
   | { t: "refused"; reason: string }
   /** A chunk, its compressed blocks after the header (see encodeBlocks). */
   | { t: "chunk"; cx: number; cz: number; palette: string[]; biomes: string; generator: number }
@@ -109,8 +109,12 @@ export type ToGuest =
   | { t: "explosion"; x: number; y: number; z: number; power: number }
   /** A sound there (Minecraft's event name), of a kind (its volume setting). */
   | { t: "sound"; event: string; x: number; y: number; z: number; category: string }
-  /** Someone broke, placed or used a block there (what it was or is): its pieces and sound. */
-  | { t: "effect"; kind: "break" | "place" | "use"; x: number; y: number; z: number; state: number }
+  /** Someone broke, placed or used a block there (what it was or is), or made it grow (bone meal): its pieces and sound. */
+  | { t: "effect"; kind: "break" | "place" | "use" | "grow"; x: number; y: number; z: number; state: number }
+  /** It started or stopped raining or storming. */
+  | { t: "weather"; rain: boolean; thunder: boolean }
+  /** Lightning struck there. */
+  | { t: "lightning"; x: number; y: number; z: number }
   /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
   | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };

@@ -642,6 +642,43 @@ Parts of this phase can come at any point; sound in particular depends on nothin
 
 ### Phase 9: Farming, weather, redstone basics (L)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Random ticks (`src/growth.ts`): grass spreads to lit dirt and dies under blocks, leaves more than six
+  blocks from a log (through leaves) decay and drop, saplings grow into oaks (now and then a big one),
+  cacti and sugar cane grow three high, ice and snow melt near light; where it snows (cold biomes, and
+  anywhere above y 150) still water freezes and snow settles while it snows. Leaves a player places are
+  marked persistent and never decay; leaves placed before this phase load as not persistent and may.
+- Farming: hoes till grass and dirt into farmland, wet within four blocks of water or in the rain, drying
+  out without, and back to dirt when dry and bare or covered; landing on it hard tramples it (players, and
+  mobs bigger than chickens and babies). Grass drops seeds (1 in 8), zombies now and then a carrot or a
+  potato. Wheat, carrots and potatoes grow in eight stages by Minecraft's formula (light 9 or more, faster
+  on wet farmland and beside more farmland); pumpkin and melon stems put their fruit on the ground beside
+  them. Bone meal (from bones) grows a crop two to five stages, a sapling into a tree, grass and flowers
+  around grass. Baked potatoes.
+- Breeding: animals fed their food (cows and sheep wheat, pigs carrots and potatoes, chickens seeds) fall in
+  love, hearts over them, and find a partner; the baby is half the size and grows up in 20 minutes (a
+  tenth sooner for every feed). Lambs have no wool to shear.
+- Weather (`src/weather.ts`, `src/rain.ts`): Minecraft's cycle, clear for 10 to 150 minutes and rain for 10
+  to 20, thunder on a timer of its own; rain or snow by biome and height (nothing in deserts and savannas),
+  falling around the camera from the sky to whatever stops it, in Minecraft's rain and snow images when
+  imported. The sky grays and darkens, the sun, moon and stars fade, sky light dims (so monsters come out
+  in storms); rain patters on the ground and on roofs overhead. Rain puts out burning players and mobs and
+  keeps zombies and skeletons from burning. Thunderstorms let players sleep, and strike lightning (one in
+  100,000 ticks per chunk) with a bolt, a flash and thunder; it hurts (5) and sets on fire what is near.
+  Sleeping through the night clears the rain. `/weather`. Saved with the world (save format 9).
+- Redstone (`src/redstone.ts`): power 0–15 through dust (a level weaker a block, climbing up and down
+  blocks, round corners, and a line running on past its end), strongly and weakly powered blocks, torches
+  (inverters, 2 ticks), levers, stone and oak buttons (1 and 1.5 seconds), stone and oak pressure plates
+  (players and mobs; items and arrows too on oak), repeaters (delays of 1 to 4, 2 ticks each, and locking),
+  lamps (out 4 ticks after their power), and doors and trapdoors open while powered. Block updates reach
+  two blocks around redstone. Levers, buttons and plates click on every player's side.
+- Sound: a weather volume; crops' own sounds; hoes, bone meal, levers, buttons and plates.
+- Multiplayer (protocol 6): the weather and lightning; bone meal's sparkles; guests feed animals and
+  trample farmland through the host.
+- Not done: pistons (Phase 10). Lightning sets no blocks on fire (Craft has no fire yet) and changes no
+  mobs. Snow settles one layer deep. Babies are drawn half the size but collide as grown animals. Not yet
+  checked in a browser: the dev server was stopped by the system for low memory.
+
 - **Random ticks** (from Phase 0): grass spreads to lit dirt and dies under blocks; leaves decay more than 6
   blocks from a log; saplings grow into trees; ice and snow form in cold biomes and melt near light; cacti and
   sugar cane grow.
@@ -705,4 +742,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 8 and M are done; next is Phase 9: farming, weather and the basics of redstone.
+Phases 0 to 9 and M are done; next are pistons.

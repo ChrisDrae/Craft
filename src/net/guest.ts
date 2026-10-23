@@ -25,6 +25,7 @@ export interface Welcome {
   hardcore: boolean;
   /** Where players start, and come back to without a bed. */
   spawn: { x: number; y: number; z: number };
+  weather: { rain: boolean; thunder: boolean };
   you: GuestState;
 }
 
@@ -77,8 +78,11 @@ export class GuestSession extends SimObject {
   onExplosion: ((x: number, y: number, z: number, power: number) => void) | null = null;
   /** Called with a sound to play there. */
   onSound: ((event: string, x: number, y: number, z: number, category: string) => void) | null = null;
+  /** Called when it starts or stops raining or storming, and when lightning strikes. */
+  onWeather: ((rain: boolean, thunder: boolean) => void) | null = null;
+  onLightning: ((x: number, y: number, z: number) => void) | null = null;
   /** Called when someone else broke, placed or used a block nearby. */
-  onEffect: ((kind: "break" | "place" | "use", x: number, y: number, z: number, state: number) => void) | null = null;
+  onEffect: ((kind: "break" | "place" | "use" | "grow", x: number, y: number, z: number, state: number) => void) | null = null;
   /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
   onContainer: ((x: number, y: number, z: number, entity: SavedEntity | null) => void) | null = null;
   /** Called when the host says goodbye or the link breaks, after the welcome. */
@@ -132,6 +136,7 @@ export class GuestSession extends SimObject {
           difficulty: msg.difficulty ?? "normal",
           hardcore: msg.hardcore === true,
           spawn: msg.spawn,
+          weather: msg.weather ?? { rain: false, thunder: false },
           you: msg.you,
         });
         return;
@@ -191,6 +196,12 @@ export class GuestSession extends SimObject {
         return;
       case "effect":
         this.onEffect?.(msg.kind, msg.x, msg.y, msg.z, msg.state);
+        return;
+      case "weather":
+        this.onWeather?.(msg.rain === true, msg.thunder === true);
+        return;
+      case "lightning":
+        this.onLightning?.(msg.x, msg.y, msg.z);
         return;
       case "container":
         this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);

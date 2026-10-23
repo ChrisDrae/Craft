@@ -72,6 +72,8 @@ export interface HostOptions {
   onNotice?: (text: string) => void;
   /** Called when a guest's action changed a block (with what was there before): its pieces and sound here. */
   onAct?: (guest: string, a: Action, before: number) => void;
+  /** Whether it rains and storms now. */
+  weather?: () => { rain: boolean; thunder: boolean };
 }
 
 /** A position that came from a guest, if it is one. */
@@ -169,11 +171,22 @@ export class HostSession extends SimObject {
   }
 
   /** A block broken, placed or used, for the guests near it (but `except`, who did it). */
-  effect(kind: "break" | "place" | "use", x: number, y: number, z: number, state: number, except: string | null = null): void {
+  effect(kind: "break" | "place" | "use" | "grow", x: number, y: number, z: number, state: number, except: string | null = null): void {
     for (const v of this.visitors.values()) {
       const p = v.state.position;
       if (v.id !== except && Math.hypot(p.x - x, p.y - y, p.z - z) < 32) this.send(v, { t: "effect", kind, x, y, z, state });
     }
+  }
+
+  /** Tells the guests it started or stopped raining or storming. */
+  weatherChanged(): void {
+    const w = this.options.weather?.() ?? { rain: false, thunder: false };
+    for (const v of this.visitors.values()) this.send(v, { t: "weather", ...w });
+  }
+
+  /** Lightning struck: every guest sees and hears it. */
+  lightning(x: number, y: number, z: number): void {
+    for (const v of this.visitors.values()) this.send(v, { t: "lightning", x, y, z });
   }
 
   /** Tells the guests the time now (it was set). */
@@ -260,7 +273,8 @@ export class HostSession extends SimObject {
     const visitor: Visitor = { id: hello.id, name, state, conn, view, sent: new Set(), outbox: Promise.resolve(), open: null, asleep: false };
     this.visitors.set(conn, visitor);
     const o = this.options;
-    this.send(visitor, { t: "welcome", id: hello.id, world: o.worldName, time: o.ticks.time, mode: o.mode, difficulty: o.difficulty(), hardcore: o.hardcore, spawn: { x: spawn.x, y: spawn.y, z: spawn.z }, you: state });
+    const weather = o.weather?.() ?? { rain: false, thunder: false };
+    this.send(visitor, { t: "welcome", id: hello.id, world: o.worldName, time: o.ticks.time, mode: o.mode, difficulty: o.difficulty(), hardcore: o.hardcore, spawn: { x: spawn.x, y: spawn.y, z: spawn.z }, weather, you: state });
     this.options.onGuests?.();
   }
 
@@ -328,7 +342,11 @@ export class HostSession extends SimObject {
       case "useMob": {
         const mob = this.options.mobs?.mobs.get(Number(msg.id));
         const held = loadStack(msg.held);
-        if (mob && held && ITEMS[held.item].name === "shears" && this.distance(v, mob.position) < 7) this.options.mobs!.shear(mob);
+        if (!mob || !held || this.distance(v, mob.position) >= 7) return;
+        // Shears shear a sheep; an animal's food feeds it
+        const item = ITEMS[held.item].name;
+        if (item === "shears") this.options.mobs!.shear(mob);
+        else this.options.mobs!.feed(mob, item);
         return;
       }
       case "take": {
@@ -408,6 +426,7 @@ export class HostSession extends SimObject {
    */
   private act(v: Visitor, msg: Action & { held?: SavedStack | null }): void {
     const a: Action = { act: msg.act, x: msg.x | 0, y: msg.y | 0, z: msg.z | 0, nx: msg.nx | 0, ny: msg.ny | 0, nz: msg.nz | 0, hy: Number(msg.hy) || 0, block: msg.block | 0, yaw: Number(msg.yaw) || 0 };
+    if (msg.use === "till" || msg.use === "fertilize" || msg.use === "trample") a.use = msg.use;
     const p = v.state.position;
     const reach = Math.hypot(a.x + 0.5 - p.x, a.y + 0.5 - (p.y + EYE_HEIGHT), a.z + 0.5 - p.z) <= REACH + 1.5;
     const known = a.act !== "place" || PLACEABLE.includes(a.block);
@@ -417,7 +436,7 @@ export class HostSession extends SimObject {
     if (reach && known && unit && perform(this.options.world, a, standing)) {
       this.options.onAct?.(v.id, a, before);
       const placed = a.act === "place" ? this.options.world.get(a.x + a.nx, a.y + a.ny, a.z + a.nz) : 0;
-      this.effect(a.act, a.act === "place" ? a.x + a.nx : a.x, a.act === "place" ? a.y + a.ny : a.y, a.act === "place" ? a.z + a.nz : a.z, a.act === "break" ? before : a.act === "place" ? placed : this.options.world.get(a.x, a.y, a.z), v.id);
+      this.effect(a.use === "fertilize" ? "grow" : a.act, a.act === "place" ? a.x + a.nx : a.x, a.act === "place" ? a.y + a.ny : a.y, a.act === "place" ? a.z + a.nz : a.z, a.act === "break" ? before : a.act === "place" ? placed : this.options.world.get(a.x, a.y, a.z), v.id);
       if (a.act === "break" && this.options.mode === "survival") {
         const held = loadStack(msg.held);
         this.options.drops.spill(a.x, a.y, a.z, dropsOf(before, held, Math.random));

@@ -14,7 +14,7 @@ export const DIFFICULTIES: readonly Difficulty[] = ["peaceful", "easy", "normal"
 export type PlayMode = "survival" | "creative" | "spectator";
 
 /** What hurts. */
-export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion" | "kill";
+export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion" | "kill" | "lightning";
 
 export const MAX_HEALTH = 20;
 export const MAX_FOOD = 20;
@@ -41,6 +41,7 @@ export const DEATH_MESSAGES: Readonly<Record<DamageSource, string>> = {
   arrow: "was shot by",
   explosion: "was blown up by",
   kill: "was killed",
+  lightning: "was struck by lightning",
 };
 
 /** How a player died: "drowned", "was slain by Zombie"; an explosion without a known cause "blew up". */
@@ -81,7 +82,7 @@ export function armorReduce(amount: number, defense: number, toughness: number):
 export interface Surroundings {
   /** In lava anywhere: it burns. */
   inLava: boolean;
-  /** In water anywhere: it puts fire out. */
+  /** In water anywhere, or out in the rain: it puts fire out. */
   inWater: boolean;
   eyesInWater: boolean;
   /** Eyes inside a solid block. */

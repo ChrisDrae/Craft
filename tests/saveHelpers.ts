@@ -31,6 +31,7 @@ export function newMeta(id: string, seed: string = "saves"): WorldMeta {
     mode: "survival",
     difficulty: "normal",
     hardcore: false,
+    weather: null,
   };
 }
 

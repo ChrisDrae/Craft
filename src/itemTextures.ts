@@ -21,6 +21,8 @@ export const PARTICLE_TILES: readonly string[] = [
   "particle_flame",
   "particle_critical_hit",
   "particle_lava",
+  "particle_heart",
+  "particle_glint",
   ...Array.from({ length: 16 }, (_, i) => `particle_explosion_${i}`),
 ];
 /** Orbs of experience from small to large, gray to be colored as they are drawn. */
@@ -135,6 +137,17 @@ function drawItem(info: ItemInfo): TilePixels {
     }
     case "shears":
       return layered(name, [[any(line(4, 12, 11, 5, 1), line(6, 13, 12, 7, 1)), color, 0.08], [any(disc(4, 12, 1.5), disc(6.5, 13, 1.5)), hex("#5a5a5a")]]);
+    case "wheat_seeds":
+    case "pumpkin_seeds":
+    case "melon_seeds":
+      return layered(name, [[any(disc(5, 6, 1.2), disc(9, 5, 1.2), disc(7, 9, 1.2), disc(11, 9, 1.2), disc(6, 12, 1.2)), color, 0.2]]);
+    case "carrot":
+      return layered(name, [[(x, y) => Math.abs(x - y) < 2.4 - (x + y) / 14 && x > 2 && x < 12, color, 0.15], [any(line(11, 3, 13, 1, 0.8), line(12, 4, 14, 3, 0.8)), hex("#3a8a2a")]]);
+    case "potato":
+    case "baked_potato":
+      return layered(name, [[(x, y) => ((x - 7.5) / 5) ** 2 + ((y - 8) / 4) ** 2 <= 1, color, 0.2], [edge((x, y) => ((x - 7.5) / 5) ** 2 + ((y - 8) / 4) ** 2 <= 1), dark, 0.1]]);
+    case "bone_meal":
+      return paint(name, (x, y, rnd) => (disc(8, 9, 4.5)(x, y) && rnd.next() < 0.7 ? scale(color, jitter(rnd, 0.1)) : CLEAR));
     case "redstone":
     case "glowstone_dust":
     case "gunpowder":
@@ -400,6 +413,8 @@ export function particleTiles(): Map<string, TilePixels> {
   out.set("particle_flame", layered("flame", [[(x, y) => ((x - 7.5) / 3) ** 2 + ((y - 9) / 5.5) ** 2 <= 1, [255, 140, 20]], [(x, y) => ((x - 7.5) / 1.6) ** 2 + ((y - 10) / 3) ** 2 <= 1, [255, 230, 120]]]));
   out.set("particle_critical_hit", layered("crit", [[any(line(7.5, 2, 7.5, 13, 0.8), line(2, 7.5, 13, 7.5, 0.8), line(4, 4, 11, 11, 0.6), line(4, 11, 11, 4, 0.6)), [240, 240, 255], 0.05]]));
   out.set("particle_lava", layered("lava", [[disc(7.5, 7.5, 3), [255, 120, 20]], [disc(7, 7, 1.5), [255, 220, 90]]]));
+  out.set("particle_heart", layered("heart", [[(x, y) => (Math.hypot(x - 5.5, y - 6) < 3 || Math.hypot(x - 9.5, y - 6) < 3 || (y >= 6 && Math.abs(x - 7.5) < 13 - y)) && y < 13, [230, 30, 50]]]));
+  out.set("particle_glint", layered("glint", [[any(line(7.5, 3, 7.5, 12, 0.7), line(3, 7.5, 12, 7.5, 0.7)), [120, 230, 120]]]));
   for (let i = 0; i < 16; i++) {
     const r = 3 + i * 0.3;
     out.set(`particle_explosion_${i}`, paint(`blast ${i}`, (x, y, rnd) => {
@@ -409,5 +424,67 @@ export function particleTiles(): Map<string, TilePixels> {
       return d < r * 0.5 ? scale([255, 240, 200], k * jitter(rnd, 0.2)) : scale([200, 190, 180], k * jitter(rnd, 0.3));
     }));
   }
+  return out;
+}
+
+/** Craft's farmland, crops by stage, and stems (gray, to be tinted by age). */
+export function farmTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  const soil = (wet: boolean) => paint(wet ? "farmland wet" : "farmland", (x, y, rnd) => scale(hex(wet ? "#4a2e18" : "#6a4628"), (y % 4 === 0 ? 0.8 : 1) * jitter(rnd, 0.2)));
+  out.set("farmland", soil(false));
+  out.set("farmland_moist", soil(true));
+  // Stalks growing taller stage by stage, wheat yellowing at the end
+  const stalks = (seed: string, height: number, color: Rgb, top: Rgb | null) =>
+    paint(seed, (x, y, rnd) => {
+      if (x % 3 !== 1 || y < 16 - height) return CLEAR;
+      if (top && y < 16 - height + 3) return scale(top, jitter(rnd, 0.2));
+      return scale(color, jitter(rnd, 0.25));
+    });
+  for (let i = 0; i < 8; i++) out.set(`wheat_stage${i}`, stalks(`wheat ${i}`, 2 + i * 2, i === 7 ? hex("#b8a040") : hex("#4a9a2a"), i >= 5 ? hex("#c8b050") : null));
+  for (let i = 0; i < 4; i++) {
+    out.set(`carrots_stage${i}`, stalks(`carrots ${i}`, 3 + i * 3, hex("#3a8a2a"), i === 3 ? hex("#f08a1a") : null));
+    out.set(`potatoes_stage${i}`, stalks(`potatoes ${i}`, 3 + i * 3, hex("#4a9a2a"), i === 3 ? hex("#d8d050") : null));
+  }
+  const stem = (seed: string, bent: boolean) => paint(seed, (x, y, rnd) => ((bent ? Math.abs(x - (16 - y) * 0.6) < 1.2 : Math.abs(x - 7.5) < 1) && y > 5 ? scale([210, 210, 210], jitter(rnd, 0.15)) : CLEAR));
+  out.set("pumpkin_stem", stem("pumpkin stem", false));
+  out.set("melon_stem", stem("melon stem", false));
+  out.set("attached_pumpkin_stem", stem("pumpkin stem bent", true));
+  out.set("attached_melon_stem", stem("melon stem bent", true));
+  return out;
+}
+
+/** Craft's redstone: dust (gray, tinted by its power), torches lit and out, a lever, repeaters, lamps, smooth stone. */
+export function redstoneTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  const gray: Rgb = [235, 235, 235];
+  out.set("redstone_dust_dot", paint("dust dot", (x, y, rnd) => (Math.hypot(x - 7.5, y - 7.5) < 3.5 && rnd.next() < 0.8 ? scale(gray, jitter(rnd, 0.2)) : CLEAR)));
+  out.set("redstone_dust_line0", paint("dust ns", (x, _y, rnd) => (Math.abs(x - 7.5) < 1.5 && rnd.next() < 0.8 ? scale(gray, jitter(rnd, 0.2)) : CLEAR)));
+  out.set("redstone_dust_line1", paint("dust ew", (_x, y, rnd) => (Math.abs(y - 7.5) < 1.5 && rnd.next() < 0.8 ? scale(gray, jitter(rnd, 0.2)) : CLEAR)));
+  const torch = (lit: boolean) =>
+    paint(lit ? "redstone torch" : "redstone torch off", (x, y, rnd) => {
+      if (x < 7 || x > 8 || y < 6) return CLEAR;
+      if (y < 8) return scale(lit ? [255, 60, 30] : [90, 20, 20], jitter(rnd, 0.15));
+      return scale(hex("#8a6a3a"), jitter(rnd, 0.2));
+    });
+  out.set("redstone_torch", torch(true));
+  out.set("redstone_torch_off", torch(false));
+  out.set("lever", paint("lever", (x, y, rnd) => (x >= 7 && x <= 8 && y >= 6 ? scale(hex("#8a6a3a"), jitter(rnd, 0.2)) : CLEAR)));
+  const smooth = hex("#a8a8a8");
+  out.set("smooth_stone", paint("smooth stone", (x, y, rnd) => scale(smooth, (x === 0 || y === 0 || x === 15 || y === 15 ? 0.85 : 1) * jitter(rnd, 0.06))));
+  const repeater = (on: boolean) =>
+    paint(on ? "repeater on" : "repeater", (x, y, rnd) => {
+      // An arrow pointing to the top of the tile (north, the way it sends power), dust along it
+      const arrow = Math.abs(x - 7.5) < 1 || (y < 6 && Math.abs(x - 7.5) < 6 - y);
+      return arrow ? scale(on ? [230, 40, 30] : [110, 30, 30], jitter(rnd, 0.15)) : scale(smooth, (x === 0 || y === 0 || x === 15 || y === 15 ? 0.85 : 1) * jitter(rnd, 0.06));
+    });
+  out.set("repeater", repeater(false));
+  out.set("repeater_on", repeater(true));
+  const lamp = (on: boolean) =>
+    paint(on ? "lamp on" : "lamp", (x, y, rnd) => {
+      const frame = x % 5 === 0 || y % 5 === 0;
+      return frame ? scale(hex("#5a3a1a"), jitter(rnd, 0.2)) : scale(on ? [250, 220, 150] : [140, 90, 50], jitter(rnd, 0.15));
+    });
+  out.set("redstone_lamp", lamp(false));
+  out.set("redstone_lamp_on", lamp(true));
   return out;
 }

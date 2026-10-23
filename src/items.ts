@@ -37,8 +37,10 @@ export interface ItemInfo {
   readonly label: string;
   /** How many fit in a slot. */
   readonly maxStack: number;
-  /** The block it places, or null. */
+  /** The block it is, or null. */
   readonly block: Block | null;
+  /** The block it places when it isn't one (seeds a crop, redstone its dust), or null. */
+  readonly places: Block | null;
   readonly tool: Tool | null;
   readonly armor: ArmorSlot | null;
   /** Armor points worn (each half an armor icon), and the toughness that helps against heavy hits. */
@@ -65,6 +67,7 @@ interface ItemOptions {
   defense?: number;
   toughness?: number;
   food?: Food;
+  places?: Block;
   attack?: number;
   attackSpeed?: number;
   durability?: number;
@@ -97,7 +100,7 @@ const WOODEN: ReadonlySet<number> = new Set([
 
 function blockItem(b: (typeof BLOCKS)[number]): ItemInfo {
   const fuel = WOODEN.has(b.id) ? WOOD_FUEL : b.id === Block.OakSlab ? 150 : b.id === Block.Ladder ? WOOD_FUEL : b.id === Block.OakSapling ? 100 : 0;
-  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture: null, color: b.top };
+  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, places: null, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture: null, color: b.top };
 }
 
 const extra: ItemInfo[] = [];
@@ -109,6 +112,7 @@ function item(name: string, label: string, color: string, options: ItemOptions =
     label,
     maxStack: options.maxStack ?? (options.tool || options.armor ? 1 : 64),
     block: null,
+    places: options.places ?? null,
     tool: options.tool ?? null,
     armor: options.armor ?? null,
     defense: options.defense ?? 0,
@@ -138,7 +142,7 @@ export const Items = {
   Diamond: item("diamond", "diamond", "#5ae8e0"),
   Emerald: item("emerald", "emerald", "#17dd62"),
   Lapis: item("lapis_lazuli", "lapis lazuli", "#2a4ac8"),
-  Redstone: item("redstone", "redstone", "#c01010"),
+  Redstone: item("redstone", "redstone", "#c01010", { places: Block.RedstoneWire }),
   Flint: item("flint", "flint", "#3a3a3a"),
   String: item("string", "string", "#e8e8e8"),
   Leather: item("leather", "leather", "#a0552e"),
@@ -171,6 +175,13 @@ export const Items = {
   Arrow: item("arrow", "arrow", "#8a6a3a"),
   Bow: item("bow", "bow", "#8a6a3a", { maxStack: 1, durability: 384, fuel: 300 }),
   Shears: item("shears", "shears", "#d8d8d8", { maxStack: 1, durability: 238 }),
+  WheatSeeds: item("wheat_seeds", "wheat seeds", "#6a9a3a", { places: Block.Wheat }),
+  Carrot: item("carrot", "carrot", "#f08a1a", { places: Block.Carrots, food: { hunger: 3, saturation: 3.6 } }),
+  Potato: item("potato", "potato", "#d8b060", { places: Block.Potatoes, food: { hunger: 1, saturation: 0.6 } }),
+  BakedPotato: item("baked_potato", "baked potato", "#c8903a", { food: { hunger: 5, saturation: 6 } }),
+  PumpkinSeeds: item("pumpkin_seeds", "pumpkin seeds", "#e8d8a0", { places: Block.PumpkinStem }),
+  MelonSeeds: item("melon_seeds", "melon seeds", "#3a2a1a", { places: Block.MelonStem }),
+  BoneMeal: item("bone_meal", "bone meal", "#f0f0e8"),
 };
 
 /**
@@ -276,5 +287,8 @@ export function loadStack(s: SavedStack | null | undefined): ItemStack | null {
   return { item, count, damage };
 }
 
-/** The items the creative inventory offers: every block but air and bedrock, then every other item. */
-export const CREATIVE: readonly Item[] = ITEMS.filter((i) => i.id !== Block.Air && i.id !== Block.Bedrock).map((i) => i.id);
+/** Blocks only ever there by other means: crops and stems (from seeds), dust (from redstone), farmland (tilled). */
+const NOT_ITEMS: ReadonlySet<number> = new Set([Block.Air, Block.Bedrock, Block.Farmland, Block.Wheat, Block.Carrots, Block.Potatoes, Block.PumpkinStem, Block.AttachedPumpkinStem, Block.MelonStem, Block.AttachedMelonStem, Block.RedstoneWire]);
+
+/** The items the creative inventory offers: every block a player can have, then every other item. */
+export const CREATIVE: readonly Item[] = ITEMS.filter((i) => !NOT_ITEMS.has(i.id)).map((i) => i.id);

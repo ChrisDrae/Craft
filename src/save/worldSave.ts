@@ -34,6 +34,8 @@ export interface WorldSaveOptions {
   guests?: () => Array<Omit<GuestRecord, "format" | "world">>;
   /** The items lying about, saved with the chunks they are in. */
   drops?: Drops;
+  /** What else the world's metadata keeps that changes as it is played (its weather). */
+  extra?: () => Partial<WorldMeta>;
   /** The animals, saved with the chunks they are in (Mobs). */
   mobs?: { inChunk(cx: number, cz: number, take: boolean): SavedMob[]; restore(saved: readonly SavedMob[]): void };
 }
@@ -65,6 +67,7 @@ export class WorldSave extends SimObject implements ChunkSupply {
   private readonly unloaded: Map<number, { chunk: Chunk; ticks: ScheduledTick[]; drops: SavedDrop[]; mobs: SavedMob[] }> = new Map();
   private readonly drops: Drops | null;
   private readonly mobs: WorldSaveOptions["mobs"] | null;
+  private readonly extra: () => Partial<WorldMeta>;
   private readonly reading: Set<number> = new Set();
   private readonly skip: SkipChunk;
   private elapsed: number = 0;
@@ -83,6 +86,7 @@ export class WorldSave extends SimObject implements ChunkSupply {
     this.guests = options.guests ?? (() => []);
     this.drops = options.drops ?? null;
     this.mobs = options.mobs ?? null;
+    this.extra = options.extra ?? (() => ({}));
     this.saved = new Set(options.savedChunks.map(([cx, cz]) => VoxelWorld.key(cx, cz)));
     this.skip = (cx, cz) => {
       const key = VoxelWorld.key(cx, cz);
@@ -179,7 +183,7 @@ export class WorldSave extends SimObject implements ChunkSupply {
         bytes += c.blocks.length - (this.sizes.get(key) ?? 0);
         if (!this.saved.has(key)) count++;
       }
-      const meta: WorldMeta = { ...this.meta, time: this.ticks.time, lastPlayed: Date.now(), bytes, chunks: count };
+      const meta: WorldMeta = { ...this.meta, ...this.extra(), time: this.ticks.time, lastPlayed: Date.now(), bytes, chunks: count };
       await this.store.save({ meta, player, chunks, guests });
       this.meta = meta;
       for (const c of chunks) {

@@ -1,6 +1,7 @@
 import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, type Action } from "./actions.js";
-import { Block, blockOf, isBed } from "./blocks.js";
+import { Block, STATE_BLOCK, blockOf, isBed } from "./blocks.js";
+import { canFertilize } from "./growth.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, Inventory } from "./inventory.js";
 import { ITEMS, Items, itemByName, type Food, type Item, type ItemStack } from "./items.js";
 import { breakTime } from "./mining.js";
@@ -113,10 +114,10 @@ export class BlockInteraction extends SimObject {
     return this.inventory.selected;
   }
 
-  /** The block the held item places, or air. */
+  /** The block the held item places (itself, or what it plants), or air. */
   get selectedBlock(): Block {
     const held = this.inventory.held;
-    return held ? (ITEMS[held.item].block ?? Block.Air) : Block.Air;
+    return held ? (ITEMS[held.item].block ?? ITEMS[held.item].places ?? Block.Air) : Block.Air;
   }
 
   select(slot: number): void {
@@ -205,7 +206,12 @@ export class BlockInteraction extends SimObject {
       return;
     }
     if (button === 2 && this.targetMob && this.onUseMob?.(this.targetMob.id, this.inventory.held)) {
-      if (this.mode === "survival") this.inventory.wearHeld(1);
+      // Shears wear; food fed to an animal is used up
+      const held = this.inventory.held;
+      if (this.mode === "survival" && held) {
+        if (ITEMS[held.item].durability > 0) this.inventory.wearHeld(1);
+        else this.inventory.useHeld(1);
+      }
       return;
     }
     if (button === 0 && !this.target) this.sinceSwing = 0;
@@ -267,7 +273,15 @@ export class BlockInteraction extends SimObject {
     const t = this.target;
     if (!t) return null;
     const hy = this.hit ? this.hit.y - t.y : 0.5;
-    return { act, x: t.x, y: t.y, z: t.z, nx: t.nx, ny: t.ny, nz: t.nz, hy, block: this.selectedBlock, yaw: this.player.yaw };
+    const a: Action = { act, x: t.x, y: t.y, z: t.z, nx: t.nx, ny: t.ny, nz: t.nz, hy, block: this.selectedBlock, yaw: this.player.yaw };
+    // A hoe tills grass and dirt, bone meal makes what it can grow (and otherwise the block is just used)
+    const held = this.inventory.held;
+    if (act === "use" && held) {
+      const b = STATE_BLOCK[t.block];
+      if (ITEMS[held.item].tool?.kind === "hoe" && (b === Block.Grass || b === Block.Dirt)) a.use = "till";
+      else if (held.item === Items.BoneMeal && canFertilize(t.block)) a.use = "fertilize";
+    }
+    return a;
   }
 
   /** Does an action (see actions.ts), and tells onAction if it did anything. */
@@ -290,9 +304,19 @@ export class BlockInteraction extends SimObject {
     return true;
   }
 
-  /** Opens or shuts the target if it's a door (both halves) or a trapdoor. Returns whether it was one. */
+  /**
+   * Uses the target (see useBlock): tills it with a hoe, fertilizes it with bone meal, flips a lever, opens
+   * a door. In survival a hoe wears and bone meal is used up. Returns whether anything happened.
+   */
   useTarget(): boolean {
-    return this.apply(this.action("use"));
+    const t = this.target;
+    if (!t) return false;
+    const before = this.world.get(t.x, t.y, t.z);
+    const a = this.action("use");
+    if (!this.apply(a)) return false;
+    if (this.mode === "survival" && a?.use === "till" && STATE_BLOCK[this.world.get(t.x, t.y, t.z)] === Block.Farmland && before !== this.world.get(t.x, t.y, t.z)) this.inventory.wearHeld(1);
+    if (this.mode === "survival" && a?.use === "fertilize" && canFertilize(before)) this.inventory.useHeld(1);
+    return true;
   }
 
   /**

@@ -1,6 +1,7 @@
-import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, LEFT_OF, RIGHT_OF, SHAPE, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, LEFT_OF, OPAQUE, RIGHT_OF, SHAPE, STATE_BLOCK, propertyOf, stateOf, withProperties } from "./blocks.js";
 import { canFallInto, delayOf, isSource } from "./fluids.js";
 import { STURDY, SUPPORT } from "./shapes.js";
+import { Redstone, isRedstone } from "./redstone.js";
 import type { WorldTicks } from "./ticks.js";
 import type { VoxelWorld } from "./world.js";
 
@@ -62,6 +63,9 @@ export function supported(world: VoxelWorld, x: number, y: number, z: number, st
       return n !== Block.Air && FLUID[n] === 0;
     case "lilypad":
       return (FLUID[n] === 1 && isSource(n)) || nb === Block.Ice;
+    case "crop":
+    case "stem":
+      return nb === Block.Farmland;
     case "vine": {
       // On a solid wall, or hanging from the vine above
       const above = world.get(x, y + 1, z);
@@ -151,6 +155,8 @@ function chestType(world: VoxelWorld, x: number, y: number, z: number, state: nu
  * of their own; they are queued and handled in order.
  */
 export class BlockUpdates {
+  /** Redstone's reactions and delays (its pressure plates need to know who stands on them). */
+  readonly redstone: Redstone;
   private readonly world: VoxelWorld;
   private readonly ticks: WorldTicks;
   private readonly queue: number[] = [];
@@ -159,19 +165,28 @@ export class BlockUpdates {
   constructor(world: VoxelWorld, ticks: WorldTicks) {
     this.world = world;
     this.ticks = ticks;
+    this.redstone = new Redstone(world, ticks);
+    for (const [block, behavior] of this.redstone.behaviors()) ticks.behave(block, behavior);
   }
 
-  /** The block at (x, y, z) changed (VoxelWorld.onChanged). */
-  changed(x: number, y: number, z: number): void {
-    this.queue.push(x, y, z);
+  /** The block at (x, y, z) changed from `old` (VoxelWorld.onChanged). */
+  changed(x: number, y: number, z: number, old: number = -1): void {
+    this.queue.push(x, y, z, old);
     if (this.running) return;
     this.running = true;
     try {
-      // Each change updates the block itself and its neighbors; changes made meanwhile join the queue
-      for (let i = 0; i < this.queue.length; i += 3) {
-        const [cx, cy, cz] = [this.queue[i], this.queue[i + 1], this.queue[i + 2]];
+      // Each change updates the block itself and its neighbors; changes made meanwhile join the queue.
+      // Redstone reaches further: what a lever or dust powers is a block away, and that block's neighbors
+      // feel it, so they are updated too
+      for (let i = 0; i < this.queue.length; i += 4) {
+        const [cx, cy, cz, was] = [this.queue[i], this.queue[i + 1], this.queue[i + 2], this.queue[i + 3]];
         this.update(cx, cy, cz, true);
         for (let d = 0; d < 6; d++) this.update(cx + DIR_X[d], cy + DIR_Y[d], cz + DIR_Z[d], false);
+        if ((was >= 0 && isRedstone(was)) || isRedstone(this.world.get(cx, cy, cz))) {
+          for (let d = 0; d < 6; d++) {
+            for (let e = 0; e < 6; e++) if ((e ^ 1) !== d) this.update(cx + DIR_X[d] + DIR_X[e], cy + DIR_Y[d] + DIR_Y[e], cz + DIR_Z[d] + DIR_Z[e], false);
+          }
+        }
       }
     } finally {
       this.queue.length = 0;
@@ -215,7 +230,19 @@ export class BlockUpdates {
     } else if (block === Block.Grass) {
       const above = STATE_BLOCK[w.get(x, y + 1, z)];
       next = withProperties(state, { snowy: String(above === Block.Snow || above === Block.SnowBlock) });
+    } else if (block === Block.Farmland && OPAQUE[w.get(x, y + 1, z)]) {
+      // Packed down under a block
+      next = Block.Dirt;
+    } else if (block === Block.AttachedPumpkinStem || block === Block.AttachedMelonStem) {
+      // Its fruit was taken: it stands up again, grown
+      const d = FACING_DIR[propertyOf(state, "facing")];
+      const fruit = STATE_BLOCK[w.get(x + DIR_X[d], y, z + DIR_Z[d])];
+      if (fruit !== (block === Block.AttachedPumpkinStem ? Block.Pumpkin : Block.Melon)) next = stateOf(block === Block.AttachedPumpkinStem ? Block.PumpkinStem : Block.MelonStem, { age: "7" });
     }
-    if (next !== state) w.set(x, y, z, next);
+    if (next !== state) {
+      w.set(x, y, z, next);
+      return;
+    }
+    this.redstone.update(x, y, z, state);
   }
 }

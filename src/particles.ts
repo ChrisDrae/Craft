@@ -177,6 +177,18 @@ export class Particles extends SimObject {
     for (let i = 0; i < this.some(10); i++) this.smoke(x + (Math.random() - 0.5) * 0.8, y + Math.random() * 1.2, z + (Math.random() - 0.5) * 0.8, true, 0);
   }
 
+  /** A heart rising over an animal in love. */
+  heart(x: number, y: number, z: number): void {
+    this.sprite("particle_heart", x, y, z, { vx: (Math.random() - 0.5) * 0.4, vy: 0.4 + Math.random() * 0.2, vz: (Math.random() - 0.5) * 0.4, life: 0.8, size: 0.1, drag: 1 });
+  }
+
+  /** Green sparkles all about a block that bone meal made grow. */
+  glint(x: number, y: number, z: number): void {
+    for (let i = 0; i < this.some(15); i++) {
+      this.sprite("particle_glint", x + Math.random(), y + Math.random(), z + Math.random(), { vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 0.5 + Math.random(), size: 0.06 });
+    }
+  }
+
   /** A drop of lava spat out of a lava pool. */
   lava(x: number, y: number, z: number): void {
     this.sprite("particle_lava", x, y, z, { vx: (Math.random() - 0.5) * 2, vy: 3 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, gravity: GRAVITY, life: 1.2, size: 0.08, glow: true, collide: true });

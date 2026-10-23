@@ -27,6 +27,8 @@ export interface ShownMob {
   sheared: boolean;
   /** Ticks alive, for idle motion. */
   age: number;
+  /** A baby: drawn half the size. */
+  baby?: boolean;
 }
 
 /** Minecraft's walk: legs swing by the distance walked, as far as the walking is fast. */
@@ -307,14 +309,15 @@ export class MobRenderer extends SimObject {
     // A creeper about to blow swells, and flashes white
     const swell = s.swell;
     const grow = 1 + Math.sin(swell * 100) * swell * 0.01;
-    const k = 1 + swell * 0.4 * grow;
-    t.scale = { x: k, y: 1 + swell * 0.1 * grow, z: k };
+    const k = (1 + swell * 0.4 * grow) * (s.baby ? 0.5 : 1);
+    t.scale = { x: k, y: (1 + swell * 0.1 * grow) * (s.baby ? 0.5 : 1), z: k };
     const flash = swell > 0 && Math.floor(swell * 10) % 2 === 1 ? 1.6 : 1;
     const pose = poseOf(d.kind, s);
     d.posed!.pose(pose, brightness * flash, s.hurt);
     if (d.wool) {
       const wt = d.wool.node.transform;
       wt.position = t.position;
+      wt.scale = t.scale;
       quat.copy(wt.rotation, t.rotation);
       d.wool.node.visible = !s.sheared;
       if (!s.sheared) {

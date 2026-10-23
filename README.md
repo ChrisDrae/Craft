@@ -6,12 +6,14 @@ A Minecraft-style voxel world in the browser, built on [Projector](https://githu
 
 Seeded terrain with 18 biomes, from deserts and jungles to snowy peaks, mountains with cliffs and
 overhangs, rivers, caves and ravines, ores by depth, dungeons, desert wells and ruins; walking, swimming
-and climbing; building with 121 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
+and climbing; building with about 150 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
 water and lava that flow, fall and harden where they meet; light levels with smooth lighting, torches and
-glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds. In survival you gather:
-blocks take time to break and drop as items, tools in five tiers break them faster, and you craft, smelt in
-furnaces and keep things in chests; you get hungry, falls and lava hurt, and a bed brings you back. In
-creative every block is at hand and you fly. Friends can join any world.
+glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds, and rain, snow and
+thunderstorms. In survival you gather: blocks take time to break and drop as items, tools in five tiers
+break them faster, and you craft, smelt in furnaces and keep things in chests; you get hungry, falls and
+lava hurt, and a bed brings you back. Fields grow wheat, carrots, potatoes, pumpkins and melons, animals
+breed, and redstone carries power from levers, buttons and plates to lamps and doors. In creative every
+block is at hand and you fly. Friends can join any world.
 
 ```sh
 npm install
@@ -23,10 +25,12 @@ The title screen lists your worlds: create one (in survival, hardcore or creativ
 play, or join a friend's. WASD moves, Space jumps (and swims up), Shift sprints; in creative a double tap
 of Space flies (Space up, Shift down). The left button breaks (hold it in survival); the right one places
 the held block, opens and shuts doors and trapdoors, opens crafting tables, chests and furnaces, sleeps in
-beds, and eats the food held (hold it). 1–9 or the wheel pick a hotbar slot, the middle button picks the
+beds, flips levers and presses buttons, tills with a hoe, spreads bone meal, and eats the food held (hold
+it). 1–9 or the wheel pick a hotbar slot, the middle button picks the
 block you aim at, E opens the inventory (every item in creative), Q throws the held item (Ctrl+Q the whole
 stack), Esc opens the game menu (options, difficulty, save and quit); a game played alone pauses there.
-The left button also hits the mob under the crosshair; the right one draws a held bow, or shears a sheep.
+The left button also hits the mob under the crosshair; the right one draws a held bow, shears a sheep, or
+feeds an animal its food.
 C sneaks, T opens the chat and / a command (`/help` lists them), F5 shows the player from behind and in
 front, F3 the debug screen. Every key can be changed in Options, as can the volumes, the hotbar's size,
 smooth lighting, view bobbing and the particles.
@@ -92,11 +96,29 @@ at your bed or the world's spawn; in hardcore you have one life, then look on.
 
 Worlds from before game modes open in creative, as they were played.
 
+## Farms, weather and redstone
+
+Till grass or dirt with a hoe and plant seeds (grass drops them), carrots or potatoes: crops grow in the
+light, faster on farmland kept wet by water within four blocks or by the rain, and bone meal (from
+skeletons' bones) hurries them along, as it does saplings and grass. Pumpkin and melon stems put their
+fruit on the ground beside them. Don't jump on the field: landing hard tramples it. Feed two animals of a
+kind their food and they have a baby, which grows up in twenty minutes.
+
+The weather turns as in Minecraft: rain for a while every hour or two, snow where it is cold or high up,
+nothing in deserts. Rain grays the sky, wets fields and puts out fires; thunderstorms are dark enough for
+monsters by day and for sleeping, and lightning strikes. A night's sleep clears the sky, and `/weather`
+sets it.
+
+Redstone dust carries power from levers, buttons and pressure plates, a level weaker every block for
+fifteen blocks; repeaters pass it on at full strength after a delay of their own, redstone torches turn
+it around, and lamps, doors and trapdoors answer it. A torch feeding its own block back through a
+repeater makes a clock.
+
 ## Worlds and saves
 
 Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests and furnaces
 hold and the items lying in it, the player and their inventory, the guests who played in it, and the
-world's clock. Craft saves every 30 seconds, when you open the game menu or switch tabs, and when you quit
+world's clock and weather. Craft saves every 30 seconds, when you open the game menu or switch tabs, and when you quit
 to the title. A world open in one tab can't be opened in a second one. From the title screen you can
 rename, copy and delete worlds, and export one to a `.craftworld` file (or import such a file), to keep it
 elsewhere or move it to another browser. Options (render distance, field of view, mouse sensitivity,
@@ -154,8 +176,8 @@ flowchart LR
     subgraph Sim["Projector Simulation"]
       Player["Player<br/>(physics)"]
       Hands["BlockInteraction<br/>(break, place, use)"]
-      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces"]
-      Updates["BlockUpdates<br/>neighbors react"]
+      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays"]
+      Updates["BlockUpdates<br/>neighbors react,<br/>redstone"]
       Drops["Dropped items"]
       Terrain["Terrain<br/>(chunk meshes)"]
       Sky["Sky, avatars,<br/>items, cracks"]
