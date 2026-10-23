@@ -73,7 +73,8 @@ canvas {
   position: fixed;
   left: 50%;
   bottom: 16px;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(var(--gui, 1));
+  transform-origin: bottom center;
   display: flex;
   gap: 4px;
   padding: 4px;
@@ -110,7 +111,7 @@ canvas {
 #block-name {
   position: fixed;
   left: 50%;
-  bottom: 78px;
+  bottom: calc(16px + 120px * var(--gui, 1));
   transform: translateX(-50%);
   font-size: 14px;
   text-shadow: 0 1px 3px #000;
@@ -505,6 +506,19 @@ button.danger {
   height: 0;
 }
 
+/* A machine's energy: red, as redstone */
+.gauge.energy {
+  width: 12px;
+  height: 18px;
+  margin: 4px 0;
+}
+
+.gauge.energy span {
+  right: 0;
+  height: 0;
+  background: #e8382a;
+}
+
 .cursor-stack {
   position: fixed;
   left: 0;
@@ -516,4 +530,223 @@ button.danger {
   background-size: contain;
   image-rendering: pixelated;
   pointer-events: none;
+}
+
+/* The status bar over the hotbar: hearts, food, armor, air, experience */
+#status {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + 58px * var(--gui, 1));
+  width: 436px;
+  transform: translateX(-50%) scale(var(--gui, 1));
+  transform-origin: bottom center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+#status .row {
+  display: flex;
+  justify-content: space-between;
+  height: 18px;
+}
+
+#status .icons {
+  display: flex;
+}
+
+#status .icons.right {
+  flex-direction: row-reverse;
+}
+
+#status .icons span {
+  width: 18px;
+  height: 18px;
+  margin-right: -2px;
+  background-size: 18px 18px;
+  background-repeat: no-repeat;
+}
+
+#status .icons.right span {
+  margin-right: 0;
+  margin-left: -2px;
+}
+
+#status .xp {
+  position: relative;
+  height: 10px;
+  margin-top: 4px;
+  background-size: 100% 100%;
+}
+
+#status .xp i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background-size: 436px 100%;
+  background-repeat: no-repeat;
+}
+
+#status .xp b {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  color: #80ff20;
+  font: 700 16px/1 ui-monospace, monospace;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+
+/* Hurt: a red flash at the edges; burning: flames rising from below; asleep: the screen goes dark */
+#hurt {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(200, 0, 0, 0.6));
+  opacity: 0;
+}
+
+#burning {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40vh;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(255, 100, 0, 0.6), rgba(255, 190, 0, 0.25) 55%, transparent);
+  animation: flicker 0.2s infinite alternate;
+}
+
+@keyframes flicker {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+#sleep {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 22vh;
+  background: rgba(0, 0, 0, var(--dark, 0));
+  color: #fff;
+  font: 15px/1.4 ui-monospace, monospace;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+
+#eating {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 16px);
+  width: 40px;
+  height: 4px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#eating i {
+  display: block;
+  height: 100%;
+  width: calc(var(--eat, 0) * 100%);
+  background: #fff;
+}
+
+/* The death screen over a red-tinted world */
+#menu.dead {
+  background: linear-gradient(rgba(90, 0, 0, 0.45), rgba(160, 16, 16, 0.65));
+}
+
+#menu.dead h1 {
+  font-size: 40px;
+}
+
+/* Chat: a line to type at the bottom left, what was said above it while it is open */
+#chat {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  max-width: 640px;
+}
+
+#chat input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font: 14px/1.4 ui-monospace, monospace;
+  outline: none;
+}
+
+#chatlog {
+  position: fixed;
+  left: 12px;
+  bottom: 52px;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+#chatlog div {
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font: 13px/1.4 ui-monospace, monospace;
+}
+
+/* The debug screen (F3) */
+#debug {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #f0f0f0;
+  font: 12px/1.45 ui-monospace, monospace;
+  pointer-events: none;
+  white-space: pre;
+}
+
+/* Options: sections, toggles and key bindings */
+.options .section {
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+
+.options .toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.options .keys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr 7em);
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.options .keys-grid button.waiting {
+  outline: 2px solid var(--accent);
+}
+
+.options .scroll {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 6px;
 }

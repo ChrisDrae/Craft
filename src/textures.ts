@@ -1,5 +1,5 @@
 import { Random, Texture } from "projector";
-import { DESTROY_TILES, ITEM_TILES, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles } from "./itemTextures.js";
+import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, farmTiles, industryTiles, pistonTiles, redstoneTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
 import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
@@ -10,7 +10,7 @@ import type { TileUVs } from "./chunkMesh.js";
  * The textures in the atlas: the blocks' (TILE_NAMES, named after Minecraft's block texture files, in the
  * same order so blocks find them by index), then the items' ("item_stick") and the stages of cracks.
  */
-export const TILES: readonly string[] = [...TILE_NAMES, ...ITEM_TILES, ...DESTROY_TILES];
+export const TILES: readonly string[] = [...TILE_NAMES, ...ITEM_TILES, ...DESTROY_TILES, ...ORB_TILES, ...PARTICLE_TILES];
 const TILE_AT: ReadonlyMap<string, number> = new Map(TILES.map((n, i) => [n, i]));
 
 /** A texture's slot in the atlas (TILES), or -1. */
@@ -59,6 +59,7 @@ const TINTED: Readonly<Record<string, number>> = {
   large_fern_bottom: Tint.Grass,
   sugar_cane: Tint.Grass,
   oak_leaves: Tint.Foliage,
+  vine: Tint.Foliage,
   jungle_leaves: Tint.Foliage,
   acacia_leaves: Tint.Foliage,
   dark_oak_leaves: Tint.Foliage,
@@ -411,6 +412,14 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
       return scale(hex("#2a8a3a"), (Math.abs(dx) < 0.6 || Math.abs(dy) < 0.6 ? 0.8 : 1) * jitter(rnd, 0.2));
     }),
   );
+  tiles.set(
+    "vine",
+    paint("vine", (x, y, rnd) => {
+      // Strands wandering down, with leaves along them
+      const strand = (x + Math.floor(Math.sin(y * 0.7 + x) * 1.5)) % 5 === 0;
+      return strand || rnd.next() < 0.18 ? scale(hex("#3a7a2a"), jitter(rnd, 0.35)) : [0, 0, 0, 0];
+    }),
+  );
   const pumpkin = hex("#e08a1d");
   tiles.set("pumpkin_side", paint("pumpkin side", (x, _y, rnd) => scale(pumpkin, (x % 4 === 0 ? 0.78 : 1) * jitter(rnd, 0.1))));
   tiles.set(
@@ -445,7 +454,7 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
     if (tile) tiles.set(name, untint(tile, tintColor(kind, Biome.Plains)));
   }
   tiles.set("furnace_front_on", furnaceOn(tiles.get("furnace_front")!));
-  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages()]) tiles.set(name, tile);
+  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles(), ...farmTiles(), ...redstoneTiles(), ...pistonTiles(), ...industryTiles()]) tiles.set(name, tile);
   for (const name of TILES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
   return tiles;
 }
@@ -543,17 +552,22 @@ export interface SkyImages {
   /** One per phase (MOON_PHASES order), or null. */
   moon: ImageBitmap[] | null;
   clouds: ImageBitmap | null;
+  /** Rain and snow falling (environment/rain.png, snow.png). */
+  rain: ImageBitmap | null;
+  snow: ImageBitmap | null;
 }
 
 /**
  * The textures imported from Minecraft by `npm run textures`: block tiles (with procedural ones for any it
- * didn't have), the sky's images, and the version they came from. Null when nothing was imported (or in
- * a build, which leaves them out).
+ * didn't have), the sky's images, the status bar's (hud_*) and the mobs' (mob_*) by name, and the version they came from. Null
+ * when nothing was imported (or in a build, which leaves them out).
  */
 export async function importedTextures(): Promise<{
   tiles: Map<TileName, TilePixels>;
   frames: Map<TileName, TilePixels[]>;
   sky: SkyImages;
+  hud: Map<string, ImageBitmap>;
+  mobs: Map<string, ImageBitmap>;
   version: string;
 } | null> {
   let manifest: { version: string; textures: string[] };
@@ -572,17 +586,20 @@ export async function importedTextures(): Promise<{
     }),
   );
   const files = new Map<string, TilePixels>();
-  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity)/.test(name)) files.set(name, firstFrame(image));
+  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity|experience_orb|hud_|mob_|weather_)/.test(name)) files.set(name, firstFrame(image));
   const tiles = proceduralTiles();
   for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
-  // The chest's faces come out of its model's texture, at its own size
-  const chest = images.get("chest_entity");
-  if (chest) {
-    const canvas = new OffscreenCanvas(chest.width, chest.height);
+  // The chest's faces come out of its model's texture, and the orbs out of their sheet, at their own size
+  const sheet = (image: ImageBitmap): Uint8ClampedArray => {
+    const canvas = new OffscreenCanvas(image.width, image.height);
     const g = canvas.getContext("2d")!;
-    g.drawImage(chest, 0, 0);
-    for (const [name, tile] of chestFromSheet(g.getImageData(0, 0, chest.width, chest.height).data, chest.width)) tiles.set(name, tile);
-  }
+    g.drawImage(image, 0, 0);
+    return g.getImageData(0, 0, image.width, image.height).data;
+  };
+  const chest = images.get("chest_entity");
+  if (chest) for (const [name, tile] of chestFromSheet(sheet(chest), chest.width)) tiles.set(name, tile);
+  const orbs = images.get("experience_orb");
+  if (orbs) for (const [name, tile] of orbsFromSheet(sheet(orbs), orbs.width)) tiles.set(name, tile);
   // The moving ones come as strips of frames, top to bottom
   const frames = animatedFrames();
   for (const name of Object.keys(ANIMATED)) {
@@ -592,15 +609,19 @@ export async function importedTextures(): Promise<{
     frames.set(name, name === "water_still" ? strip.map(waterTile) : strip);
   }
   const phases = MOON_PHASES.map((p) => images.get(`moon_${p}`));
-  const sheet = images.get("moon_phases");
+  const moons = images.get("moon_phases");
   return {
     tiles,
     frames,
     sky: {
       sun: images.get("sun") ?? null,
-      moon: phases.every((p) => p) ? (phases as ImageBitmap[]) : sheet ? await moonSheet(sheet) : null,
+      moon: phases.every((p) => p) ? (phases as ImageBitmap[]) : moons ? await moonSheet(moons) : null,
       clouds: images.get("clouds") ?? null,
+      rain: images.get("weather_rain") ?? null,
+      snow: images.get("weather_snow") ?? null,
     },
+    hud: new Map([...images].filter(([name]) => name.startsWith("hud_"))),
+    mobs: new Map([...images].filter(([name]) => name.startsWith("mob_"))),
     version: manifest.version,
   };
 }

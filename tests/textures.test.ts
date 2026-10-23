@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TILE } from "../src/atlas.js";
 import { BLOCKS, Block } from "../src/blocks.js";
+import { INDUSTRY_ITEM_TILES, INDUSTRY_TILES } from "../src/itemTextures.js";
 import { TILES, iconPixels, minecraftTiles, overlay, proceduralTiles, tint } from "../src/textures.js";
 
 /** A tile of one color. */
@@ -78,14 +79,22 @@ describe("Minecraft textures", () => {
 describe("the texture importer", () => {
   it("knows every texture Craft uses", () => {
     const script = new TextDecoder().decode(readFileSync(new URL("../scripts/import-textures.mjs", import.meta.url)));
-    // Wool is listed by color, tools and armor by material; the chest comes from its model's texture
+    // Wool and beds are listed by color, tools and armor by material; the chest comes from its model's
+    // texture, the orbs from their sheet
     for (const name of TILES) {
-      if (name.endsWith("_wool") || name.startsWith("chest_")) continue;
+      if (name.endsWith("_wool") || name.startsWith("chest_") || /^[a-z_]+_bed_(head|foot)_[a-z]+$/.test(name) || name.startsWith("experience_orb_") || name.startsWith("particle_") || /_stage\d$/.test(name)) continue;
       const item = name.replace(/^item_/, "");
       if (/_(pickaxe|axe|shovel|hoe|sword|helmet|chestplate|leggings|boots)$/.test(item)) continue;
+      // The industry's are Craft's own: there is nothing of them to import
+      if (INDUSTRY_TILES.includes(name) || INDUSTRY_ITEM_TILES.has(name)) continue;
       expect(script, name).toContain(`"${item}"`);
     }
     expect(script).toContain("_wool`");
+    expect(script).toContain("_bed_${f}`");
     expect(script).toContain("entity/chest/normal.png");
+    expect(script).toContain("entity/experience/experience_orb.png");
+    expect(script).toContain("[`particle_${n}`, [`particle/${n}.png`]]");
+    expect(script).toContain("`wheat_stage${i}`");
+    expect(script).toContain("`carrots_stage${i}`, `potatoes_stage${i}`");
   });
 });

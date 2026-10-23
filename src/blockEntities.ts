@@ -1,6 +1,7 @@
-import { Block, STATE_BLOCK, propertyOf, withProperties } from "./blocks.js";
+import { BLOCKS, Block, STATE_BLOCK, blockByName, propertyOf, stateByName, stateName, withProperties } from "./blocks.js";
+import { MACHINES } from "./machines.js";
 import { CHUNK_SIZE, type Chunk } from "./chunk.js";
-import { SMELT_TIME, fuelOf, smelt } from "./crafting.js";
+import { SMELT_TIME, fuelOf, smelt, smeltXp } from "./crafting.js";
 import { ITEMS, loadStack, saveStack, type ItemStack, type SavedStack } from "./items.js";
 
 /**
@@ -22,11 +23,52 @@ export interface FurnaceEntity {
   burnTotal: number;
   /** Ticks into smelting the input, up to SMELT_TIME. */
   cook: number;
+  /** Experience from what it smelted, given to whoever takes from the output (takeXp). */
+  xp: number;
 }
 
-export type BlockEntity = ChestEntity | FurnaceEntity;
+/** A hopper's five slots, and how long until it passes an item on again. */
+export interface HopperEntity {
+  kind: "hopper";
+  items: (ItemStack | null)[];
+  cooldown: number;
+}
+
+/** A block a piston is moving (see pistons.ts): what it will be, the way it goes, how far it has come. */
+export interface MovingEntity {
+  kind: "moving";
+  /** Always empty: a moving block holds nothing. */
+  items: (ItemStack | null)[];
+  state: number;
+  /** The way it goes (Dir) and how far it has come (0-1). */
+  dir: number;
+  progress: number;
+  /** Out of the piston (pushed, or the head going out), or back toward it. */
+  extending: boolean;
+  /** The piston's head (gone back in, it becomes nothing). */
+  head: boolean;
+  /** The game tick it started on: it moves from the next (not saved). */
+  since?: number;
+}
+
+/** A machine of the industry's (machines.ts): which, its slots, the energy (EU) it holds, how far its work is. */
+export interface MachineEntity {
+  kind: "machine";
+  /** Which machine: its block. */
+  block: number;
+  items: (ItemStack | null)[];
+  energy: number;
+  /** A processor's ticks into its work. */
+  progress: number;
+  /** A generator's ticks of burning left, and how many its fuel gave. */
+  burn: number;
+  burnTotal: number;
+}
+
+export type BlockEntity = ChestEntity | FurnaceEntity | HopperEntity | MovingEntity | MachineEntity;
 
 export const CHEST_SLOTS = 27;
+export const HOPPER_SLOTS = 5;
 export const FURNACE_INPUT = 0;
 export const FURNACE_FUEL = 1;
 export const FURNACE_OUTPUT = 2;
@@ -34,13 +76,23 @@ export const FURNACE_OUTPUT = 2;
 /** A new, empty entity for a block that has one, or null. */
 export function entityFor(block: number): BlockEntity | null {
   if (block === Block.Chest) return { kind: "chest", items: new Array(CHEST_SLOTS).fill(null) };
-  if (block === Block.Furnace) return { kind: "furnace", items: [null, null, null], burn: 0, burnTotal: 0, cook: 0 };
+  if (block === Block.Furnace) return { kind: "furnace", items: [null, null, null], burn: 0, burnTotal: 0, cook: 0, xp: 0 };
+  if (block === Block.Hopper) return { kind: "hopper", items: new Array(HOPPER_SLOTS).fill(null), cooldown: 0 };
+  if (block === Block.MovingPiston) return { kind: "moving", items: [], state: Block.Air, dir: 0, progress: 1, extending: true, head: false };
+  const machine = MACHINES.get(block);
+  if (machine) return { kind: "machine", block, items: new Array(machine.slots).fill(null), energy: 0, progress: 0, burn: 0, burnTotal: 0 };
   return null;
 }
 
+/** Whether a block's entity is made as soon as it is there (it works without anyone opening it): hoppers, machines. */
+export const madeAtOnce = (block: number): boolean => block === Block.Hopper || MACHINES.has(block);
+
+/** The block each kind of entity belongs to (machines: their own). */
+const BLOCK_OF: Readonly<Record<Exclude<BlockEntity["kind"], "machine">, number>> = { chest: Block.Chest, furnace: Block.Furnace, hopper: Block.Hopper, moving: Block.MovingPiston };
+
 /** Whether a state's block keeps the entity (a lit furnace is still a furnace). */
 export function keeps(entity: BlockEntity, state: number): boolean {
-  return STATE_BLOCK[state] === (entity.kind === "chest" ? Block.Chest : Block.Furnace);
+  return STATE_BLOCK[state] === (entity.kind === "machine" ? entity.block : BLOCK_OF[entity.kind]);
 }
 
 /** Whether the furnace's input smelts into what its output slot can take. */
@@ -77,11 +129,20 @@ export function furnaceTick(f: FurnaceEntity): boolean {
       f.items[FURNACE_INPUT] = input.count > 1 ? { ...input, count: input.count - 1 } : null;
       const output = f.items[FURNACE_OUTPUT];
       f.items[FURNACE_OUTPUT] = output ? { ...output, count: output.count + 1 } : { item: made, count: 1, damage: 0 };
+      f.xp += smeltXp(made);
     }
   } else {
     f.cook = 0;
   }
   return f.burn > 0 || canSmelt(f);
+}
+
+/** Takes the experience a furnace has kept: its whole points, and one more by chance for the fraction. */
+export function takeXp(f: FurnaceEntity, random: () => number): number {
+  const whole = Math.floor(f.xp);
+  const xp = whole + (random() < f.xp - whole ? 1 : 0);
+  f.xp = 0;
+  return xp;
 }
 
 /** The furnace's state for whether it burns. */
@@ -133,22 +194,62 @@ export interface SavedEntity {
   burn?: number;
   burnTotal?: number;
   cook?: number;
+  xp?: number;
+  /** A hopper's. */
+  cooldown?: number;
+  /** A machine's: which (its block's name), its energy and its work (and burn and burnTotal above). */
+  block?: string;
+  energy?: number;
+  /** A moving block's: what it will be (by name, as chunks keep blocks), the way and how far. */
+  state?: string;
+  dir?: number;
+  progress?: number;
+  extending?: boolean;
+  head?: boolean;
 }
 
 export function saveEntity(x: number, y: number, z: number, e: BlockEntity): SavedEntity {
   const items = e.items.map(saveStack);
-  return e.kind === "furnace" ? { x, y, z, kind: e.kind, items, burn: e.burn, burnTotal: e.burnTotal, cook: e.cook } : { x, y, z, kind: e.kind, items };
+  switch (e.kind) {
+    case "furnace":
+      return { x, y, z, kind: e.kind, items, burn: e.burn, burnTotal: e.burnTotal, cook: e.cook, xp: e.xp };
+    case "hopper":
+      return { x, y, z, kind: e.kind, items, cooldown: e.cooldown };
+    case "moving":
+      return { x, y, z, kind: e.kind, items: [], state: stateName(e.state), dir: e.dir, progress: e.progress, extending: e.extending, head: e.head };
+    case "machine":
+      return { x, y, z, kind: e.kind, block: BLOCKS[e.block].name, items, energy: e.energy, progress: e.progress, burn: e.burn, burnTotal: e.burnTotal };
+    default:
+      return { x, y, z, kind: e.kind, items };
+  }
 }
 
 /** A saved entity back, or null for a kind this Craft doesn't know. */
 export function loadEntity(s: SavedEntity): BlockEntity | null {
-  const fresh = entityFor(s.kind === "chest" ? Block.Chest : s.kind === "furnace" ? Block.Furnace : -1);
+  const block = s.kind === "machine" ? blockByName(String(s.block ?? "")) : s.kind in BLOCK_OF ? BLOCK_OF[s.kind as keyof typeof BLOCK_OF] : null;
+  const fresh = block !== null ? entityFor(block) : null;
   if (!fresh) return null;
   fresh.items = fresh.items.map((_, i) => loadStack(s.items?.[i]));
   if (fresh.kind === "furnace") {
     fresh.burn = Math.max(0, Number(s.burn) || 0);
     fresh.burnTotal = Math.max(fresh.burn, Number(s.burnTotal) || 0);
     fresh.cook = Math.max(0, Math.min(SMELT_TIME, Number(s.cook) || 0));
+    fresh.xp = Math.max(0, Number(s.xp) || 0);
+  } else if (fresh.kind === "hopper") {
+    fresh.cooldown = Math.max(0, Math.min(8, Math.floor(Number(s.cooldown) || 0)));
+  } else if (fresh.kind === "machine") {
+    const spec = MACHINES.get(fresh.block)!;
+    fresh.energy = Math.max(0, Math.min(spec.capacity, Number(s.energy) || 0));
+    fresh.progress = Math.max(0, Math.min(spec.time, Math.floor(Number(s.progress) || 0)));
+    fresh.burn = Math.max(0, Number(s.burn) || 0);
+    fresh.burnTotal = Math.max(fresh.burn, Number(s.burnTotal) || 0);
+  } else if (fresh.kind === "moving") {
+    // A block this Craft doesn't know arrives as nothing
+    fresh.state = stateByName(String(s.state ?? "air")) ?? Block.Air;
+    fresh.dir = Math.max(0, Math.min(5, Math.floor(Number(s.dir) || 0)));
+    fresh.progress = Math.max(0, Math.min(1, Number(s.progress) || 0));
+    fresh.extending = s.extending !== false;
+    fresh.head = s.head === true;
   }
   return fresh;
 }

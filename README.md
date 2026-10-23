@@ -6,11 +6,15 @@ A Minecraft-style voxel world in the browser, built on [Projector](https://githu
 
 Seeded terrain with 18 biomes, from deserts and jungles to snowy peaks, mountains with cliffs and
 overhangs, rivers, caves and ravines, ores by depth, dungeons, desert wells and ruins; walking, swimming
-and climbing; building with 121 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
+and climbing; building with about 150 blocks, slabs, stairs, fences, walls, panes, doors and plants among them;
 water and lava that flow, fall and harden where they meet; light levels with smooth lighting, torches and
-glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds. In survival you gather:
-blocks take time to break and drop as items, tools in five tiers break them faster, and you craft, smelt in
-furnaces and keep things in chests. In creative every block is at hand. Friends can join any world.
+glowstone; a 20-minute day with the sun, the moon in its phases, stars and clouds, and rain, snow and
+thunderstorms. In survival you gather: blocks take time to break and drop as items, tools in five tiers
+break them faster, and you craft, smelt in furnaces and keep things in chests; you get hungry, falls and
+lava hurt, and a bed brings you back. Fields grow wheat, carrots, potatoes, pumpkins and melons, animals
+breed, and redstone carries power from levers, buttons and plates to lamps, doors and pistons, while
+hoppers move items between chests and furnaces. Beyond Minecraft, generators, cables and machines turn
+tin, copper and rubber into an industry. In creative every block is at hand and you fly. Friends can join any world.
 
 ```sh
 npm install
@@ -18,12 +22,19 @@ npm run dev      # http://localhost:5173
 npm run check    # typecheck, tests, build
 ```
 
-The title screen lists your worlds: create one (in survival or creative) and play, or join a friend's.
-WASD moves, Space jumps (and swims up), Shift sprints. The left button breaks (hold it in survival); the
-right one places the held block, opens and shuts doors and trapdoors, and opens crafting tables, chests and
-furnaces. 1–9 or the wheel pick a hotbar slot, the middle button picks the block you aim at, E opens the
-inventory (every item in creative), Q throws the held item (Ctrl+Q the whole stack), Esc opens the game
-menu (options, save and quit).
+The title screen lists your worlds: create one (in survival, hardcore or creative, on a difficulty) and
+play, or join a friend's. WASD moves, Space jumps (and swims up), Shift sprints; in creative a double tap
+of Space flies (Space up, Shift down). The left button breaks (hold it in survival); the right one places
+the held block, opens and shuts doors and trapdoors, opens crafting tables, chests and furnaces, sleeps in
+beds, flips levers and presses buttons, tills with a hoe, spreads bone meal, and eats the food held (hold
+it). 1–9 or the wheel pick a hotbar slot, the middle button picks the
+block you aim at, E opens the inventory (every item in creative), Q throws the held item (Ctrl+Q the whole
+stack), Esc opens the game menu (options, difficulty, save and quit); a game played alone pauses there.
+The left button also hits the mob under the crosshair; the right one draws a held bow, shears a sheep, or
+feeds an animal its food.
+C sneaks, T opens the chat and / a command (`/help` lists them), F5 shows the player from behind and in
+front, F3 the debug screen. Every key can be changed in Options, as can the volumes, the hotbar's size,
+smooth lighting, view bobbing and the particles.
 
 <sub>The pictures here show Craft's own textures, painted in code. Minecraft's can be used instead on your
 own computer (see below).</sub>
@@ -52,9 +63,30 @@ the inventory's 2×2 grid, then sticks and a wooden pickaxe at the table's 3×3 
 to drop anything, iron ore a stone one, diamonds an iron one. Tools wear out. A furnace smelts ores, sand
 and logs with coal, charcoal or wood; a chest holds 27 stacks, two side by side 54. Items move as in
 Minecraft: the left button picks up and puts down stacks, the right one halves a stack or puts down one,
-shift moves a stack across, a double click gathers. About a hundred recipes: planks, sticks, tables,
-furnaces, chests, torches, tools and armor in every material, doors, stairs, slabs, panes, ladders, fences,
-walls and more. (Health, hunger and armor that protects come next, in Phase 6.)
+shift moves a stack across, a double click gathers. Recipes: planks, sticks, tables, furnaces,
+chests, torches, tools and armor in every material, beds in 16 colors, doors, stairs, slabs, panes, ladders,
+fences, walls, bowls and stew, redstone's parts and more (about 135).
+
+Staying alive goes as in Minecraft. Ten hearts: falls of more than three blocks hurt (half as much onto a
+bed, not at all into water), lava burns and sets you burning until water puts it out, you drown when your
+air runs out, and cacti, being shut in a block and the void hurt too; armor takes part of what lava and
+cacti do, wearing as it does. Running, jumping, swimming and breaking make you hungry; with 18 or more food
+you heal, at 6 or less you can't sprint, at none you starve (on easy to half your hearts, on normal to
+half a heart, on hard to death; peaceful feeds and heals you). Food is apples from oak leaves, melon slices
+from jungle melons, stew from mushrooms found in dark and damp places, and bread; a hungry player eats by
+holding the right button. Dungeons hold a chest or two: bread, apples, string to make wool, iron, gold,
+now and then diamonds. Ores of coal, gems and redstone give experience, as does smelting; the orbs fly to
+you and fill the bar over the hotbar.
+
+Nights are dangerous. In the dark (at night, in caves, near dungeon spawners) zombies, skeletons, creepers
+and spiders appear and find their way to you around walls and through open doors: zombies strike, skeletons
+shoot from a distance, creepers swell and blow holes in the ground, spiders climb walls and leap. Zombies
+and skeletons burn at dawn. Fight back with swords (and axes) by Minecraft's rules, hits strongest once the
+weapon has swung back, critical when falling; or with a bow (hold the right button to draw, release to
+shoot). Pigs, cows, sheep and chickens roam the grass: they give meat to cook in a furnace, leather,
+feathers and eggs, sheep wool when shorn (it grows back as they graze), and follow you when you hold wheat. Sleeping in a bed makes it home, and when everyone is in bed the
+night passes. Dying drops what you carried and some of your experience where you fell, and you start again
+at your bed or the world's spawn; in hardcore you have one life, then look on.
 
 | | |
 | --- | --- |
@@ -65,11 +97,52 @@ walls and more. (Health, hunger and armor that protects come next, in Phase 6.)
 
 Worlds from before game modes open in creative, as they were played.
 
+## Farms, weather and redstone
+
+Till grass or dirt with a hoe and plant seeds (grass drops them), carrots or potatoes: crops grow in the
+light, faster on farmland kept wet by water within four blocks or by the rain, and bone meal (from
+skeletons' bones) hurries them along, as it does saplings and grass. Pumpkin and melon stems put their
+fruit on the ground beside them. Don't jump on the field: landing hard tramples it. Feed two animals of a
+kind their food and they have a baby, which grows up in twenty minutes.
+
+The weather turns as in Minecraft: rain for a while every hour or two, snow where it is cold or high up,
+nothing in deserts. Rain grays the sky, wets fields and puts out fires; thunderstorms are dark enough for
+monsters by day and for sleeping, and lightning strikes. A night's sleep clears the sky, and `/weather`
+sets it.
+
+Redstone dust carries power from levers, buttons and pressure plates, a level weaker every block for
+fifteen blocks; repeaters pass it on at full strength after a delay of their own, redstone torches turn
+it around, and lamps, doors and trapdoors answer it. A torch feeding its own block back through a
+repeater makes a clock.
+
+Pistons push up to twelve blocks out of their way and break plants and the like at the end of the line;
+sticky ones, made with a slimeball, pull a block back. Slimes hop about swamps at night and deep down in
+some places; the big ones split when killed, the smallest drop slimeballs. Observers pulse when the block
+they watch changes, which makes farms that harvest themselves. Hoppers pass items from chests and
+furnaces above, or from the ground over them, into whatever they point at; comparators read how full a
+chest is, and compare or subtract signals.
+
+## Industry
+
+Beyond Minecraft, after the IndustrialCraft mods: machines run on energy (EU) that moves through cables.
+New worlds have tin ore, a little uranium deep down, and rubber trees in forests, jungles and swamps; a
+tree tap takes sticky resin from the amber spots on their trunks, and resin smelts into rubber. Smelt
+iron ingots again into refined iron, make a machine casing of it, insulate copper cable with rubber, and
+build electronic circuits and batteries from those.
+
+A generator burns coal (or anything a furnace burns) into energy; cables carry it (tin for low voltage,
+copper for medium, losing a little every block, bare copper shocking whoever touches it) to the machines:
+the macerator grinds an ore into two dusts that smelt into two ingots, the electric furnace smelts without
+fuel, the extractor makes rubber, the compressor packs snow, sand and clay. A battery box stores what
+they don't use and sends it out of its front; batteries carry energy to a machine's battery slot. A
+wrench turns machines, or takes them up whole when sneaking (broken, they leave only their casing), and
+an EU meter shows what a cable carries. Energy of a higher voltage than a machine takes blows it up.
+
 ## Worlds and saves
 
-Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests and furnaces
-hold and the items lying in it, the player and their inventory, the guests who played in it, and the
-world's clock. Craft saves every 30 seconds, when you open the game menu or switch tabs, and when you quit
+Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests, furnaces and
+hoppers hold and the items lying in it, the player and their inventory, the guests who played in it, and the
+world's clock and weather. Craft saves every 30 seconds, when you open the game menu or switch tabs, and when you quit
 to the title. A world open in one tab can't be opened in a second one. From the title screen you can
 rename, copy and delete worlds, and export one to a `.craftworld` file (or import such a file), to keep it
 elsewhere or move it to another browser. Options (render distance, field of view, mouse sensitivity,
@@ -127,8 +200,8 @@ flowchart LR
     subgraph Sim["Projector Simulation"]
       Player["Player<br/>(physics)"]
       Hands["BlockInteraction<br/>(break, place, use)"]
-      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces"]
-      Updates["BlockUpdates<br/>neighbors react"]
+      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays,<br/>pistons, hoppers,<br/>machines, energy"]
+      Updates["BlockUpdates<br/>neighbors react,<br/>redstone"]
       Drops["Dropped items"]
       Terrain["Terrain<br/>(chunk meshes)"]
       Sky["Sky, avatars,<br/>items, cracks"]
@@ -216,7 +289,7 @@ sequenceDiagram
   H->>G: welcome: world, mode, your place and inventory
   loop while playing
     H->>G: chunks nearby, block changes, players, items lying about, the time
-    G->>H: moves, actions (break, place, use), inventory, chests and furnaces
+    G->>H: moves, actions (break, place, use), inventory, chests, furnaces and machines
   end
 ```
 
@@ -230,7 +303,8 @@ blocks.
 ![The Canvas 2D renderer: flat-colored blocks and items](docs/images/canvas2d.jpg)
 
 URL options: `?seed=` plays a fresh world with that seed that isn't saved (Quick play, in survival, or
-creative with `&mode=creative`); `?view=16..160` and `?renderer=canvas|webgl` override the options for one
+creative with `&mode=creative`; `&difficulty=peaceful|easy|normal|hard`); `?view=16..160` and
+`?renderer=canvas|webgl` override the options for one
 page; `?textures=craft` uses Craft's own textures even where Minecraft's were imported.
 
 ## Minecraft's textures
@@ -244,13 +318,17 @@ npm run textures -- <file>          # a client jar or a resource pack zip
 ```
 
 This copies the block and item textures Craft needs (water and lava animated, the chest from its model's
-texture, the cracks of breaking), and the sun, the moon's phases and the clouds, into `textures/minecraft/`.
+texture, the cracks of breaking), the mobs', the players' skins, particles, the status bar, the sun, the
+moon's phases and the clouds, into `textures/minecraft/`, and from the version's assets (in `.minecraft`)
+the sounds Craft plays and a few music tracks.
 They belong to Mojang, so they stay on your machine: git ignores the folder and `npm run build` leaves it
 out (a built Craft always uses its own textures). Delete the folder to go back to them.
 
 ## Project
 
-- `src/`: the game. `docs/roadmap.md`: the plan, phase by phase, with what each one turned out to be.
+- `src/`: the game. `docs/roadmap.md`: the plan, phase by phase, with what each one turned out to be;
+  after pistons comes a technology tree after the IndustrialCraft mods, from a coal generator to a nuclear
+  reactor.
 - `api/`: the multiplayer endpoints (Vercel Functions, also served by the dev server).
 - `tests/`: Vitest, run by `npm test`; `tests/fixtures/` holds a saved world of every save format, which
   must keep opening.

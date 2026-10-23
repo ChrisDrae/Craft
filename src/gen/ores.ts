@@ -23,6 +23,9 @@ interface Ore {
 export const ORES: readonly Ore[] = [
   { block: Block.CoalOre, veins: 18, size: 16, lo: 5, hi: 160, peak: 95 },
   { block: Block.CopperOre, veins: 10, size: 10, lo: 0, hi: 100, peak: 50 },
+  // The industry's: tin about as common as copper, a little lower; uranium rare and deep
+  { block: Block.TinOre, veins: 8, size: 9, lo: 0, hi: 80, peak: 35 },
+  { block: Block.UraniumOre, veins: 0.6, size: 4, lo: 0, hi: 30, peak: 10 },
   { block: Block.IronOre, veins: 12, size: 9, lo: 0, hi: 80, peak: 30 },
   { block: Block.GoldOre, veins: 2.5, size: 9, lo: 0, hi: 40, peak: 12 },
   { block: Block.RedstoneOre, veins: 5, size: 8, lo: 0, hi: 18 },

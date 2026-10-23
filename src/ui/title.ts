@@ -4,6 +4,7 @@ import { FORMAT_VERSION, type GameMode, type WorldMeta } from "../save/format.js
 import type { WorldStore } from "../save/store.js";
 import { readWorldFile, writeWorldFile } from "../save/worldFile.js";
 import type { Settings } from "../settings.js";
+import { DIFFICULTIES, type Difficulty } from "../vitals.js";
 import { formatBytes, formatWhen, h } from "./dom.js";
 import { optionsScreen } from "./options.js";
 
@@ -12,8 +13,8 @@ export function worldUrl(id: string): string {
   return `?world=${encodeURIComponent(id)}`;
 }
 
-/** A new world's metadata; a blank seed gets a random one. */
-export function newWorld(name: string, seed: string, mode: GameMode = "survival"): WorldMeta {
+/** A new world's metadata; a blank seed gets a random one. Hardcore worlds are survival on hard. */
+export function newWorld(name: string, seed: string, mode: GameMode = "survival", difficulty: Difficulty = "normal", hardcore: boolean = false): WorldMeta {
   const now = Date.now();
   return {
     format: FORMAT_VERSION,
@@ -27,7 +28,10 @@ export function newWorld(name: string, seed: string, mode: GameMode = "survival"
     spawn: null,
     chunks: 0,
     bytes: 0,
-    mode,
+    mode: hardcore ? "survival" : mode,
+    difficulty: hardcore ? "hard" : difficulty,
+    hardcore,
+    weather: null,
   };
 }
 
@@ -116,7 +120,7 @@ export class TitleScreen {
             },
           },
           h("b", {}, w.name),
-          h("span", { class: "muted" }, `${w.mode === "creative" ? "Creative" : "Survival"} · Seed ${w.seed} · ${formatWhen(w.lastPlayed)} · ${formatBytes(w.bytes)}`),
+          h("span", { class: "muted" }, `${w.hardcore ? "Hardcore" : w.mode === "creative" ? "Creative" : "Survival"} · Seed ${w.seed} · ${formatWhen(w.lastPlayed)} · ${formatBytes(w.bytes)}`),
         ),
       ),
     );
@@ -187,12 +191,19 @@ export class TitleScreen {
     const seed = h("input", { placeholder: "Leave empty for a random one", maxLength: 64 });
     const mode = h(
       "select",
+      { onchange: () => (difficulty.disabled = mode.value !== "survival") },
+      h("option", { value: "survival" }, "Survival: gather, craft, stay alive"),
+      h("option", { value: "hardcore" }, "Hardcore: survival on hard, one life"),
+      h("option", { value: "creative" }, "Creative: every block at hand, flying"),
+    );
+    const difficulty = h(
+      "select",
       {},
-      h("option", { value: "survival" }, "Survival: gather, craft and build"),
-      h("option", { value: "creative" }, "Creative: every block at hand"),
+      ...DIFFICULTIES.map((d) => h("option", { value: d, selected: d === "normal" }, `${d[0].toUpperCase()}${d.slice(1)}`)),
     );
     const go = async (): Promise<void> => {
-      const meta = newWorld(name.value, seed.value, mode.value === "creative" ? "creative" : "survival");
+      const chosen = DIFFICULTIES.find((d) => d === difficulty.value) ?? "normal";
+      const meta = newWorld(name.value, seed.value, mode.value === "creative" ? "creative" : "survival", chosen, mode.value === "hardcore");
       await this.store!.putWorld(meta);
       location.href = worldUrl(meta.id);
     };
@@ -204,6 +215,7 @@ export class TitleScreen {
         h("label", { class: "field" }, h("span", {}, "World name"), name),
         h("label", { class: "field" }, h("span", {}, "Seed"), seed),
         h("label", { class: "field" }, h("span", {}, "Game mode"), mode),
+        h("label", { class: "field" }, h("span", {}, "Difficulty"), difficulty),
         h("div", { class: "buttons" }, h("button", { class: "primary", type: "submit" }, "Create"), h("button", { type: "button", onclick: () => void this.show() }, "Cancel")),
       ),
     );

@@ -56,12 +56,14 @@ export const SHAPED: readonly Shaped[] = [
     ["iron", "iron_ingot"],
     ["golden", "gold_ingot"],
     ["diamond", "diamond"],
+    ["bronze", "bronze_ingot"],
   ].flatMap(([prefix, material]) => Object.entries(TOOL_SHAPES).map(([kind, pattern]) => shaped(pattern, { M: material, S: "stick" }, `${prefix}_${kind}`))),
   ...[
     ["leather", "leather"],
     ["iron", "iron_ingot"],
     ["golden", "gold_ingot"],
     ["diamond", "diamond"],
+    ["bronze", "bronze_ingot"],
   ].flatMap(([prefix, material]) => Object.entries(ARMOR_SHAPES).map(([piece, pattern]) => shaped(pattern, { M: material }, `${prefix}_${piece}`))),
   shaped(["##", "##", "##"], { "#": "oak_planks" }, "oak_door", 3),
   shaped(["###", "###"], { "#": "oak_planks" }, "oak_trapdoor", 2),
@@ -96,11 +98,53 @@ export const SHAPED: readonly Shaped[] = [
   shaped(["###"], { "#": "sugar_cane" }, "paper", 3),
   shaped(["WWW"], { W: "wheat" }, "bread"),
   ...COLORS.map((c) => shaped(["##"], { "#": `${c}_wool` }, `${c}_carpet`, 3)),
+  ...COLORS.map((c) => shaped(["WWW", "PPP"], { W: `${c}_wool`, P: "#planks" }, `${c}_bed`)),
+  shaped(["# #", " # "], { "#": "#planks" }, "bowl", 4),
+  shaped([" #S", "# S", " #S"], { "#": "stick", S: "string" }, "bow"),
+  shaped(["F", "S", "E"], { F: "flint", S: "stick", E: "feather" }, "arrow", 4),
+  shaped([" #", "# "], { "#": "iron_ingot" }, "shears"),
+  shaped(["R", "S"], { R: "redstone", S: "stick" }, "redstone_torch"),
+  shaped(["S", "C"], { S: "stick", C: "cobblestone" }, "lever"),
+  shaped(["##"], { "#": "stone" }, "stone_pressure_plate"),
+  shaped(["##"], { "#": "#planks" }, "oak_pressure_plate"),
+  shaped(["T#T", "SSS"], { T: "redstone_torch", "#": "redstone", S: "stone" }, "repeater"),
+  shaped([" R ", "RGR", " R "], { R: "redstone", G: "glowstone" }, "redstone_lamp"),
+  shaped(["###", "CIC", "CRC"], { "#": "#planks", C: "cobblestone", I: "iron_ingot", R: "redstone" }, "piston"),
+  shaped(["S", "P"], { S: "slime_ball", P: "piston" }, "sticky_piston"),
+  shaped(["I I", "ICI", " I "], { I: "iron_ingot", C: "chest" }, "hopper"),
+  // Minecraft's observers and comparators take Nether quartz; until Craft has a Nether, an iron ingot
+  shaped(["CCC", "RRI", "CCC"], { C: "cobblestone", R: "redstone", I: "iron_ingot" }, "observer"),
+  // The industry: cables, the casing, circuits, batteries, the first machines and tools
+  shaped(["TTT"], { T: "tin_ingot" }, "tin_cable", 6),
+  shaped(["CCC"], { C: "copper_ingot" }, "copper_cable", 6),
+  shaped(["RRR", "R R", "RRR"], { R: "refined_iron_ingot" }, "machine_casing"),
+  shaped(["CCC", "RIR", "CCC"], { C: "insulated_copper_cable", R: "redstone", I: "refined_iron_ingot" }, "electronic_circuit"),
+  shaped([" C ", "TRT", "TRT"], { C: "insulated_copper_cable", T: "tin_ingot", R: "redstone" }, "battery"),
+  shaped(["B", "M", "F"], { B: "battery", M: "machine_casing", F: "furnace" }, "generator"),
+  shaped([" C ", "RFR"], { C: "electronic_circuit", R: "redstone", F: "furnace" }, "electric_furnace"),
+  shaped(["FFF", "SMS", " C "], { F: "flint", S: "cobblestone", M: "machine_casing", C: "electronic_circuit" }, "macerator"),
+  shaped(["TMT", "TCT"], { T: "tree_tap", M: "machine_casing", C: "electronic_circuit" }, "extractor"),
+  shaped(["S S", "SMS", "SCS"], { S: "stone", M: "machine_casing", C: "electronic_circuit" }, "compressor"),
+  shaped(["PCP", "BBB", "PPP"], { P: "#planks", C: "tin_cable", B: "battery" }, "battery_box"),
+  shaped([" P ", "PPP", "P  "], { P: "#planks" }, "tree_tap"),
+  shaped(["B B", "BBB", " B "], { B: "bronze_ingot" }, "wrench"),
+  shaped([" G ", "CRC", "C C"], { G: "glowstone_dust", C: "insulated_copper_cable", R: "redstone" }, "eu_meter"),
+  shaped([" T ", "TIT", "SSS"], { T: "redstone_torch", I: "iron_ingot", S: "stone" }, "comparator"),
+  shaped(["###", "###", "###"], { "#": "melon_slice" }, "melon"),
 ];
 
 export const SHAPELESS: readonly Shapeless[] = [
   ...WOODS.map((w) => shapeless([`${w}_log`], `${w}_planks`, 4)),
   shapeless(["paper", "paper", "paper", "leather"], "book"),
+  shapeless(["rubber_log"], "oak_planks", 3),
+  shapeless(["copper_cable", "rubber"], "insulated_copper_cable"),
+  shapeless(["copper_dust", "copper_dust", "copper_dust", "tin_dust"], "bronze_dust", 4),
+  shapeless(["brown_mushroom", "red_mushroom", "bowl"], "mushroom_stew"),
+  shapeless(["stone"], "stone_button"),
+  shapeless(["#planks"], "oak_button"),
+  shapeless(["bone"], "bone_meal", 3),
+  shapeless(["pumpkin"], "pumpkin_seeds", 4),
+  shapeless(["melon_slice"], "melon_seeds"),
 ];
 
 /** Whether an item fits an ingredient (a name or a #tag). */
@@ -174,7 +218,8 @@ export function craft(grid: readonly (ItemStack | null)[], width: number): ItemS
 function result(name: string, count: number): ItemStack {
   const item = itemByName(name);
   if (item === null) throw new Error(`No item ${name}`);
-  return { item, count, damage: 0 };
+  // What holds energy is made empty
+  return { item, count, damage: ITEMS[item].charge?.capacity ?? 0 };
 }
 
 /** What a furnace makes of an item, by name. */
@@ -188,13 +233,50 @@ const SMELTING: Readonly<Record<string, string>> = {
   sand: "glass",
   cobblestone: "stone",
   clay_ball: "brick",
+  porkchop: "cooked_porkchop",
+  beef: "cooked_beef",
+  chicken: "cooked_chicken",
+  mutton: "cooked_mutton",
+  potato: "baked_potato",
   ...Object.fromEntries(TAGS.logs.map((log) => [log, "charcoal"])),
+  rubber_log: "charcoal",
+  // The industry's: ores' dusts into ingots, iron refined, resin into rubber
+  raw_tin: "tin_ingot",
+  tin_ore: "tin_ingot",
+  iron_dust: "iron_ingot",
+  gold_dust: "gold_ingot",
+  copper_dust: "copper_ingot",
+  tin_dust: "tin_ingot",
+  bronze_dust: "bronze_ingot",
+  iron_ingot: "refined_iron_ingot",
+  sticky_resin: "rubber",
 };
 
 /** What a furnace makes of an item, or null if it doesn't smelt. */
 export function smelt(item: Item): Item | null {
   const out = SMELTING[ITEMS[item].name];
   return out ? itemByName(out) : null;
+}
+
+/** Experience a furnace keeps for each item it makes, by what it made, until someone takes the output. */
+const SMELT_XP: Readonly<Record<string, number>> = {
+  iron_ingot: 0.7,
+  gold_ingot: 1,
+  copper_ingot: 0.7,
+  glass: 0.1,
+  stone: 0.1,
+  brick: 0.3,
+  charcoal: 0.15,
+  cooked_porkchop: 0.35,
+  cooked_beef: 0.35,
+  cooked_chicken: 0.35,
+  cooked_mutton: 0.35,
+  baked_potato: 0.35,
+};
+
+/** The experience smelting gives per item made. */
+export function smeltXp(made: Item): number {
+  return SMELT_XP[ITEMS[made].name] ?? 0;
 }
 
 /** Ticks of furnace burning an item gives (0 if it doesn't burn). */

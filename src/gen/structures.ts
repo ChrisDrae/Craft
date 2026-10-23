@@ -1,7 +1,9 @@
 import { Biome } from "../biomes.js";
+import { CHEST_SLOTS, type ChestEntity } from "../blockEntities.js";
 import { Block, FLUID, stateOf } from "../blocks.js";
+import { itemByName, type ItemStack } from "../items.js";
 import { SEA_LEVEL } from "./climate.js";
-import { hash2, hash3 } from "./noise.js";
+import { Rng, hash2, hash3 } from "./noise.js";
 import type { ChunkWriter } from "./writer.js";
 
 /** What placing structures needs to know of the terrain, anywhere (not just in the chunk being made). */
@@ -45,6 +47,32 @@ function oldStone(x: number, y: number, z: number, seed: number): number {
   return r < 0.3 ? Block.MossyCobblestone : r < 0.5 ? Block.Cobblestone : r < 0.75 ? Block.StoneBricks : r < 0.9 ? Block.MossyStoneBricks : Block.CrackedStoneBricks;
 }
 
+/** What a dungeon's chests may hold: item, weight, fewest and most. */
+const DUNGEON_LOOT: ReadonlyArray<readonly [string, number, number, number]> = [
+  ["bread", 20, 1, 2],
+  ["wheat", 20, 1, 4],
+  ["string", 20, 1, 8],
+  ["apple", 15, 1, 3],
+  ["coal", 15, 1, 4],
+  ["redstone", 15, 1, 4],
+  ["iron_ingot", 10, 1, 4],
+  ["gold_ingot", 5, 1, 4],
+  ["diamond", 2, 1, 2],
+];
+
+/** A dungeon chest's loot: four to eight stacks in places of their own. */
+function dungeonChest(rng: Rng): ChestEntity {
+  const items: (ItemStack | null)[] = new Array(CHEST_SLOTS).fill(null);
+  const total = DUNGEON_LOOT.reduce((n, [, w]) => n + w, 0);
+  const rolls = rng.int(4, 8);
+  for (let r = 0; r < rolls; r++) {
+    let pick = rng.next() * total;
+    const [name, , lo, hi] = DUNGEON_LOOT.find(([, w]) => (pick -= w) < 0) ?? DUNGEON_LOOT[0];
+    items[rng.int(0, CHEST_SLOTS - 1)] = { item: itemByName(name)!, count: rng.int(lo, hi), damage: 0 };
+  }
+  return { kind: "chest", items };
+}
+
 const DUNGEON: StructureType = {
   name: "dungeon",
   region: 32,
@@ -57,7 +85,7 @@ const DUNGEON: StructureType = {
     return t.topAt(x, z) >= y + 12 ? { x, y, z, seed } : null;
   },
   build(w, { x, y, z, seed }) {
-    // A room of mossy cobblestone, 5 or 7 wide each way, with a spawner in the middle
+    // A room of mossy cobblestone, 5 or 7 wide each way, with a spawner in the middle and a chest or two by the walls
     const rx = 2 + (seed & 1);
     const rz = 2 + ((seed >> 1) & 1);
     for (let dy = -1; dy <= 4; dy++) {
@@ -70,6 +98,18 @@ const DUNGEON: StructureType = {
       }
     }
     w.set(x, y, z, Block.Spawner);
+    const rng = new Rng(seed ^ 0x10075);
+    // Against the west or east wall, and maybe the north or south one, facing into the room
+    const sides: Array<[number, number, string]> = [
+      rng.next() < 0.5 ? [-rx, rng.int(-rz + 1, rz - 1), "east"] : [rx, rng.int(-rz + 1, rz - 1), "west"],
+      rng.next() < 0.5 ? [rng.int(-rx + 1, rx - 1), -rz, "south"] : [rng.int(-rx + 1, rx - 1), rz, "north"],
+    ];
+    const chests = rng.next() < 0.5 ? 1 : 2;
+    for (const [dx, dz, facing] of sides.slice(0, chests)) {
+      const loot = dungeonChest(rng);
+      w.set(x + dx, y, z + dz, stateOf(Block.Chest, { facing }));
+      w.setEntity(x + dx, y, z + dz, loot);
+    }
   },
 };
 

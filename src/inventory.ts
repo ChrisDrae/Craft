@@ -163,11 +163,16 @@ export class Inventory {
 
   /** Wears the held tool by `uses`; it breaks when worn through. */
   wearHeld(uses: number = 1): void {
-    const held = this.held;
-    const durability = held ? ITEMS[held.item].durability : 0;
-    if (!held || durability === 0) return;
-    const damage = held.damage + uses;
-    this.slots[this.selected] = damage >= durability ? null : { ...held, damage };
+    this.wear(this.selected, uses);
+  }
+
+  /** Wears what is in a slot (a tool, armor) by `uses`; it breaks when worn through. */
+  wear(slot: number, uses: number): void {
+    const s = this.slots[slot];
+    const durability = s ? ITEMS[s.item].durability : 0;
+    if (!s || durability === 0) return;
+    const damage = s.damage + uses;
+    this.slots[slot] = damage >= durability ? null : { ...s, damage };
     this.onChange?.();
   }
 

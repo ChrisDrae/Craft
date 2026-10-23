@@ -1,9 +1,12 @@
 import { SimObject } from "projector";
 import type { Action } from "../actions.js";
+import type { Move } from "../pistons.js";
 import type { SavedEntity } from "../blockEntities.js";
 import { decodeBiomes } from "../biomes.js";
 import { loadStack, saveStack, type ItemStack, type SavedStack } from "../items.js";
-import type { GameMode } from "../save/format.js";
+import type { GameMode, PlayerLife } from "../save/format.js";
+import type { MobView } from "../mobs/mobs.js";
+import type { DamageSource, Difficulty } from "../vitals.js";
 import type { Chunk } from "../chunk.js";
 import { lightChunk } from "../light.js";
 import { decodeBlocks, decompress } from "../save/codec.js";
@@ -14,6 +17,18 @@ import { PROTOCOL_VERSION, REGISTRY, decode, encode, type DropView, type GuestSt
 
 /** Seconds between position updates sent to the host. */
 const MOVES = 0.05;
+
+/** What the host says first: the world, how it is played, and the player's state. */
+export interface Welcome {
+  world: string;
+  mode: GameMode;
+  difficulty: Difficulty;
+  hardcore: boolean;
+  /** Where players start, and come back to without a bed. */
+  spawn: { x: number; y: number; z: number };
+  weather: { rain: boolean; thunder: boolean };
+  you: GuestState;
+}
 
 export interface GuestOptions {
   world: VoxelWorld;
@@ -44,9 +59,33 @@ export class GuestSession extends SimObject {
   /** The items lying about nearby, as the host last said. */
   drops: DropView[] = [];
   /** Resolves with the world's name, how it is played and the player's state when the host welcomes us. */
-  readonly welcome: Promise<{ world: string; mode: GameMode; you: GuestState }>;
+  readonly welcome: Promise<Welcome>;
   /** Called with what the host handed over (an item picked up). */
   onGiven: ((stack: ItemStack) => void) | null = null;
+  /** Called with experience picked up. */
+  onXp: ((points: number) => void) | null = null;
+  /** Called with what everyone is told (who died). */
+  onNotice: ((text: string) => void) | null = null;
+  /** Called when the host changes the difficulty. */
+  onRules: ((difficulty: Difficulty) => void) | null = null;
+  /** Called in the morning, when the night passed with everyone asleep. */
+  onWake: (() => void) | null = null;
+  /** The mobs and arrows nearby as the host last said, and when it said so (performance.now()). */
+  mobs: MobView[] = [];
+  mobsAt: number = 0;
+  /** Called when a mob, arrow or explosion hurt the player (on the host). */
+  onHurt: ((amount: number, source: DamageSource, by: string, push: { x: number; y: number; z: number }) => void) | null = null;
+  /** Called when something blew up nearby. */
+  onExplosion: ((x: number, y: number, z: number, power: number) => void) | null = null;
+  /** Called with a sound to play there. */
+  onSound: ((event: string, x: number, y: number, z: number, category: string) => void) | null = null;
+  /** Called when it starts or stops raining or storming, and when lightning strikes. */
+  onWeather: ((rain: boolean, thunder: boolean) => void) | null = null;
+  onLightning: ((x: number, y: number, z: number) => void) | null = null;
+  /** Called when pistons start moving blocks. */
+  onMoving: ((moves: Move[]) => void) | null = null;
+  /** Called when someone else broke, placed or used a block nearby. */
+  onEffect: ((kind: "break" | "place" | "use" | "grow", x: number, y: number, z: number, state: number) => void) | null = null;
   /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
   onContainer: ((x: number, y: number, z: number, entity: SavedEntity | null) => void) | null = null;
   /** Called when the host says goodbye or the link breaks, after the welcome. */
@@ -61,7 +100,7 @@ export class GuestSession extends SimObject {
   private moveTimer: number = 0;
   private lastMove: string = "";
   private dropped: Array<[number, number]> = [];
-  private resolveWelcome!: (w: { world: string; mode: GameMode; you: GuestState }) => void;
+  private resolveWelcome!: (w: Welcome) => void;
   private rejectWelcome!: (e: Error) => void;
 
   constructor(conn: Connection, options: GuestOptions) {
@@ -94,7 +133,15 @@ export class GuestSession extends SimObject {
       case "welcome":
         this.welcomed = true;
         this.options.ticks.time = msg.time;
-        this.resolveWelcome({ world: msg.world, mode: msg.mode === "creative" ? "creative" : "survival", you: msg.you });
+        this.resolveWelcome({
+          world: msg.world,
+          mode: msg.mode === "creative" ? "creative" : "survival",
+          difficulty: msg.difficulty ?? "normal",
+          hardcore: msg.hardcore === true,
+          spawn: msg.spawn,
+          weather: msg.weather ?? { rain: false, thunder: false },
+          you: msg.you,
+        });
         return;
       case "refused":
         this.rejectWelcome(new Error(msg.reason));
@@ -125,8 +172,43 @@ export class GuestSession extends SimObject {
       case "given": {
         const s = loadStack(msg.item);
         if (s) this.onGiven?.(s);
+        if (Number(msg.xp) > 0) this.onXp?.(Math.floor(Number(msg.xp)));
         return;
       }
+      case "notice":
+        this.onNotice?.(String(msg.text));
+        return;
+      case "rules":
+        this.onRules?.(msg.difficulty);
+        return;
+      case "wake":
+        this.onWake?.();
+        return;
+      case "mobs":
+        this.mobs = msg.mobs;
+        this.mobsAt = performance.now();
+        return;
+      case "hurt":
+        this.onHurt?.(Number(msg.amount) || 0, msg.source, String(msg.by ?? ""), msg.push);
+        return;
+      case "explosion":
+        this.onExplosion?.(msg.x, msg.y, msg.z, msg.power);
+        return;
+      case "sound":
+        this.onSound?.(String(msg.event), msg.x, msg.y, msg.z, String(msg.category));
+        return;
+      case "effect":
+        this.onEffect?.(msg.kind, msg.x, msg.y, msg.z, msg.state);
+        return;
+      case "weather":
+        this.onWeather?.(msg.rain === true, msg.thunder === true);
+        return;
+      case "lightning":
+        this.onLightning?.(msg.x, msg.y, msg.z);
+        return;
+      case "moving":
+        if (Array.isArray(msg.moves)) this.onMoving?.(msg.moves.map(([x, y, z, state, dir, flags]) => ({ x, y, z, state, dir, extending: (flags & 1) !== 0, head: (flags & 2) !== 0 })));
+        return;
       case "container":
         this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);
         return;
@@ -146,6 +228,41 @@ export class GuestSession extends SimObject {
   /** Tells the host what the player carries (it keeps it for the next visit). */
   inventory(slots: readonly (ItemStack | null)[], selected: number): void {
     this.send({ t: "inventory", inventory: slots.map(saveStack), selected });
+  }
+
+  /** Tells the host how the player is (for keeping). */
+  life(life: PlayerLife): void {
+    this.send({ t: "life", ...life });
+  }
+
+  /** Tells the host the player died (by what), and how much experience they leave. */
+  died(cause: DamageSource, killer: string | null, xp: number): void {
+    this.send({ t: "died", cause, killer, xp });
+  }
+
+  /** Hits a mob on the host's side. */
+  attack(id: number, damage: number, crit: boolean, knockback: number): void {
+    this.send({ t: "attack", id, damage, crit, knockback });
+  }
+
+  /** Looses an arrow on the host's side. */
+  shoot(from: { x: number; y: number; z: number }, velocity: { x: number; y: number; z: number }, crit: boolean): void {
+    this.send({ t: "shoot", x: from.x, y: from.y, z: from.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, crit });
+  }
+
+  /** Says something to everyone. */
+  chat(text: string): void {
+    this.send({ t: "chat", text });
+  }
+
+  /** Uses the held item on a mob (shears). */
+  useMob(id: number, held: ItemStack | null): void {
+    this.send({ t: "useMob", id, held: saveStack(held) });
+  }
+
+  /** Tells the host the player lay down in a bed, or got up. */
+  sleep(asleep: boolean): void {
+    this.send({ t: "sleep", asleep });
   }
 
   /** Asks for an item lying about, as much as fits (`max`). */

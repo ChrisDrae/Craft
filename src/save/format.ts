@@ -1,7 +1,10 @@
 import type { SavedEntity } from "../blockEntities.js";
 import { BLOCKS, HOTBAR } from "../blocks.js";
 import type { SavedDrop } from "../drops.js";
+import type { SavedMob } from "../mobs/mobs.js";
 import type { SavedStack } from "../items.js";
+import { FRESH_VITALS, type Difficulty, type PlayMode, type SavedVitals } from "../vitals.js";
+import type { SavedWeather } from "../weather.js";
 
 /**
  * Version of the save format. Every record carries the version that wrote it: older records are migrated
@@ -14,8 +17,16 @@ import type { SavedStack } from "../items.js";
  * 4. Guests: the players who joined the world from elsewhere, each by their id.
  * 5. Items: worlds have a game mode, players and guests an inventory (instead of a hotbar of block
  *    names), chunks their chests' and furnaces' contents and the items lying in them.
+ * 6. Survival: worlds have a difficulty and may be hardcore; players and guests their health, hunger and
+ *    experience, the bed they sleep in, and whether they fly or look on (dead in hardcore); chunks the
+ *    orbs of experience lying in them, and furnaces the experience they keep.
+ * 7. Mobs: chunks keep the animals in them.
+ * 8. Commands: players and guests may have a game mode and a spawn point of their own.
+ * 9. Weather: worlds keep theirs; animals may be babies.
+ * 10. Pistons and hoppers: chunks keep what hoppers hold and the blocks pistons are moving.
+ * 11. The industry: chunks keep machines (their energy, slots and work); batteries their charge.
  */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 11;
 
 /** How a world is played: gathering and crafting, or with every block at hand. */
 export type GameMode = "survival" | "creative";
@@ -45,9 +56,28 @@ export interface WorldMeta {
   chunks: number;
   bytes: number;
   mode: GameMode;
+  difficulty: Difficulty;
+  /** One life: a player who dies looks on, and the difficulty stays hard. */
+  hardcore: boolean;
+  /** Rain and storms, and when they come and go; null for weather still to be decided. */
+  weather: SavedWeather | null;
 }
 
-export interface PlayerRecord {
+/** What a player is besides where they are and what they carry. */
+export interface PlayerLife {
+  vitals: SavedVitals;
+  /** The bed they last slept in (its head), where they come back after dying, or null for the world's spawn. */
+  bed: Position | null;
+  /** Died in a hardcore world: they look on. */
+  spectating: boolean;
+  flying: boolean;
+  /** Their own game mode (/gamemode), or null for the world's. */
+  mode: PlayMode | null;
+  /** Their own spawn point (/spawnpoint), used when they have no bed, or null for the world's. */
+  spawn: Position | null;
+}
+
+export interface PlayerRecord extends PlayerLife {
   format: number;
   /** The world's id. */
   world: string;
@@ -62,7 +92,7 @@ export interface PlayerRecord {
 }
 
 /** A player who joined the world from another browser, kept for when they come back. */
-export interface GuestRecord {
+export interface GuestRecord extends PlayerLife {
   format: number;
   /** The world's id. */
   world: string;
@@ -102,8 +132,10 @@ export interface ChunkRecord {
   ticks: SavedTick[];
   /** What its chests and furnaces hold. */
   entities: SavedEntity[];
-  /** The items lying in it. */
+  /** The items and orbs of experience lying in it. */
   drops: SavedDrop[];
+  /** The animals in it. */
+  mobs: SavedMob[];
 }
 
 /** A save written by a newer Craft than this one. */
@@ -126,15 +158,20 @@ function hotbarInventory(r: { format: number; hotbar?: string[] }): { format: nu
   return { ...next(rest), inventory };
 }
 
+/** A player from before survival: alive and well, with nothing learned. */
+const fresh = (r: { format: number }) => ({ ...next(r), vitals: { ...FRESH_VITALS }, bed: null, spectating: false, flying: false });
+/** A player from before commands: the world's game mode and spawn. */
+const own = (r: { format: number }) => ({ ...next(r), mode: null, spawn: null });
+
 const MIGRATIONS: Record<RecordKind, Migration<{ format: number }>[]> = {
-  // Worlds from before game modes were played with every block at hand
-  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" })],
+  // Worlds from before game modes were played with every block at hand; from before difficulty, normal
+  world: [next, next, next, (r) => ({ ...next(r), mode: "creative" }), (r) => ({ ...next(r), difficulty: "normal", hardcore: false }), next, next, (r) => ({ ...next(r), weather: null }), next, next],
   // Players from before the hotbar could change get the hotbar it had; their hotbar becomes their inventory
-  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory],
-  // Chunks from before biomes were all made like plains; from before items they hold none
-  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] })],
+  player: [(r) => ({ ...next(r), hotbar: HOTBAR.map((b) => BLOCKS[b].name) }), next, next, hotbarInventory, fresh, next, own, next, next, next],
+  // Chunks from before biomes were all made like plains; from before items they hold none, nor animals
+  chunk: [next, (r) => ({ ...next(r), biomes: "" }), next, (r) => ({ ...next(r), entities: [], drops: [] }), next, (r) => ({ ...next(r), mobs: [] }), next, next, next, next],
   // Guests came with format 4
-  guest: [next, next, next, hotbarInventory],
+  guest: [next, next, next, hotbarInventory, fresh, next, own, next, next, next],
 };
 
 export type RecordKind = "world" | "player" | "chunk" | "guest";

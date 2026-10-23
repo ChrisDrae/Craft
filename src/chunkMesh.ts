@@ -26,6 +26,9 @@ const CORNER_UVS: Float32Array = Float32Array.from(
   Array.from({ length: 24 }, (_, i) => cornerUV(Math.floor(i / 4), CORNERS[i * 3], CORNERS[i * 3 + 1], CORNERS[i * 3 + 2])).flat(),
 );
 
+/** How chunks are meshed: smooth light with shaded corners (Minecraft's smooth lighting), or a light per face (Options). */
+export const MESHING = { smooth: true };
+
 /** How dark each face direction is drawn, as in Minecraft: tops full, bottoms half, the sides between. */
 export const SHADE = [0.6, 0.6, 1, 0.5, 0.8, 0.8];
 /** Brightness at a corner with 0-3 of its neighbors blocking (ambient occlusion). */
@@ -326,6 +329,11 @@ function cubeCorners(x: number, y: number, z: number, d: number, occlude: boolea
   const fy = Math.min(y + DIR[d][1], WORLD_HEIGHT - 1);
   const fz = z + DIR[d][2];
   const front = at(fx, fy, fz);
+  if (!MESHING.smooth) {
+    flatLight(front);
+    occlusion.fill(0);
+    return;
+  }
   for (let k = 0; k < 4; k++) {
     const c = d * 12 + k * 3;
     const su = CORNERS[c + ua] > 0 ? 1 : -1;
@@ -400,9 +408,12 @@ function build(chunk: Chunk, tiles: TileUVs, translucent: boolean, capacity: num
         // Sides show the part of the texture as high as they are, not squeezed
         const u = CORNER_UVS[(d * 4 + k) * 2];
         const v = d === 2 || d === 3 ? CORNER_UVS[(d * 4 + k) * 2 + 1] : 1 - cy;
-        const turned = FACE_TURN[state * 6 + d] === 1;
-        cornerU[k] = turned ? v : u;
-        cornerV[k] = turned ? 1 - u : v;
+        // Turned a quarter at a time: (u, v) to (v, 1 - u)
+        let tu = u;
+        let tv = v;
+        for (let t = FACE_TURN[state * 6 + d]; t > 0; t--) [tu, tv] = [tv, 1 - tu];
+        cornerU[k] = tu;
+        cornerV[k] = tv;
       }
       // Split the quad along the diagonal whose corners are least alike in occlusion, so it shades evenly
       const first = occlusion[0] + occlusion[2] > occlusion[1] + occlusion[3] ? 1 : 0;

@@ -1,11 +1,13 @@
 # Craft roadmap
 
-A plan for giving Craft Minecraft's principal features, save games included. Written on 2026-10-22 against
-`feature/textures` (7a6fdea).
+A plan for giving Craft Minecraft's principal features, save games included, and then a technology tree
+after the IndustrialCraft mods (added on 2026-10-23). Written on 2026-10-22 against `feature/textures`
+(7a6fdea).
 
 - [Where Craft stands](#where-craft-stands) and the [principles](#principles) every phase follows
 - [1. Feature inventory](#1-feature-inventory): Minecraft's features, what Craft has, and the phase for the rest
-- [2. Phases at a glance](#2-phases-at-a-glance) and [3. the phases](#3-phases) in build order
+- [2. Phases at a glance](#2-phases-at-a-glance) and [3. the phases](#3-phases) in build order, the
+  [industry's technology tree](#industry-a-technology-tree-phases-11-to-16) among them
 - [4. What Projector needs](#4-what-projector-needs): rendering features that belong in the framework
 - [5. Decisions](#5-decisions)
 
@@ -83,12 +85,20 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | | AI and pathfinding | — | 7 |
 | | Combat: melee, bows, knockback, explosions | — | 7 |
 | | Breeding, taming | — | 9, L |
+| | Slimes | — | 10 |
 | | Villagers and trading | — | L |
 | Simulation | Game ticks: scheduled and random | — | 0 |
 | | Growth, spreading, leaf decay, farming | — | 9 |
-| | Redstone | — | 9 (basics), L |
+| | Redstone | — | 9 (basics), 10 (pistons, hoppers, comparators), L |
 | | Fire | — | L |
 | | Boats, minecarts, horses | — | L |
+| Industry (beyond Minecraft) | Energy: generators, cables, transformers, stores | — | 11, 12 |
+| | Machines: macerator, extractor, compressor, electric furnace | — | 11 |
+| | Solar, wind, water and geothermal power | — | 12 |
+| | Advanced machines, upgrades, automation | — | 13 |
+| | Electric tools, jetpack, nano suit, the miner | — | 14 |
+| | Nuclear reactors | — | 15 |
+| | UU-matter, quantum suit, teleporters, terraformers | — | 16 |
 | Saves and UI | Several worlds, saving, autosave | — (lost on reload) | 1 |
 | | Title, world list and pause menus | ◐ start overlay | 1 |
 | | Settings and key bindings | ◐ URL parameters | 1, 8 |
@@ -118,6 +128,13 @@ A plan for giving Craft Minecraft's principal features, save games included. Wri
 | 7 | Mobs and combat | L | 6 |
 | 8 | Feel: sound, particles, hand, camera, UI | M | parts any time |
 | 9 | Farming, weather, redstone basics | L | 5, 7 |
+| 10 | Pistons, hoppers and comparators | M | 9 |
+| 11 | Industry I: energy, cables, the generator and the first machines | L | 9, 10 |
+| 12 | Industry II: solar, wind, water and geothermal power; transformers | M | 11 |
+| 13 | Industry III: advanced machines, upgrades, automation | L | 12 |
+| 14 | Industry IV: electric tools and armor, the miner | M | 12 |
+| 15 | Industry V: nuclear power | L | 13, 14 |
+| 16 | Industry VI: UU-matter, quantum suit, teleporters, terraformers | M | 15 |
 | L | Later: Nether, enchanting, brewing, villagers, transport | | |
 
 Sizes are relative effort (S, M, L), not dates. Each phase is planned in detail when it starts.
@@ -419,7 +436,7 @@ start rather than fitted to it later.
   up. New worlds pick one, older ones are creative (save format 5), quick play takes `&mode=creative`.
 - Items (`src/items.ts`): every block, 25 materials and foods, 25 tools in five tiers (gold as fast as
   Minecraft's and as weak), 16 pieces of armor (worn in their slots; protection comes with health in
-  Phase 6). Not yet: buckets, shears, flint and steel, beds (Phase 6), food that can be eaten (Phase 6).
+  Phase 6). Not yet: buckets, shears, flint and steel; beds and food came in Phase 6.
 - Inventory (`src/inventory.ts`): 36 slots, 4 armor slots and an off-hand slot (kept, not used yet).
   Minecraft's clicks: pick up, put down, swap, halve, one at a time, shift to move across, double click to
   gather; not yet dragging to spread a stack.
@@ -475,6 +492,42 @@ start rather than fitted to it later.
 
 ### Phase 6: Survival and game modes (M)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Game modes per world: survival, creative (flying: a double tap of Space, Shift to go down, as Craft's
+  sprint key is Shift) and hardcore (survival on hard, one life; after dying the player looks on as a
+  spectator, flying through blocks). Chosen when the world is made; no switching in a world yet.
+- Health (`src/vitals.ts`, `src/survival.ts`): Minecraft's rules. Falls (a point per block beyond three,
+  half onto a bed, none into water or onto a ladder), drowning, lava (4, and burning for 15 seconds, put
+  out by water), burning, suffocating, cactus and the void; half a second in which only a harder hit lands;
+  a red flash, hearts that flash when hit and shake when nearly gone, flames on screen while burning. The
+  death screen gives the cause and score; what the player carried and 7 points of experience per level
+  (100 at most) fall where they died; they come back at their bed (beside it, if there's room) or the
+  world's spawn. Creative takes only the void, spectators nothing. Fire blocks: not yet.
+- Hunger: Minecraft's exhaustion (sprinting, swimming, jumping, breaking, hurts), saturation, healing (from
+  18, quickly at 20 with saturation), starving by difficulty, no sprinting at 6 or less. Food came short
+  before monsters, so came: melons in jungles (slices), mushrooms in dark forests, swamps and taigas, bowls
+  and mushroom stew, and loot chests in dungeons (bread, wheat, apples, string for wool and so beds, coal,
+  iron, gold, redstone, diamonds). Generator version 3.
+- Armor: Minecraft's points and toughness, against lava and cactus (falls, drowning and the rest go through
+  armor in Minecraft too); every piece wears a use per 4 damage.
+- Beds in the 16 colors, from wool and planks: two blocks long, the head the way the player looks; using
+  one makes it home, at night the player lies down, and when every player sleeps for 5 seconds morning
+  comes. Waking with Space or Shift, or a hit. Minecraft 26 draws beds as block models with textures of
+  their own, which are imported; Craft's world is Minecraft's mirrored, so the sides swap.
+- Experience: orbs from coal, diamond, emerald, lapis and redstone ores and from smelting (the furnace keeps
+  it until its output is taken); they fly to the nearest player within 8 blocks; Minecraft's levels.
+- Difficulty: peaceful, easy, normal, hard, set when the world is made and from the game menu (hard in
+  hardcore); for now it decides hunger and starving, damage waits for monsters (Phase 7).
+- The status bar (`src/ui/hud.ts`) uses Minecraft's sprites when imported (gui/sprites/hud), its own
+  drawings otherwise.
+- A game played alone pauses under its game menu, as Minecraft's; a shared one goes on.
+- Multiplayer (protocol 3): a guest's own physics runs on their side, so they feel their own hurts and
+  send their vitals to the host for keeping; deaths are told to everyone; orbs fly to guests; difficulty
+  changes reach them; the night passes when host and guests all sleep.
+- Save format 6: difficulty and hardcore; players' and guests' vitals, beds, flying and spectating; orbs in
+  chunks; furnaces' experience.
+
+
 - **Game modes** per world: survival and creative, and hardcore as an option. Creative flies (double-tap
   Space), breaks instantly, has endless blocks and takes no damage.
 - **Health:** 20 points (10 hearts). Damage from falling (1 per block beyond 3), drowning (15 s of air, then 2
@@ -493,6 +546,39 @@ start rather than fitted to it later.
 - **Tests:** damage rules per source, hunger and regeneration over ticks, respawn, game mode rules.
 
 ### Phase 7: Mobs and combat (L)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- Models (`src/mobs/models.ts`): Minecraft's part and box definitions ported as they are (texture corners,
+  pivots, rest rotations), mapped into Craft's mirrored world by turning every axis over, so Minecraft's
+  entity textures fit unmirrored; imported from the player's installation (mob_*), Craft paints its own
+  skins on the same layouts otherwise. Each mob is one mesh posed on the CPU every frame (a draw call a
+  mob, shading and the red of a hit in the corner colors), so instancing (R19) wasn't needed.
+- AI (`src/mobs/mobs.ts`): goals in Minecraft's order per kind rather than a general goal system. A* paths
+  (`src/mobs/path.ts`): stepping up a block, dropping up to three, swimming, through open doors,
+  diagonally where both sides are clear, 600 nodes a search, the nearest point when the goal can't be
+  reached. Monsters notice a player within 16 blocks they can see and follow to 32; zombies strike,
+  skeletons keep their distance, strafe and shoot (aimed as Minecraft's), creepers stop, swell for 1.5
+  seconds and blow up (calming down when the player gets away), spiders climb walls, leap, and leave
+  players alone in the light unless hit. Zombies and skeletons burn under the open sky by day.
+- Animals wander, run when hit, follow wheat (cows, sheep, chickens; pigs follow apples until carrots come
+  with farming in Phase 9); sheep have Minecraft's natural colors, are sheared for 1 to 3 wool and grow it
+  back eating grass; chickens lay eggs every 5 to 10 minutes. No breeding yet; no dyeing sheep (no dyes).
+- Spawning: monsters where Minecraft's rule allows (no block light, sky light dimmed by night at most 0 to 7,
+  in groups, 24 to 64 blocks from players, 24 at most), going when far away; animals on grass in daylight
+  (12 at most) and staying; dungeon spawners (zombie, skeleton or spider by position, up to six around).
+- Combat: Minecraft's damage by weapon and its attack cooldown, critical hits falling, knockback (more when
+  sprinting), the hit window for mobs as for players; bows that draw over a second and fire arrows that
+  fall, do damage by speed, stick and can be picked up; explosions by Minecraft's ray method (blast
+  resistance per block, drops one in power, damage by distance and exposure). Monster damage scales with
+  difficulty; armor counts against mobs, arrows and explosions.
+- New items: raw and cooked pork, beef, chicken and mutton, rotten flesh, spider eyes (food without their
+  effects yet), bones, gunpowder, feathers, eggs, arrows, bows, shears. TNT and bone meal wait for Phase 9.
+- Ticking: 20 a second in the world's ticks, drawn between ticks; mobs beyond 96 blocks of every player
+  stand still. Animals are saved with their chunk (save format 7), monsters aren't.
+- Multiplayer (protocol 4): the host runs the mobs and sends each guest those near them ten times a second,
+  which the guest moves smoothly between updates; guests' hits, shots and shears go to the host, which
+  checks their reach; mobs and explosions hurt guests by a message; monsters go after guests too.
+
 
 - **Models:** mobs are boxes in a hierarchy (body, head, legs) shaped like Minecraft's, as Projector mesh
   nodes under one object, so imported entity textures fit them; drawn textures otherwise. Legs swing with the
@@ -516,6 +602,37 @@ start rather than fitted to it later.
   blocks.
 
 ### Phase 8: Feel: sound, particles, hand, camera, UI (M)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- Sound (`src/audio.ts`): Web Audio, events by Minecraft's names from its sounds.json, copied out of the
+  version's asset index by `npm run textures` (241 files, 23 MB with eight music tracks; music for a world
+  in its own 'music.creative' or 'music.game'). Positional within 16 blocks, a volume per kind (master,
+  music, blocks, monsters, animals, players, ambient). Footsteps by the block underfoot every 1.67 blocks,
+  breaking, placing, mining hits, doors, chests, furnaces crackling, lava popping, eating and burping,
+  picking up, experience and levels, hurts and falls, splashes, bows and arrows, mobs calling, hurt and
+  dying, creepers' fuses, explosions, caves; music every 10 to 20 minutes. Without imported sounds Craft
+  makes small ones of its own and plays no music.
+- Particles (`src/particles.ts`): one mesh of camera-facing quads (one draw call, so Projector's R18 wasn't
+  needed): block pieces with the block's texture, mining bits, sprint dust, splashes, torch and furnace
+  smoke and flames (from blocks near the player picked at random, as Minecraft's), explosions, critical
+  hits, crumbs while eating, lava drops. Minecraft's particle textures when imported. WebGL only.
+- The hand (`src/hand.ts`): the arm (in the player's skin) or the held item, on Projector's new Front layer
+  (R15, Projector 0.5.0: drawn last over a cleared depth buffer); it swings, dips when the item changes,
+  raises food while eating and draws a bow back.
+- Camera (`src/camera.ts`): Minecraft's bobbing, a wider view sprinting and flying, a tilt when hurt, and F5
+  for third person behind and in front, as near as walls allow, showing the player's model.
+- Players are drawn with Minecraft's player model now (overlay layers included), in Minecraft's nine
+  default skins by id when imported, Craft's own skin in their shirt color otherwise.
+- Sneaking (C by default, as Craft's sprint is Shift): a third of the speed, the eyes lower, no stepping
+  off edges, holding on to ladders. Vines grow on jungle and swamp trees and are climbed (generator 4).
+- F3 shows frames, the renderer's work, position, block and chunk, facing, biome, light, time, the block
+  looked at, loaded chunks and mobs.
+- Chat (T) and commands (/): /gamemode, /time, /tp, /give, /kill, /spawnpoint, /seed, /difficulty, /summon,
+  /weather (with Phase 9), /help; for the world's host (not guests, not hardcore). A player's own game
+  mode and spawn point are saved (save format 8).
+- Options: volumes, the hotbar's size, smooth lighting, view bobbing, FOV effects, particles, and every key.
+- Multiplayer (protocol 5): chat; sounds and the pieces of others' broken blocks reach the players near.
+
 
 Parts of this phase can come at any point; sound in particular depends on nothing else.
 
@@ -542,6 +659,43 @@ Parts of this phase can come at any point; sound in particular depends on nothin
 
 ### Phase 9: Farming, weather, redstone basics (L)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Random ticks (`src/growth.ts`): grass spreads to lit dirt and dies under blocks, leaves more than six
+  blocks from a log (through leaves) decay and drop, saplings grow into oaks (now and then a big one),
+  cacti and sugar cane grow three high, ice and snow melt near light; where it snows (cold biomes, and
+  anywhere above y 150) still water freezes and snow settles while it snows. Leaves a player places are
+  marked persistent and never decay; leaves placed before this phase load as not persistent and may.
+- Farming: hoes till grass and dirt into farmland, wet within four blocks of water or in the rain, drying
+  out without, and back to dirt when dry and bare or covered; landing on it hard tramples it (players, and
+  mobs bigger than chickens and babies). Grass drops seeds (1 in 8), zombies now and then a carrot or a
+  potato. Wheat, carrots and potatoes grow in eight stages by Minecraft's formula (light 9 or more, faster
+  on wet farmland and beside more farmland); pumpkin and melon stems put their fruit on the ground beside
+  them. Bone meal (from bones) grows a crop two to five stages, a sapling into a tree, grass and flowers
+  around grass. Baked potatoes.
+- Breeding: animals fed their food (cows and sheep wheat, pigs carrots and potatoes, chickens seeds) fall in
+  love, hearts over them, and find a partner; the baby is half the size and grows up in 20 minutes (a
+  tenth sooner for every feed). Lambs have no wool to shear.
+- Weather (`src/weather.ts`, `src/rain.ts`): Minecraft's cycle, clear for 10 to 150 minutes and rain for 10
+  to 20, thunder on a timer of its own; rain or snow by biome and height (nothing in deserts and savannas),
+  falling around the camera from the sky to whatever stops it, in Minecraft's rain and snow images when
+  imported. The sky grays and darkens, the sun, moon and stars fade, sky light dims (so monsters come out
+  in storms); rain patters on the ground and on roofs overhead. Rain puts out burning players and mobs and
+  keeps zombies and skeletons from burning. Thunderstorms let players sleep, and strike lightning (one in
+  100,000 ticks per chunk) with a bolt, a flash and thunder; it hurts (5) and sets on fire what is near.
+  Sleeping through the night clears the rain. `/weather`. Saved with the world (save format 9).
+- Redstone (`src/redstone.ts`): power 0–15 through dust (a level weaker a block, climbing up and down
+  blocks, round corners, and a line running on past its end), strongly and weakly powered blocks, torches
+  (inverters, 2 ticks), levers, stone and oak buttons (1 and 1.5 seconds), stone and oak pressure plates
+  (players and mobs; items and arrows too on oak), repeaters (delays of 1 to 4, 2 ticks each, and locking),
+  lamps (out 4 ticks after their power), and doors and trapdoors open while powered. Block updates reach
+  two blocks around redstone. Levers, buttons and plates click on every player's side.
+- Sound: a weather volume; crops' own sounds; hoes, bone meal, levers, buttons and plates.
+- Multiplayer (protocol 6): the weather and lightning; bone meal's sparkles; guests feed animals and
+  trample farmland through the host.
+- Not done: pistons (Phase 10). Lightning sets no blocks on fire (Craft has no fire yet) and changes no
+  mobs. Snow settles one layer deep. Babies are drawn half the size but collide as grown animals. Not yet
+  checked in a browser: the dev server was stopped by the system for low memory.
+
 - **Random ticks** (from Phase 0): grass spreads to lit dirt and dies under blocks; leaves decay more than 6
   blocks from a log; saplings grow into trees; ice and snow form in cold biomes and melt near light; cacti and
   sugar cane grow.
@@ -556,6 +710,337 @@ Parts of this phase can come at any point; sound in particular depends on nothin
   a torch clock blinks.
 - **Tests:** growth over ticks, leaf decay, circuit truth tables and timing (inverter, clock, repeater delays)
   stepped in Node.
+
+### Phase 10: Pistons, hoppers and comparators (M)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- Pistons and sticky pistons (`src/pistons.ts`): powered from any side but their front (without
+  Minecraft's quasi-connectivity), they push up to 12 blocks and break what is fragile at the end of the
+  line (plants, torches, redstone's parts, doors, beds, snow, cacti, pumpkins and melons, which drop). They
+  can't push obsidian, bedrock, spawners, blocks that hold things (chests, furnaces, hoppers) or pistons
+  pushed out. A move takes 2 game ticks: the blocks become moving blocks, kept with their chunk (by name),
+  drawn sliding (`src/moving.ts`) and carrying the player, mobs and items along. A pulse shorter than a
+  move finishes it at once (and a sticky piston then pulls its block back). Breaking the head breaks the
+  piston. The sides' textures turn toward the front (cube faces now take any of four quarter turns).
+- Observers: two ticks after the block in front of them changes, they pulse for two ticks out of their
+  back. Craft makes them, and comparators, with an iron ingot where Minecraft takes Nether quartz, until
+  there is a Nether.
+- Hoppers (`src/hoppers.ts`): five slots. Every 8 ticks they pass an item into what they point at (down or
+  a side) and take one from the container above, or what lies in their bowl (without waiting out its
+  pickup delay). They fill a furnace's input from above and its fuel from the sides, and take its output
+  from below. Powered, they stop. A double chest counts as two halves (Minecraft fills it as one).
+- Comparators compare or subtract (using one switches), taking side signals from dust, repeaters and
+  comparators. They read how full a chest, furnace or hopper behind them is (or one behind a solid block),
+  looking again every 2 ticks while they do.
+- Slimes, for sticky pistons' slimeballs: sizes 1, 2 and 4. They hop after players; those of size 2 and 4
+  hurt by their size. They split when they die, and the smallest drop slimeballs. They appear in swamps at
+  night and deep down (below y 40) in one chunk in ten, chosen by the world's seed. Minecraft's texture and
+  sounds when imported, their outsides see-through.
+- Sounds: pistons, comparators clicking, slimes, hoppers' metal.
+- Multiplayer (protocol 7): guests see blocks move and open hoppers. Pistons carry only the host's
+  player: guests move themselves.
+- Save format 10 (hoppers' items, moving blocks) with a fixture.
+- Fixed on the way: the clicks of levers, buttons and plates looked for a "powered" property on every
+  block that changed, and threw for the rest (a furnace lighting up, Phase 9). The in-memory test
+  connection could deliver a frame forever to nobody.
+- Not done: quasi-connectivity, slime blocks, dispensers and droppers. Not yet checked in a browser: the
+  dev server was stopped by the system for low memory.
+
+The rest of redstone that the industry phases build on: things moved by redstone, items moved between
+blocks, and blocks read by redstone.
+
+- **Pistons and sticky pistons:** push up to 12 blocks in a line (not obsidian, bedrock, or blocks with
+  contents); plants, torches and dust in the way break; sticky pistons pull one block back. A move takes
+  2 ticks, drawn moving, and carries or shoves what stands on it; a world saved mid-move finishes it.
+- **Observers:** a pulse when the block they face changes, for farms that harvest themselves.
+- **Hoppers:** take items from the container above and items lying on them, and pass them into what they
+  point at, one every 8 ticks; powered, they stop. They work with chests and furnaces now, and with every
+  machine of the industry phases.
+- **Comparators:** keep or subtract a signal, and read how full a container (later a machine or an energy
+  store) is.
+- **Done when:** a piston door opens to a button; a sugar cane farm with an observer and a piston harvests
+  itself into hoppers and a chest; a comparator's signal grows as the chest fills.
+- **Tests:** push limits and order, sticky pulls, moves saved halfway, hopper rates and directions,
+  comparator modes and container levels, observer pulses.
+
+### Industry: a technology tree (Phases 11 to 16)
+
+Beyond Minecraft: a technology tree after the IndustrialCraft mods, from a coal generator and a copper
+cable to a nuclear reactor. Each step needs machines and materials from the ones before.
+
+```mermaid
+flowchart LR
+  subgraph P11["11: energy and the first machines"]
+    ore["Copper, tin,<br/>uranium ore"] --> ingot["Copper, tin,<br/>bronze"]
+    tree["Rubber trees"] -->|tree tap| rubber["Resin, rubber"]
+    iron["Iron"] --> refined["Refined iron"]
+    ingot --> cable["Cables"]
+    rubber --> cable
+    cable --> circuit["Electronic circuit"]
+    ingot --> battery["Battery"]
+    refined --> casing["Machine casing"]
+    casing --> gen["Generator"]
+    battery --> gen
+    casing --> mach["Macerator, extractor,<br/>compressor, electric furnace"]
+    circuit --> mach
+    battery --> batbox["Battery box"]
+  end
+  subgraph P12["12: renewable power"]
+    solar["Solar panel"]
+    windwater["Wind and water mills"]
+    geo["Geothermal generator"]
+    trans["Transformers"]
+    crystal["Energy crystal"]
+    bank["Energy cell, energy bank"]
+  end
+  subgraph P13["13: advanced machines"]
+    alloy["Advanced alloy,<br/>carbon plate"]
+    adv["Advanced circuit"]
+    advcasing["Advanced casing"]
+    upg["Upgrades"]
+    advmach["Induction furnace, recycler,<br/>pump"]
+  end
+  subgraph P14["14: electric tools and armor"]
+    tools["Drills, chainsaw,<br/>mining laser"]
+    lapo["Lapotron crystal"]
+    packs["Battery packs, jetpack"]
+    nano["Nano suit"]
+    miner["Miner, ore scanners"]
+  end
+  subgraph P15["15: nuclear power"]
+    fuel["Uranium fuel rods"]
+    parts["Vents, exchangers,<br/>coolant, plating"]
+    reactor["Nuclear reactor"]
+    vault["Energy vault"]
+  end
+  subgraph P16["16: high tech"]
+    fab["Mass fabricator"]
+    uu["UU-matter"]
+    irid["Iridium plate"]
+    quantum["Quantum suit"]
+    tele["Teleporter, terraformer"]
+  end
+  gen --> solar & windwater & geo
+  circuit --> solar & trans
+  mach -->|coal dust| solar
+  battery --> bank
+  crystal --> bank & trans
+  mach -->|compressor| alloy
+  circuit --> adv
+  casing --> advcasing
+  alloy --> advcasing
+  adv --> upg & advmach & lapo
+  advcasing --> advmach
+  crystal --> tools & lapo
+  circuit --> tools
+  alloy --> nano
+  crystal --> nano
+  lapo --> packs
+  tools --> miner
+  ore -->|macerator, compressor| fuel
+  advcasing --> reactor
+  adv --> reactor
+  parts --> reactor
+  fuel --> reactor
+  lapo --> vault
+  reactor -->|power| fab
+  advmach -->|scrap| fab
+  fab --> uu --> irid
+  alloy --> irid
+  irid --> quantum
+  nano --> quantum
+  lapo --> tele
+```
+
+**Energy** comes in EU (energy units), sent from generators and stores to machines in packets, at one of
+four tiers. A machine fed packets above its tier explodes, a cable carrying more than its tier burns up,
+and a little is lost on every block of cable (least in tin and glass fibre, most in uncovered cable, which
+also shocks whoever touches it while it carries current). Transformers step packets between tiers.
+
+| Tier | Packet (EU) | Cables | Store | Phase |
+| --- | --- | --- | --- | --- |
+| Low (LV) | 32 | tin; copper | battery box: 40,000 EU | 11 |
+| Medium (MV) | 128 | copper, insulated | energy cell: 300,000 EU | 12 |
+| High (HV) | 512 | gold, double-insulated | energy bank: 4 million EU | 12 |
+| Extreme (EV) | 2,048 | HV cable, glass fibre | energy vault: 40 million EU | 15 |
+
+How every industry phase works, besides the principles above:
+- **Machines are block entities,** like furnaces: slots, stored energy, progress, and a front lit while
+  working (a block state, so it reaches guests as any block change). One screen layout serves them all:
+  slots, a progress arrow, an energy bar, upgrade slots.
+- **Registries:** machines, generators, cables, components and upgrades are entries (tier, capacity,
+  energy per operation, recipes, slots, faces) with small handlers, like blocks and items.
+- **Energy nets** are found again only when a cable or energy block changes: each connected net keeps its
+  sources, stores and machines with the paths and losses between them, and a tick hands out the energy.
+  Budget: a big base (hundreds of cables and machines) under a millisecond a tick.
+- **Where the world runs:** machines tick alone or on the host; guests open their screens as they open
+  furnaces now. Every phase adds its block entities and items' charge to the save format, with a migration
+  and a fixture.
+- **Craft's own art:** IndustrialCraft's textures are the mod's, not in a Minecraft installation, and not
+  imported. Craft paints machines, cables and items in code, in Minecraft's style, and the Canvas 2D
+  renderer gets them in flat colors.
+- **Mechanics after IndustrialCraft 2,** with the numbers tuned for Craft when each phase is planned in
+  detail; names are plain English where IndustrialCraft's are its own coinages (battery box, energy cell,
+  energy bank and energy vault for its BatBox, CESU, MFE and MFSU).
+- **Tests:** every net, generator, machine and reactor rule runs headless, like the redstone tests.
+
+### Phase 11: Industry I: energy and the first machines (L)
+
+**Done on 2026-10-23.** What changed against the plan below:
+- Resources (generator 5):
+  - Ores: tin ore about as common as copper, a little lower (y 0–80); uranium ore rare and deep (y 0–30).
+  - Rubber trees grow in forests, jungles and swamps, with resin spots here and there. A tree tap takes one
+    to three sticky resin from a wet spot, which dries and fills again on random ticks.
+- Materials:
+  - Raw tin, tin ingots, bronze (dust from three copper dust and one tin dust).
+  - Refined iron (iron ingots smelted again).
+  - Rubber: from resin smelted, or three from the extractor.
+  - Bronze tools and armor: iron's tier, lasting longer.
+- Energy (`src/energy.ts`) moves in EU packets of four tiers, through three cables:
+  - Tin: low voltage, losing 0.025 EU a block.
+  - Bare copper: medium voltage, losing 0.3 a block, and shocking a player touching it while it carries.
+  - Insulated copper: medium voltage, losing 0.2 a block.
+
+  Cables are drawn thin and join cables and machines any of six ways. Every tick each generator and store
+  sends up to its output to the machines it reaches, the nearest first (by loss). The ways are found again
+  only when a cable or machine changes, or chunks come or go. Energy above a machine's tier blows it up;
+  above a cable's, it burns the weakest cable.
+- Machines (`src/machines.ts`), their fronts lit while they work:
+  - Generator: burns furnace fuel at a quarter of a furnace's burning time, 10 EU a tick, holds 4,000 EU.
+  - Electric furnace: 3 EU a tick, 6.5 seconds an item.
+  - Macerator: ores into two dusts, cobblestone into sand, gravel into flint, a bone into five bone meal.
+  - Extractor (rubber) and compressor (snowballs, snow, sand, clay): 2 EU a tick, 15 seconds an item.
+  - Battery box: 40,000 EU, low voltage out of its front, which faces any of six ways.
+
+  Their screens show a slot over a gauge over a slot, an arrow to the output and the energy held; the
+  furnace's screen is now the same kind.
+- Items:
+  - The battery holds 10,000 EU. A stack keeps the charge it is missing as its damage, so its bar shows the
+    charge; crafted, it is empty.
+  - The electronic circuit and the machine casing.
+  - The wrench turns a machine, or takes it up whole when sneaking. Broken any other way, a machine leaves
+    only its casing.
+  - The EU meter reads a cable's flow or a machine's energy.
+- Craft paints all of it: IndustrialCraft's textures aren't in Minecraft, and nothing is imported.
+- Save format 11 (machines, batteries' charge) with a fixture; protocol 8.
+- Against the plan:
+  - The compressor packs snow, sand and clay. Plates come with Phase 13's advanced materials.
+  - Copper cable already carries medium voltage, as IndustrialCraft's does.
+  - Machines don't take items from hoppers yet (Phase 13).
+- Not done:
+  - Only the host's player is shocked by bare cable, and the EU meter reads only where the world runs.
+  - Not yet checked in a browser: the dev server was stopped by the system for low memory.
+
+- **Resources** (generator 5): tin ore, uranium ore (deep and rare, used from Phase 15, generated now so
+  worlds explored in between have it), rubber trees with resin spots in forests, swamps and jungles. Copper
+  and tin ingots; bronze (copper and tin), with bronze tools and armor between iron and diamond in
+  durability; refined iron (iron smelted again); resin and rubber.
+- **Tools:** the tree tap takes resin from rubber logs; the wrench turns machines and takes them up whole
+  (a pickaxe gets only the casing back); the EU meter shows what a cable carries and a machine uses.
+- **Energy:** low and medium voltage (32 and 128 EU packets); tin and copper cables, insulated with rubber;
+  cables drawn as thin connected shapes, like fences.
+- **The generator:** burns what a furnace burns (coal gives 4,000 EU), 10 EU a tick.
+- **Machines** (low voltage): the electric furnace (faster than a furnace, no fuel); the macerator (an ore
+  into two dusts that smelt into ingots, cobblestone into gravel and gravel into sand); the extractor
+  (resin into rubber, rubber saplings and logs into rubber too); the compressor (dusts into plates, snow
+  into ice). Recipes in their own registry, shown in the creative inventory's tooltips.
+- **Storage:** the battery (10,000 EU, a charge bar like a tool's wear) and the battery box (40,000 EU,
+  low voltage out of its front, a slot to charge batteries and one to empty them).
+- **Done when:** a coal generator powers a macerator and an electric furnace down a copper cable and the
+  ore comes out doubled; a battery box keeps what they didn't use and runs them a while without coal.
+- **Tests:** a generator's output; nets with one and several sources and machines, cable loss by length
+  and kind, packets over a machine's tier blowing it up, storage filling and emptying; each machine's
+  recipes and timing; nets found again when a cable breaks.
+
+### Phase 12: Industry II: renewable power and bigger grids (M)
+
+- **Solar panels:** 1 EU a tick while they see the sky in daylight; nothing at night, under a roof or in
+  the rain (Phase 2's daylight, Phase 9's weather).
+- **Wind mills:** more the higher above the ground and the less is built around them; more in storms,
+  and one too high may be torn apart in a storm.
+- **Water mills:** by how much water is around them, more in the rain.
+- **Geothermal generators:** lava poured in from buckets or cells, 20 EU a tick.
+- **Cells:** tin cells carry water and lava, like buckets that stack.
+- **Transformers** between low, medium and high voltage (and back, flipped by a redstone signal); gold
+  cable; the energy crystal (stored energy, and a part of recipes); the energy cell (medium voltage) and
+  energy bank (high).
+- **Done when:** a base runs off-grid: solar panels by day, wind and water mills by night, the surplus
+  banked, power sent far at high voltage and stepped down to the machines.
+- **Tests:** solar output through a day and in rain; wind by height, obstruction and storms; water by the
+  water around and rain; transformers both ways; stores of every tier.
+
+### Phase 13: Industry III: advanced machines and automation (L)
+
+- **Advanced materials:** advanced alloy (from mixed metal ingots), coal dust pressed to carbon fibre and
+  carbon plates, the advanced circuit (redstone, glowstone, lapis), the advanced machine casing.
+- **Upgrades,** four slots on every machine: the overclocker (faster, for more energy), energy storage,
+  the transformer upgrade (takes a higher tier), the ejector (puts what is made into the inventory beside
+  it) and the puller.
+- **Automation:** machines take and give items through hoppers (Phase 10) by face, and stop while
+  powered (or run only while powered, a switch on their screen); comparators read their progress and
+  energy.
+- **Machines:** the induction furnace (two items at once, faster as it heats up); the recycler (anything
+  into scrap now and then) and scrap boxes (something at random); the pump (fluids into cells, or straight
+  into a geothermal generator beside it).
+- **Done when:** an ore line runs by itself: a hopper feeds ore to an overclocked macerator, an ejector
+  passes the dust to an induction furnace, and ingots fill a chest.
+- **Tests:** upgrades' arithmetic, items through faces and hoppers, the induction furnace's heat, the
+  recycler's odds, redstone control.
+
+### Phase 14: Industry IV: electric tools and armor (M)
+
+- **Charged items:** energy kept in the stack, charged in a store's slot, used up by work; an item takes
+  charge up to its tier only. The lapotron crystal (lapis and advanced circuits) holds the most.
+- **Tools:** the mining drill and the diamond drill (anything a pickaxe or shovel breaks, fast, for energy
+  per block), the chainsaw (wood and leaves, and shears), the electric hoe and tree tap, the electric wrench
+  (no losses), the mining laser (a beam through rock), the nano saber (strong while switched on).
+- **Worn:** battery and lapotron packs (charge what is held), the electric jetpack (flight on energy), the
+  nano suit (takes damage with energy instead of health; night vision; softer falls), night-vision goggles.
+- **The miner:** with a drill and mining pipes it digs a shaft down and takes ores from around it, found by
+  an ore scanner (scanners in two strengths also work in the hand).
+- **Done when:** a drill goes through stone in a moment and needs charging; a jetpack lifts a player over
+  a hill; the nano suit takes a creeper's blast; a miner empties a column of its ores into a chest.
+- **Tests:** charging and use, tier limits, the suit's absorption, the jetpack's lift and drain, drill
+  speeds and costs, the miner's shaft.
+
+### Phase 15: Industry V: nuclear power (L)
+
+- **Uranium:** ore macerated and compressed into uranium, made into fuel rods (single, dual and quad).
+  Carried without a hazmat suit (rubber) it makes players sick (a slow hurt, the view tinted); fuel rods
+  are used up into depleted rods, which are slowly made fresh again beside active rods in a reactor.
+- **The nuclear reactor:** a block with a grid of components, 6 rows of 3 columns and a column more for
+  each reactor chamber beside it (up to 9). Every reactor second (20 ticks), each rod pulses itself and its
+  neighbors (energy and heat per pulse) and neutron reflectors send pulses back; heat goes to the
+  components beside that take it (heat exchangers spread it, coolant cells hold it, vents give it away from
+  themselves, the hull or their neighbors) and the rest heats the hull; reactor plating raises how much heat
+  the hull bears and softens a blast.
+- **Heat:** past 40 % of the hull's limit fires start around it, past 50 % water near it boils away, past
+  70 % radiation hurts whoever is near, past 85 % the blocks around melt into lava, and at 100 % it melts
+  down: an explosion as big as its load.
+- **Control:** it runs while it gets a redstone signal. Its energy leaves at high or extreme voltage; the
+  energy vault (extreme, 40 million EU, lapotron crystals) stores it.
+- **The reactor's screen:** the grid, every component's heat and wear, the hull's heat, the energy made.
+- **Done when:** a well-cooled four-rod reactor runs a day at steady output into an energy vault; a badly
+  cooled one starts fires, then melts down.
+- **Tests:** each component's rule; pulses and reflection; known designs, stable and not, their heat over
+  time and their output; every heat threshold's effect; the meltdown; redstone control; the same result on
+  every run.
+
+### Phase 16: Industry VI: high tech (M)
+
+- **The mass fabricator:** turns a great deal of energy into UU-matter, faster with scrap; UU-matter
+  recipes make ores, diamonds and iridium.
+- **The quantum suit** (iridium plates from UU-matter, advanced alloy and diamond): flight with its chest
+  piece, no fall damage, fast running and high jumps, food and air kept up, all on energy.
+- **The teleporter:** linked to another by a frequency transmitter, for energy by distance and what is
+  carried, drawn from the stores beside it.
+- **The terraformer:** with a blueprint, changes the land around it: grass and trees, water and farmland,
+  sand, or flattened ground.
+- **Done when:** a reactor-powered fabricator makes the UU-matter for diamonds; a teleporter links two
+  bases; a player flies in the quantum suit.
+- **Tests:** the fabricator's rates and scrap, teleporter costs and links, each blueprint's changes.
+
+Not planned for the industry: world-wrecking items (IndustrialCraft's nuke), and its crop breeding.
 
 ### Later
 
@@ -587,7 +1072,9 @@ R1–R11 in Projector's `docs/requirements-feedback.md`.
 | R19 | Instanced meshes: one mesh drawn with many transforms | Many mobs and dropped items in few draw calls | 7 | P3 |
 | R20 | Lines wider than 1 px on WebGL (`LineSet.width`) | A more visible block outline | 8 | P3 |
 
-Sound stays in Craft (Web Audio), unless Projector should get positional audio tied to its objects.
+Sound stays in Craft (Web Audio), unless Projector should get positional audio tied to its objects. The
+industry phases need nothing new: machines are blocks, cables are block shapes, and the jetpack's flame
+and a working machine's glow are particles and lit faces Craft already draws.
 
 ## 5. Decisions
 
@@ -603,6 +1090,11 @@ Settled on 2026-10-22, all as recommended:
    deployed game (Phase M). Phase 0 kept the simulation free of DOM and rendering code for this.
 5. **Assets:** sounds and entity, item and GUI textures are imported from the player's installation like the
    block textures, with Craft's own fallbacks.
-6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
+6. **Redstone:** the basics in Phase 9, then pistons, with hoppers and comparators (changed on
+   2026-10-23: the industry phases move items between machines and read them by redstone), the rest later.
+7. **Industry** (added on 2026-10-23): a technology tree after the IndustrialCraft mods, in Phases 11 to
+   16 before the "Later" list. Mechanics follow IndustrialCraft 2 where they fit Craft, with numbers
+   tuned when each phase starts; plain names where the mod's are its own; Craft's own textures.
 
-Phases 0 to 5 and M are done; next is Phase 6, survival: health, hunger, armor, beds and death.
+Phases 0 to 11 and M are done; next is Phase 12: solar, wind, water and geothermal power, transformers and
+bigger stores.

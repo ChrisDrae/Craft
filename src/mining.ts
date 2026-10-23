@@ -58,6 +58,39 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.OakTrapdoor]: by("axe", 3),
   [Block.OakFence]: WOOD_LIKE,
   [Block.Pumpkin]: by("axe", 1),
+  [Block.Melon]: by("axe", 1),
+  [Block.Vine]: by("axe", 0.2),
+  [Block.Farmland]: by("shovel", 0.6),
+  [Block.Lever]: hand(0.5),
+  [Block.StoneButton]: by("pickaxe", 0.5),
+  [Block.OakButton]: by("axe", 0.5),
+  [Block.StonePressurePlate]: by("pickaxe", 0.5, Tier.Wood),
+  [Block.OakPressurePlate]: by("axe", 0.5),
+  [Block.Repeater]: hand(0),
+  [Block.RedstoneLamp]: hand(0.3),
+  [Block.Piston]: by("pickaxe", 1.5),
+  [Block.StickyPiston]: by("pickaxe", 1.5),
+  [Block.PistonHead]: by("pickaxe", 1.5),
+  [Block.MovingPiston]: hand(-1),
+  [Block.Observer]: by("pickaxe", 3, Tier.Wood),
+  [Block.Hopper]: by("pickaxe", 3, Tier.Wood),
+  [Block.Comparator]: hand(0),
+  [Block.TinOre]: by("pickaxe", 3, Tier.Stone),
+  [Block.UraniumOre]: by("pickaxe", 3, Tier.Iron),
+  [Block.RubberLog]: WOOD_LIKE,
+  [Block.RubberLeaves]: by("hoe", 0.2),
+  [Block.RubberSapling]: hand(0),
+  [Block.MachineCasing]: by("pickaxe", 3, Tier.Wood),
+  [Block.Generator]: by("pickaxe", 3, Tier.Wood),
+  [Block.ElectricFurnace]: by("pickaxe", 3, Tier.Wood),
+  [Block.Macerator]: by("pickaxe", 3, Tier.Wood),
+  [Block.Extractor]: by("pickaxe", 3, Tier.Wood),
+  [Block.Compressor]: by("pickaxe", 3, Tier.Wood),
+  [Block.BatteryBox]: WOOD_LIKE,
+  [Block.TinCable]: hand(0.2),
+  [Block.CopperCable]: hand(0.2),
+  [Block.InsulatedCopperCable]: hand(0.2),
+  [Block.RedstoneWire]: hand(0),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
   [Block.Glowstone]: hand(0.3),
@@ -73,13 +106,39 @@ for (const b of BLOCKS) {
   else if (n.endsWith("_leaves")) TABLE[b.id] = by("hoe", 0.2);
   else if (n.endsWith("_wool")) TABLE[b.id] = hand(0.8);
   else if (n.endsWith("_carpet")) TABLE[b.id] = hand(0.1);
+  else if (b.shape === "bed") TABLE[b.id] = hand(0.2);
   else if (b.shape === "slab" || b.shape === "stairs" || b.shape === "wall") TABLE[b.id] = n.startsWith("oak") ? WOOD_LIKE : by("pickaxe", 2, Tier.Wood);
-  else if (b.shape === "cross" || b.shape === "tall" || b.shape === "torch" || b.shape === "lilypad" || n === "sugar_cane") TABLE[b.id] = hand(0);
+  else if (b.shape === "cross" || b.shape === "tall" || b.shape === "torch" || b.shape === "lilypad" || b.shape === "crop" || b.shape === "stem" || n === "sugar_cane") TABLE[b.id] = hand(0);
 }
 
 /** Mining for every block (a hand and a second's worth of hardness for anything not listed). */
 export function miningOf(block: Block): Mining {
   return TABLE[block] ?? hand(1);
+}
+
+/** Blast resistance where it isn't the hardness (Minecraft's): stone things 6, obsidian 1200, fluids 100. */
+const RESISTANCE: Partial<Record<number, number>> = {
+  [Block.Stone]: 6,
+  [Block.Cobblestone]: 6,
+  [Block.MossyCobblestone]: 6,
+  [Block.StoneBricks]: 6,
+  [Block.MossyStoneBricks]: 6,
+  [Block.CrackedStoneBricks]: 6,
+  [Block.Bricks]: 6,
+  [Block.Obsidian]: 1200,
+  [Block.Bedrock]: 3600000,
+  [Block.Water]: 100,
+  [Block.Lava]: 100,
+  [Block.CobblestoneWall]: 6,
+};
+
+/** How well a block stands up to explosions. */
+export function resistanceOf(block: Block): number {
+  const r = RESISTANCE[block];
+  if (r !== undefined) return r;
+  const b = BLOCKS[block];
+  if (b.shape === "slab" || b.shape === "stairs") return b.name.startsWith("oak") ? 3 : 6;
+  return Math.max(0, miningOf(block).hardness);
 }
 
 /** Whether a held item (or none) gets drops from a block. */
@@ -104,11 +163,12 @@ const one = (item: number, count: number = 1): ItemStack[] => [{ item, count, da
 
 /**
  * What a block in a state drops when broken by a player with a held item (`random` gives numbers in
- * [0, 1), for the drops that are a matter of luck). Nothing without the right tool.
+ * [0, 1), for the drops that are a matter of luck). Nothing without the right tool, unless `anyTool`
+ * (blown up: an explosion harvests anything).
  */
-export function dropsOf(state: number, held: ItemStack | null, random: () => number): ItemStack[] {
+export function dropsOf(state: number, held: ItemStack | null, random: () => number, anyTool: boolean = false): ItemStack[] {
   const block = STATE_BLOCK[state];
-  if (!canHarvest(block, held)) return [];
+  if (!anyTool && !canHarvest(block, held)) return [];
   const between = (lo: number, hi: number): number => lo + Math.floor(random() * (hi - lo + 1));
   switch (block) {
     case Block.Grass:
@@ -141,6 +201,55 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return one(Items.Emerald);
     case Block.Glowstone:
       return one(Items.GlowstoneDust, between(2, 4));
+    case Block.Melon:
+      return one(Items.MelonSlice, between(3, 7));
+    case Block.Vine:
+      return held?.item === Items.Shears ? one(Block.Vine) : [];
+    case Block.Farmland:
+      return one(Block.Dirt);
+    case Block.TinOre:
+      return one(Items.RawTin);
+    case Block.UraniumOre:
+      return one(Items.RawUranium);
+    case Block.RubberLog:
+      return one(Block.RubberLog);
+    case Block.RubberLeaves:
+      return random() < 0.05 ? one(Block.RubberSapling) : [];
+    case Block.Generator:
+    case Block.ElectricFurnace:
+    case Block.Macerator:
+    case Block.Extractor:
+    case Block.Compressor:
+      // Broken (not taken up with a wrench), a machine leaves only its casing, as IndustrialCraft's
+      return one(Block.MachineCasing);
+    case Block.PistonHead:
+      // Its piston, which goes with it
+      return one(propertyOf(state, "type") === "sticky" ? Block.StickyPiston : Block.Piston);
+    case Block.MovingPiston:
+      return [];
+    case Block.RedstoneWire:
+      return one(Items.Redstone);
+    case Block.Wheat:
+    case Block.Carrots:
+    case Block.Potatoes: {
+      // Ripe: the harvest and seeds by Minecraft's chances (three tries at 4 in 7); green: what was planted
+      const ripe = propertyOf(state, "age") === "7";
+      const extra = (): number => [0, 1, 2].filter(() => random() < 4 / 7).length;
+      if (block === Block.Wheat) return ripe ? [...one(Items.Wheat), ...one(Items.WheatSeeds, 1 + extra())] : one(Items.WheatSeeds);
+      return one(block === Block.Carrots ? Items.Carrot : Items.Potato, ripe ? 1 + extra() : 1);
+    }
+    case Block.PumpkinStem:
+    case Block.MelonStem:
+    case Block.AttachedPumpkinStem:
+    case Block.AttachedMelonStem: {
+      const age = block === Block.PumpkinStem || block === Block.MelonStem ? Number(propertyOf(state, "age")) : 7;
+      const seeds = [0, 1, 2].filter(() => random() < (age + 1) / 15).length;
+      return seeds > 0 ? one(block === Block.PumpkinStem || block === Block.AttachedPumpkinStem ? Items.PumpkinSeeds : Items.MelonSeeds, seeds) : [];
+    }
+    case Block.ShortGrass:
+    case Block.Fern:
+      // Seeds now and then, as Minecraft's grass gives them
+      return random() < 0.125 ? one(Items.WheatSeeds) : [];
     case Block.Bookshelf:
       return one(Items.Book, 3);
     case Block.DeadBush:
@@ -149,8 +258,6 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
     case Block.GlassPane:
     case Block.Ice:
     case Block.Spawner:
-    case Block.ShortGrass:
-    case Block.Fern:
     case Block.TallGrass:
     case Block.LargeFern:
     case Block.Bedrock:
@@ -167,4 +274,21 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
   if (shape === "slab" && propertyOf(state, "type") === "double") return one(block, 2);
   if (shape === "door" || shape === "tall") return one(block);
   return one(block);
+}
+
+/** Experience from ores that drop what they hold (coal, gems, redstone, lapis), when harvested. */
+const ORE_XP: Partial<Record<number, readonly [number, number]>> = {
+  [Block.CoalOre]: [0, 2],
+  [Block.DiamondOre]: [3, 7],
+  [Block.EmeraldOre]: [3, 7],
+  [Block.LapisOre]: [2, 5],
+  [Block.RedstoneOre]: [1, 5],
+};
+
+/** The experience breaking a block gives with a held item (or none). */
+export function xpOf(state: number, held: ItemStack | null, random: () => number): number {
+  const block = STATE_BLOCK[state];
+  const range = ORE_XP[block];
+  if (!range || !canHarvest(block, held)) return 0;
+  return range[0] + Math.floor(random() * (range[1] - range[0] + 1));
 }

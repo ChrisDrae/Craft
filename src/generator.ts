@@ -16,8 +16,11 @@ export { SEA_LEVEL };
  * Bumped whenever the generator makes different terrain from the same seed; saves record it.
  * 1. A heightmap with oak forests.
  * 2. Biomes, 3D terrain, caves, ores by depth, structures.
+ * 3. Melons in jungles, mushrooms in shady places, chests in dungeons.
+ * 4. Vines in jungles and swamps.
+ * 5. Tin and uranium ores, rubber trees.
  */
-export const GENERATOR_VERSION = 2;
+export const GENERATOR_VERSION = 5;
 
 /** Density is worked out at points this far apart across, STEP apart up, and interpolated between. */
 const CELL = 4;

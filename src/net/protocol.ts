@@ -2,7 +2,9 @@ import type { Action } from "../actions.js";
 import type { SavedEntity } from "../blockEntities.js";
 import { STATE_COUNT, stateName } from "../blocks.js";
 import { ITEMS, type SavedStack } from "../items.js";
-import type { GameMode } from "../save/format.js";
+import type { GameMode, PlayerLife } from "../save/format.js";
+import type { MobView } from "../mobs/mobs.js";
+import type { DamageSource, Difficulty } from "../vitals.js";
 
 /**
  * What host and guests say to each other. Every message is one binary frame: the length of a JSON header
@@ -10,7 +12,7 @@ import type { GameMode } from "../save/format.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
@@ -34,8 +36,8 @@ export interface PlayerView {
   pitch: number;
 }
 
-/** A guest as the host keeps them between visits. */
-export interface GuestState {
+/** A guest as the host keeps them between visits: where, what they carry, and how they are. */
+export interface GuestState extends PlayerLife {
   position: { x: number; y: number; z: number };
   yaw: number;
   pitch: number;
@@ -43,8 +45,10 @@ export interface GuestState {
   inventory: (SavedStack | null)[];
 }
 
-/** An item lying about, as guests see it: id, where, what and how many. */
+/** An item lying about, as guests see it: id, where, what and how many; an orb of experience has item -1 and its points. */
 export type DropView = [id: number, x: number, y: number, z: number, item: number, count: number];
+/** The item of an orb of experience in a DropView. */
+export const ORB = -1;
 
 export type ToHost =
   /** First thing a guest says: who they are, what they run, how far they see (in chunks). */
@@ -53,6 +57,20 @@ export type ToHost =
   /** An action done on the guest's side, with what the guest held (the tool that decides drops). */
   | ({ t: "act"; held: SavedStack | null } & Action)
   | { t: "inventory"; inventory: (SavedStack | null)[]; selected: number }
+  /** How the guest is (health, hunger, experience, bed), for keeping. */
+  | ({ t: "life" } & PlayerLife)
+  /** The guest died: everyone is told how (and by what), and the experience they leave lies where they died. */
+  | { t: "died"; cause: DamageSource; killer: string | null; xp: number }
+  /** Hitting a mob: its id, the damage (the guest worked out with its weapon and timing), crit, knockback. */
+  | { t: "attack"; id: number; damage: number; crit: boolean; knockback: number }
+  /** Loosing an arrow from (x, y, z) at that velocity. */
+  | { t: "shoot"; x: number; y: number; z: number; vx: number; vy: number; vz: number; crit: boolean }
+  /** Using the held item on a mob (shears on a sheep). */
+  | { t: "useMob"; id: number; held: SavedStack | null }
+  /** A line of chat, for everyone. */
+  | { t: "chat"; text: string }
+  /** Lying in a bed, or up again. The night passes when every player sleeps. */
+  | { t: "sleep"; asleep: boolean }
   /** Picking up an item lying about: as much as fits, at most `max`. */
   | { t: "take"; id: number; max: number }
   /** Throwing a stack out, from (x, y, z) with that velocity. */
@@ -65,7 +83,7 @@ export type ToHost =
   | { t: "dropped"; chunks: Array<[number, number]> };
 
 export type ToGuest =
-  | { t: "welcome"; id: string; world: string; time: number; mode: GameMode; you: GuestState }
+  | { t: "welcome"; id: string; world: string; time: number; mode: GameMode; difficulty: Difficulty; hardcore: boolean; spawn: { x: number; y: number; z: number }; weather: { rain: boolean; thunder: boolean }; you: GuestState }
   | { t: "refused"; reason: string }
   /** A chunk, its compressed blocks after the header (see encodeBlocks). */
   | { t: "chunk"; cx: number; cz: number; palette: string[]; biomes: string; generator: number }
@@ -75,8 +93,30 @@ export type ToGuest =
   | { t: "time"; time: number }
   /** The items lying near the guest. */
   | { t: "drops"; drops: DropView[] }
-  /** What the guest picked up. */
-  | { t: "given"; item: SavedStack }
+  /** What the guest picked up: an item, or experience. */
+  | { t: "given"; item?: SavedStack; xp?: number }
+  /** Something everyone is told: who died and how. */
+  | { t: "notice"; text: string }
+  /** The world's difficulty changed. */
+  | { t: "rules"; difficulty: Difficulty }
+  /** Morning: the night passed while everyone slept. */
+  | { t: "wake" }
+  /** The mobs and arrows near the guest. */
+  | { t: "mobs"; mobs: MobView[] }
+  /** The guest was hurt (by difficulty already): how much, by what, pushed how. */
+  | { t: "hurt"; amount: number; source: DamageSource; by: string; push: { x: number; y: number; z: number } }
+  /** Something blew up there. */
+  | { t: "explosion"; x: number; y: number; z: number; power: number }
+  /** A sound there (Minecraft's event name), of a kind (its volume setting). */
+  | { t: "sound"; event: string; x: number; y: number; z: number; category: string }
+  /** Someone broke, placed or used a block there (what it was or is), or made it grow (bone meal): its pieces and sound. */
+  | { t: "effect"; kind: "break" | "place" | "use" | "grow"; x: number; y: number; z: number; state: number }
+  /** It started or stopped raining or storming. */
+  | { t: "weather"; rain: boolean; thunder: boolean }
+  /** Lightning struck there. */
+  | { t: "lightning"; x: number; y: number; z: number }
+  /** Blocks pistons started moving: [x, y, z, state, dir, extending + 2 for a head] each (where they go). */
+  | { t: "moving"; moves: Array<[number, number, number, number, number, number]> }
   /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
   | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };

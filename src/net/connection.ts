@@ -38,7 +38,11 @@ class MemoryEnd implements Connection {
     this.scheduled = true;
     setTimeout(() => {
       this.scheduled = false;
-      while (this.open && this.inbox.length > 0) this.onMessage?.(this.inbox.shift()!);
+      // Taken out first: with nobody listening yet the frame is dropped, not delivered forever
+      while (this.open && this.inbox.length > 0) {
+        const frame = this.inbox.shift()!;
+        this.onMessage?.(frame);
+      }
     }, 0);
   }
 

@@ -1,4 +1,4 @@
-import { entityFor, keeps, type BlockEntity } from "./blockEntities.js";
+import { entityFor, keeps, madeAtOnce, type BlockEntity } from "./blockEntities.js";
 import { Block, CUBE_SHAPED, CULL_SAME, DIR_X, DIR_Y, DIR_Z, FLUID, LEAFY, SOLID, STATE_BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, MODEL_FACE, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
 import { ownHeight } from "./fluids.js";
@@ -21,7 +21,7 @@ export class VoxelWorld implements LightWorld {
    */
   fancyLeaves: boolean = false;
   /** Called after every block change with its position (BlockUpdates.changed). */
-  onChanged: ((x: number, y: number, z: number) => void) | null = null;
+  onChanged: ((x: number, y: number, z: number, old: number) => void) | null = null;
   /** Called when a chest or furnace goes with its block, with what it held (the game drops it). */
   onEntityRemoved: ((x: number, y: number, z: number, entity: BlockEntity) => void) | null = null;
 
@@ -206,6 +206,7 @@ export class VoxelWorld implements LightWorld {
     const ly = y & 15;
     const lz = z & 15;
     const s = y >> 4;
+    const old = chunk.get(lx, y, lz);
     chunk.set(lx, y, lz, state);
     chunk.unsaved = true;
     const entityKey = (y << 8) | (lz << 4) | lx;
@@ -214,6 +215,8 @@ export class VoxelWorld implements LightWorld {
       chunk.entities.delete(entityKey);
       this.onEntityRemoved?.(x, y, z, entity);
     }
+    // Hoppers and machines work without anyone opening them: they have their entity from the start
+    if (madeAtOnce(STATE_BLOCK[state]) && !chunk.entities.has(entityKey)) chunk.entities.set(entityKey, entityFor(STATE_BLOCK[state])!);
     chunk.packed = null;
     chunk.sections[s].dirty = true;
     if (ly === 0 && s > 0) chunk.sections[s - 1].dirty = true;
@@ -223,7 +226,7 @@ export class VoxelWorld implements LightWorld {
     if (lz === 0) this.markDirty(cx, cz - 1, s);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1, s);
     relight(this, x, y, z);
-    this.onChanged?.(x, y, z);
+    this.onChanged?.(x, y, z, old);
     return true;
   }
 

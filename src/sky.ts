@@ -155,6 +155,9 @@ export class Sky extends SimObject {
   horizon: Rgb = HORIZON_DAY;
   /** Blocks around the camera the clouds reach. */
   cloudReach: number = 192;
+  /** How hard it rains and storms (0-1), and a lightning flash (0-1, fading), for the sky's colors and light. */
+  weather: () => { rain: number; thunder: number } = () => ({ rain: 0, thunder: 0 });
+  flash: number = 0;
   private readonly ticks: WorldTicks;
   private readonly lightMap: LightMap;
   private readonly dome: MeshNode;
@@ -207,7 +210,9 @@ export class Sky extends SimObject {
   follow(camera: PerspectiveCamera): void {
     const time = this.ticks.time + this.ticks.partial;
     const angle = celestialAngle(time);
-    this.daylight = daylightAt(angle);
+    // Rain and storms darken the day, as Minecraft's: up to five sixteenths each
+    const { rain, thunder } = this.weather();
+    this.daylight = daylightAt(angle) * (1 - rain * 0.3125) * (1 - thunder * 0.3125);
     const e = camera.position;
 
     // The sun, moon and stars turn about the north-south axis: up at noon, set in the west (-x)
@@ -218,28 +223,36 @@ export class Sky extends SimObject {
       n.transform.position.z = e.z;
     }
     for (const n of [this.sun, this.moon, this.stars]) quat.copy(n.transform.rotation, this.turn);
-    const stars = starsAt(angle);
+    const stars = starsAt(angle) * (1 - rain);
     this.stars.visible = stars > 0.01;
     this.stars.material.opacity = stars;
+    // The sun and moon behind the rain clouds
+    this.sun.visible = this.moon.visible = rain < 0.9;
+    this.sun.material.opacity = this.moon.material.opacity = 1 - rain;
     this.moon.material.map = this.moonPhases[Math.floor(time / DAY) % 8];
 
     // Colors only change with the time: once a tick is enough
     const tick = Math.floor(time);
-    if (tick !== this.lastTick) {
+    if (tick !== this.lastTick || this.flash > 0) {
       this.lastTick = tick;
-      this.paintDome(angle);
-      this.lightMap.update(this.daylight);
-      const c = 0.12 + 0.88 * this.daylight;
+      this.paintDome(angle, rain);
+      // A lightning flash lights everything for a moment
+      this.lightMap.update(Math.min(1, this.daylight + this.flash));
+      const c = (0.12 + 0.88 * this.daylight) * (1 - rain * 0.4);
       this.clouds.material.color = css([c, c, c * 0.95 + 0.05]);
     }
     this.moveClouds(e.x, e.y, e.z, time / TICKS_PER_SECOND);
   }
 
-  /** Colors the dome for a moment of the day, and sets `horizon`. */
-  private paintDome(angle: number): void {
-    const day = this.daylight;
-    const zenith = mix(ZENITH_NIGHT, ZENITH_DAY, day);
-    const horizon = mix(HORIZON_NIGHT, HORIZON_DAY, day);
+  /** Colors the dome for a moment of the day (grayer in the rain), and sets `horizon`. */
+  private paintDome(angle: number, rain: number = 0): void {
+    const day = Math.min(1, this.daylight + this.flash);
+    const gray = (c: Rgb): Rgb => {
+      const l = (c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11) * 0.6;
+      return mix(c, [l, l, l], rain * 0.7);
+    };
+    const zenith = gray(mix(ZENITH_NIGHT, ZENITH_DAY, day));
+    const horizon = gray(mix(HORIZON_NIGHT, HORIZON_DAY, day));
     this.horizon = horizon;
     // The glow is strongest with the sun at the horizon, toward it
     const c = Math.cos(angle * Math.PI * 2);

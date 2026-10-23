@@ -5,7 +5,7 @@ import type { ChunkGenerator } from "../src/chunk.js";
 import { blockBehaviors } from "../src/fluids.js";
 import { memoryPair } from "../src/net/connection.js";
 import { GuestSession } from "../src/net/guest.js";
-import { HostSession } from "../src/net/host.js";
+import { HostSession, type HostOptions } from "../src/net/host.js";
 import { encode, type GuestState } from "../src/net/protocol.js";
 import { stack } from "../src/items.js";
 import { WorldTicks } from "../src/ticks.js";
@@ -18,7 +18,7 @@ import { flatWorld } from "./helpers.js";
 const nothing: ChunkGenerator = { generate: () => {} };
 
 /** A host on a stone floor (top at y 9) with block updates and ticks, and guests to connect to it. */
-function hostWorld() {
+function hostWorld(more: Partial<HostOptions> = {}) {
   const world = flatWorld(10, 4);
   const ticks = new WorldTicks(world, blockBehaviors());
   const updates = new BlockUpdates(world, ticks);
@@ -29,11 +29,14 @@ function hostWorld() {
     ticks,
     worldName: "Shared",
     mode: "creative",
+    difficulty: () => "normal",
+    hardcore: false,
     drops,
     host: () => ({ id: "host", name: "Host", x: 0.5, y: 10, z: 0.5, yaw: 0, pitch: 0 }),
     spawn: () => ({ x: 8.5, y: 10, z: 8.5 }),
     saved: (id) => kept.get(id) ?? null,
     onLeave: (g) => kept.set(g.id, structuredClone(g.state)),
+    ...more,
   });
   world.onChanged = (x, y, z) => {
     updates.changed(x, y, z);
@@ -94,7 +97,7 @@ describe("multiplayer", () => {
     expect(perform(a.world, door, [])).toBe(true);
     a.session.act(door, null);
     await run(3);
-    expect(stateName(world.get(6, 11, 6))).toBe("oak_door[facing=north,half=upper,open=false,hinge=left]");
+    expect(stateName(world.get(6, 11, 6))).toBe("oak_door[facing=north,half=upper,open=false,hinge=left,powered=false]");
     expect(b.world.get(6, 11, 6)).toBe(world.get(6, 11, 6));
     // Water poured by a guest flows on the host, and the flow reaches the guests
     a.session.act(onTop("place", 3, 9, 3, Block.Water), null);
@@ -133,6 +136,21 @@ describe("multiplayer", () => {
       { x: 8.5, z: 8.5, radius: 2 },
       { x: 8.5, z: 8.5, radius: 2 },
     ]);
+  });
+
+  it("tells guests the weather when they join and when it turns, and where lightning strikes", async () => {
+    let weather = { rain: true, thunder: false };
+    const { host, join, run } = hostWorld({ weather: () => weather });
+    const guest = join("guest-1");
+    expect((await guest.session.welcome).weather).toEqual({ rain: true, thunder: false });
+    const heard: unknown[] = [];
+    guest.session.onWeather = (rain, thunder) => heard.push({ rain, thunder });
+    guest.session.onLightning = (x, y, z) => heard.push([x, y, z]);
+    weather = { rain: true, thunder: true };
+    host.weatherChanged();
+    host.lightning(3, 10, -4);
+    await run(2);
+    expect(heard).toEqual([{ rain: true, thunder: true }, [3, 10, -4]]);
   });
 
   it("refuses a guest running another version of Craft", async () => {

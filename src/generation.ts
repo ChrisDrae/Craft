@@ -1,3 +1,4 @@
+import { loadEntity, saveEntity, type SavedEntity } from "./blockEntities.js";
 import { Chunk, type ChunkGenerator, type PackedBlocks } from "./chunk.js";
 import { lightChunk } from "./light.js";
 import { compress, encodeBlocks } from "./save/codec.js";
@@ -24,6 +25,8 @@ export interface GeneratedChunk {
   packed: PackedBlocks | null;
   biomes: Uint8Array;
   generator: number;
+  /** What its generated chests hold (dungeon loot). */
+  entities: SavedEntity[];
 }
 
 /** A lit chunk taken apart for posting. */
@@ -40,6 +43,7 @@ export function takeApart(chunk: Chunk, packed: PackedBlocks | null): GeneratedC
     packed,
     biomes: chunk.biomes,
     generator: chunk.generator,
+    entities: [...chunk.entities].map(([key, e]) => saveEntity(key & 15, key >> 8, (key >> 4) & 15, e)),
   };
 }
 
@@ -82,5 +86,9 @@ export function assembleChunk(data: GeneratedChunk): Chunk {
   chunk.packed = data.packed;
   chunk.biomes = data.biomes;
   chunk.generator = data.generator;
+  for (const s of data.entities) {
+    const e = loadEntity(s);
+    if (e) chunk.entities.set((s.y << 8) | (s.z << 4) | s.x, e);
+  }
   return chunk;
 }

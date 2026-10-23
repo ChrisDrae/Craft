@@ -1,4 +1,4 @@
-import { BLOCKS, Block, Dir, FACING_DIR, Face, STATE_BLOCK, STATE_COUNT, SHAPE, OPAQUE, propertyOf, tileIndex } from "./blocks.js";
+import { BLOCKS, Block, Dir, FACING_DIR, Face, STATE_BLOCK, STATE_COUNT, SHAPE, OPAQUE, Tint, propertyOf, tileIndex } from "./blocks.js";
 import { FACE_CORNERS as CORNERS } from "./chunk.js";
 
 /**
@@ -59,6 +59,105 @@ function turn(box: Box, turns: number): Box {
 }
 
 const TURNS: Readonly<Record<string, number>> = { north: 0, east: 1, south: 2, west: 3 };
+
+/** The direction a face points after a quarter turn as turn() makes (north to east), by Dir. */
+const TURN_DIR: readonly number[] = [Dir.PosZ, Dir.NegZ, Dir.Up, Dir.Down, Dir.NegX, Dir.PosX];
+
+/** Quads turned like turn() turns boxes, their textures turning with them (a bed's pillow stays at its head). */
+function turnQuads(quads: Quad[], turns: number): Quad[] {
+  return quads.map((q) => {
+    const corners = new Float64Array(q.corners);
+    let { cull, dir } = q;
+    for (let t = 0; t < turns; t++) {
+      for (let k = 0; k < 12; k += 3) [corners[k], corners[k + 2]] = [1 - corners[k + 2], corners[k]];
+      if (cull >= 0) cull = TURN_DIR[cull];
+      if (dir >= 0) dir = TURN_DIR[dir];
+    }
+    return { ...q, corners, cull, dir };
+  });
+}
+
+/** Quads moved by a function of their corners (a rotation), the directions they face mapped too (-1 for none). */
+function moveQuads(quads: Quad[], move: (x: number, y: number, z: number) => [number, number, number], dirs: (d: number) => number): Quad[] {
+  return quads.map((q) => {
+    const c = q.corners;
+    const corners = new Float64Array(12);
+    for (let k = 0; k < 12; k += 3) corners.set(move(c[k], c[k + 1], c[k + 2]), k);
+    return { ...q, corners, cull: q.cull >= 0 ? dirs(q.cull) : -1, dir: q.dir >= 0 ? dirs(q.dir) : -1 };
+  });
+}
+
+/** Up onto the wall to the south (from the floor, a quarter turn about x), or onto the ceiling (half a turn about z). */
+const ONTO_WALL = (x: number, y: number, z: number): [number, number, number] => [x, z, 1 - y];
+const WALL_DIRS = [Dir.PosX, Dir.NegX, Dir.NegZ, Dir.PosZ, Dir.Up, Dir.Down];
+const ONTO_CEILING = (x: number, y: number, z: number): [number, number, number] => [1 - x, 1 - y, z];
+const CEILING_DIRS = [Dir.NegX, Dir.PosX, Dir.Down, Dir.Up, Dir.PosZ, Dir.NegZ];
+const onto = (box: Box, face: string): Box => {
+  if (face === "floor") return box;
+  const a = face === "wall" ? ONTO_WALL(box[0], box[1], box[2]) : ONTO_CEILING(box[0], box[1], box[2]);
+  const b = face === "wall" ? ONTO_WALL(box[3], box[4], box[5]) : ONTO_CEILING(box[3], box[4], box[5]);
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])];
+};
+/** A floor model put on its face (floor, the south wall, the ceiling), then turned the way it faces. */
+function attached(quads: Quad[], boxes: Box[], face: string, facing: string): { quads: Quad[]; boxes: Box[] } {
+  const moved = face === "wall" ? moveQuads(quads, ONTO_WALL, (d) => WALL_DIRS[d]) : face === "ceiling" ? moveQuads(quads, ONTO_CEILING, (d) => CEILING_DIRS[d]) : quads;
+  const turns = TURNS[facing];
+  return { quads: turnQuads(moved, turns), boxes: boxes.map((b) => turn(onto(b, face), turns)) };
+}
+
+/** A model built pointing up, pointed to one of six facings (pistons). */
+function pointed(quads: Quad[], list: Box[], facing: string): { quads: Quad[]; boxes: Box[] } {
+  if (facing === "up") return { quads, boxes: list };
+  return facing === "down" ? attached(quads, list, "ceiling", "north") : attached(quads, list, "wall", facing);
+}
+
+/**
+ * A piston's arm: a rod 4 pixels square from 4 pixels into the base up to the head's plate, its sides
+ * showing the band at the top of the piston's side, turned to run along it (as Minecraft's).
+ */
+function rodQuads(tile: number): Quad[] {
+  const rod: Box = [px(6), px(-4), px(6), px(10), px(12), px(10)];
+  return boxQuads(rod, () => tile, [Dir.PosX, Dir.NegX, Dir.PosZ, Dir.NegZ]).map((q) => {
+    const c = q.corners;
+    const uvs = new Float64Array(8);
+    for (let k = 0; k < 4; k++) {
+      const along = c[k * 3 + 1] + px(4);
+      const across = (q.dir === Dir.PosX || q.dir === Dir.NegX ? c[k * 3 + 2] : c[k * 3]) - px(6);
+      uvs.set([along, across], k * 2);
+    }
+    return { ...q, uvs };
+  });
+}
+
+/** Four planes in a # (crops), each seen from both sides, sunk a pixel into the farmland below. */
+function hashQuads(tile: number): Quad[] {
+  const quads: Quad[] = [];
+  const lo = -1 / 16;
+  const hi = 15 / 16;
+  for (const p of [4 / 16, 12 / 16]) {
+    for (const [a, b] of [
+      [
+        [p, 0],
+        [p, 1],
+      ],
+      [
+        [p, 1],
+        [p, 0],
+      ],
+    ]) {
+      // Along z at x = p, and along x at z = p
+      quads.push({ corners: Float64Array.of(a[0], lo, a[1], b[0], lo, b[1], b[0], hi, b[1], a[0], hi, a[1]), uvs: Float64Array.of(0, 1, 1, 1, 1, 0, 0, 0), tile, cull: -1, dir: -1, tint: 0 });
+      quads.push({ corners: Float64Array.of(a[1], lo, a[0], b[1], lo, b[0], b[1], hi, b[0], a[1], hi, a[0]), uvs: Float64Array.of(0, 1, 1, 1, 1, 0, 0, 0), tile, cull: -1, dir: -1, tint: 0 });
+    }
+  }
+  return quads;
+}
+
+/** A flat quad on the ground (redstone dust), over part of the cell (x0..x1, z0..z1), the same part of its tile. */
+function groundQuad(tile: number, x0: number, z0: number, x1: number, z1: number): Quad {
+  const y = 0.25 / 16;
+  return { corners: Float64Array.of(x0, y, z1, x1, y, z1, x1, y, z0, x0, y, z0), uvs: Float64Array.of(x0, z1, x1, z1, x1, z0, x0, z0), tile, cull: -1, dir: Dir.Up, tint: 0 };
+}
 
 /** Flips a box upside down within the cell. */
 const flip = (b: Box): Box => [b[0], 1 - b[4], b[2], b[3], 1 - b[1], b[5]];
@@ -143,6 +242,8 @@ function partsOf(state: number): Parts | null {
   const info = BLOCKS[b];
   const prop = (name: string): string => propertyOf(state, name);
   if (info.shape === "cube" || info.shape === "fluid") return null;
+  // A piston that hasn't pushed is a cube
+  if (info.shape === "piston" && prop("extended") === "false") return null;
   const t = info.textures.map(tileIndex);
   switch (info.shape) {
     case "cross":
@@ -155,9 +256,10 @@ function partsOf(state: number): Parts | null {
         // On a wall: the same stick a little raised, its back a pixel from the wall (built facing south)
         box = turn([px(7), px(3.5), px(1), px(9), px(13.5), px(3)], (TURNS[facing] + 2) % 4);
       }
-      // Its texture comes from the standing stick, wherever the stick is
-      const quads = boxQuads(box, () => t[Face.Side]);
-      const uvQuads = boxQuads(standing, () => t[Face.Side]);
+      // Its texture comes from the standing stick, wherever the stick is; a redstone torch's off is darker
+      const tile = b === Block.RedstoneTorch && prop("lit") === "false" ? tileIndex("redstone_torch_off") : t[Face.Side];
+      const quads = boxQuads(box, () => tile);
+      const uvQuads = boxQuads(standing, () => tile);
       quads.forEach((q, i) => q.uvs.set(uvQuads[i].uvs));
       return { quads, collision: [], selection: [box] };
     }
@@ -219,6 +321,12 @@ function partsOf(state: number): Parts | null {
       const turned = turn(box, TURNS[prop("facing")]);
       return { quads: boxQuads(turned, () => t[Face.Side]), collision: [turned], selection: [turned] };
     }
+    case "vine": {
+      // A sheet on the wall behind, as a ladder's, but nothing to bump into
+      const plate = turn([0, 0, px(15.2), 1, 1, 1], TURNS[prop("facing")]);
+      const front = FACING_DIR[prop("facing")];
+      return { quads: boxQuads(plate, () => t[Face.Side], [front, front ^ 1]), collision: [], selection: [plate] };
+    }
     case "ladder": {
       // On the wall behind it (built facing north: the wall to the south), seen from both sides
       const plate = turn([0, 0, px(15.2), 1, 1, 1], TURNS[prop("facing")]);
@@ -251,6 +359,189 @@ function partsOf(state: number): Parts | null {
       const quads = boxQuads(turned, (d) => (d === front ? t[Face.Front] : t[lookOf(d)]));
       return { quads, collision: [turned], selection: [turned] };
     }
+    case "farmland": {
+      // A pixel lower than a block; its top darker when wet
+      const top = tileIndex(prop("moisture") === "7" ? "farmland_moist" : "farmland");
+      const box: Box = [0, 0, 0, 1, px(15), 1];
+      return { quads: boxQuads(box, (d) => (d === Dir.Up ? top : t[lookOf(d)])), collision: [box], selection: [box] };
+    }
+    case "crop": {
+      const age = Number(prop("age"));
+      const stage = b === Block.Wheat ? `wheat_stage${age}` : `${info.name}_stage${[0, 0, 1, 1, 2, 2, 2, 3][age]}`;
+      return { quads: hashQuads(tileIndex(stage)), collision: [], selection: [[0, 0, 0, 1, px(2 + age * 2), 1]] };
+    }
+    case "stem": {
+      if (info.properties.some((p) => p.name === "facing")) {
+        // Bent toward its fruit (built toward the north)
+        const quad = (a: number, c: number): Quad => ({ corners: Float64Array.of(0.5, 0, a, 0.5, 0, c, 0.5, px(10), c, 0.5, px(10), a), uvs: Float64Array.of(0, 1, 1, 1, 1, 6 / 16, 0, 6 / 16), tile: t[Face.Side], cull: -1, dir: -1, tint: 0 });
+        return { quads: turnQuads([quad(0.5, 0), quad(0, 0.5)], TURNS[prop("facing")]), collision: [], selection: [[px(6), 0, px(6), px(10), px(10), px(10)]] };
+      }
+      const h = px((Number(prop("age")) + 1) * 2);
+      const quads = crossQuads(t[Face.Side]).map((q) => {
+        const corners = new Float64Array(q.corners);
+        for (let k = 1; k < 12; k += 3) corners[k] *= h;
+        const uvs = new Float64Array(q.uvs);
+        for (let k = 1; k < 8; k += 2) uvs[k] = uvs[k] === 0 ? 1 - h : 1;
+        return { ...q, corners, uvs };
+      });
+      return { quads, collision: [], selection: [[px(6), 0, px(6), px(10), Math.max(px(2), h), px(10)]] };
+    }
+    case "wire": {
+      // Lines toward the sides it connects to; one line through if it connects one way, a cross if none
+      const n = prop("north") === "true";
+      const e = prop("east") === "true";
+      const s = prop("south") === "true";
+      const w = prop("west") === "true";
+      const dot = tileIndex("redstone_dust_dot");
+      const ns = tileIndex("redstone_dust_line0");
+      const ew = tileIndex("redstone_dust_line1");
+      const quads: Quad[] = [];
+      const count = [n, e, s, w].filter(Boolean).length;
+      if (count === 0 || ((n || s) && !e && !w)) quads.push(groundQuad(ns, 0, 0, 1, 1));
+      if (count === 0 || ((e || w) && !n && !s)) quads.push(groundQuad(ew, 0, 0, 1, 1));
+      if (count > 0 && (n || s) && (e || w)) {
+        quads.push(groundQuad(dot, 0, 0, 1, 1));
+        if (n) quads.push(groundQuad(ns, 0, 0, 1, 0.5));
+        if (s) quads.push(groundQuad(ns, 0, 0.5, 1, 1));
+        if (w) quads.push(groundQuad(ew, 0, 0, 0.5, 1));
+        if (e) quads.push(groundQuad(ew, 0.5, 0, 1, 1));
+      }
+      return { quads, collision: [], selection: [[0, 0, 0, 1, px(1), 1]] };
+    }
+    case "lever": {
+      // A cobblestone base and a handle leaning one way or the other (built on the floor, facing north)
+      const base: Box = [px(5), 0, px(4), px(11), px(3), px(12)];
+      const stone = tileIndex("cobblestone");
+      const lean = prop("powered") === "true" ? -Math.PI / 4 : Math.PI / 4;
+      const handle = moveQuads(
+        boxQuads([px(7), px(1), px(7), px(9), px(11), px(9)], () => t[Face.Side]),
+        (x, y, z) => {
+          const dy = y - px(1);
+          const dz = z - 0.5;
+          return [x, px(1) + dy * Math.cos(lean) - dz * Math.sin(lean), 0.5 + dy * Math.sin(lean) + dz * Math.cos(lean)];
+        },
+        () => -1,
+      );
+      const { quads, boxes: sel } = attached([...boxQuads(base, () => stone), ...handle], [[px(4), 0, px(4), px(12), px(10), px(12)]], prop("face"), prop("facing"));
+      return { quads, collision: [], selection: sel };
+    }
+    case "button": {
+      const pressed = prop("powered") === "true";
+      const box: Box = [px(5), 0, px(6), px(11), px(pressed ? 1 : 2), px(10)];
+      const { quads, boxes: sel } = attached(boxQuads(box, (d) => t[lookOf(d)]), [box], prop("face"), prop("facing"));
+      return { quads, collision: [], selection: sel };
+    }
+    case "plate": {
+      const box: Box = [px(1), 0, px(1), px(15), px(prop("powered") === "true" ? 0.5 : 1), px(15)];
+      return { quads: boxQuads(box, (d) => t[lookOf(d)]), collision: [], selection: [box] };
+    }
+    case "repeater": {
+      // A thin slab with its arrow on top, two little torches (the back one where the delay puts it); built facing north
+      const on = prop("powered") === "true";
+      const slab: Box = [0, 0, 0, 1, px(2), 1];
+      const top = tileIndex(on ? "repeater_on" : "repeater");
+      const torch = tileIndex(on ? "redstone_torch" : "redstone_torch_off");
+      const back = 6 + (Number(prop("delay")) - 1) * 2;
+      const torches = [px(2), px(back)].flatMap((z0) => boxQuads([px(7), px(2), z0, px(9), px(7), z0 + px(2)], () => torch, [Dir.PosX, Dir.NegX, Dir.Up, Dir.PosZ, Dir.NegZ]));
+      const quads = turnQuads([...boxQuads(slab, (d) => (d === Dir.Up ? top : t[lookOf(d)])), ...torches], TURNS[prop("facing")]);
+      return { quads, collision: [slab], selection: [slab] };
+    }
+    case "piston": {
+      // The base without its head: 12 pixels deep, its inside showing where the head was (built pointing up)
+      const base: Box = [0, 0, 0, 1, px(12), 1];
+      const inner = tileIndex("piston_inner");
+      const { quads, boxes: list } = pointed(boxQuads(base, (d) => (d === Dir.Up ? inner : t[lookOf(d)])), [base], prop("facing"));
+      return { quads, collision: list, selection: list };
+    }
+    case "piston_head": {
+      // The plate, its face sticky or not, and the rod back into the base (built pointing up)
+      const plate: Box = [0, px(12), 0, 1, 1, 1];
+      const face = tileIndex(prop("type") === "sticky" ? "piston_top_sticky" : "piston_top");
+      const side = t[Face.Side];
+      const own = [...boxQuads(plate, (d) => (d === Dir.Up ? face : d === Dir.Down ? t[Face.Bottom] : side)), ...rodQuads(side)];
+      const { quads, boxes: list } = pointed(own, [plate, [px(6), 0, px(6), px(10), px(12), px(10)]], prop("facing"));
+      return { quads, collision: list, selection: list };
+    }
+    case "moving":
+      return { quads: [], collision: [], selection: [] };
+    case "hopper": {
+      // A bowl (its floor 10 pixels up, walls 2 thick round it), a narrower box under it, and a spout
+      const top = tileIndex("hopper_top");
+      const inside = tileIndex("hopper_inside");
+      const outside = t[Face.Side];
+      const floor: Box = [0, px(10), 0, 1, px(11), 1];
+      const walls: Box[] = [
+        [0, px(11), 0, px(2), 1, 1],
+        [px(14), px(11), 0, 1, 1, 1],
+        [px(2), px(11), 0, px(14), 1, px(2)],
+        [px(2), px(11), px(14), px(14), 1, 1],
+      ];
+      const middle: Box = [px(4), px(4), px(4), px(12), px(10), px(12)];
+      const facing = prop("facing");
+      const spout: Box = facing === "down" ? [px(6), 0, px(6), px(10), px(4), px(10)] : turn([px(6), px(4), 0, px(10), px(8), px(4)], TURNS[facing]);
+      const quads = [
+        ...boxQuads(floor, (d) => (d === Dir.Up ? inside : outside)),
+        ...walls.flatMap((b) => boxQuads(b, (d) => (d === Dir.Up ? top : outside))),
+        ...[middle, spout].flatMap((b) => boxQuads(b, () => outside)),
+      ];
+      const list = [floor, ...walls, middle, spout];
+      return { quads, collision: list, selection: [[0, px(10), 0, 1, 1, 1], middle, spout] };
+    }
+    case "comparator": {
+      // A thin slab with its arrow on top; two torches at the back lit while it sends power, one at the
+      // front lit when it subtracts (built facing north, the way it sends power)
+      const on = Number(prop("power")) > 0;
+      const slab: Box = [0, 0, 0, 1, px(2), 1];
+      const top = tileIndex(on ? "comparator_on" : "comparator");
+      const torch = (lit: boolean): number => tileIndex(lit ? "redstone_torch" : "redstone_torch_off");
+      const stick = (x: number, z: number, lit: boolean, h: number): Quad[] => boxQuads([px(x), px(2), px(z), px(x + 2), px(h), px(z + 2)], () => torch(lit), [Dir.PosX, Dir.NegX, Dir.Up, Dir.PosZ, Dir.NegZ]);
+      const quads = turnQuads(
+        [...boxQuads(slab, (d) => (d === Dir.Up ? top : t[lookOf(d)])), ...stick(3, 11, on, 7), ...stick(11, 11, on, 7), ...stick(7, 2, prop("mode") === "subtract", 5)],
+        TURNS[prop("facing")],
+      );
+      return { quads, collision: [slab], selection: [slab] };
+    }
+    case "cable": {
+      // A rod through the middle, and arms to the sides it connects to; insulated cable is thicker
+      const half = px(STATE_BLOCK[state] === Block.InsulatedCopperCable ? 3 : 2);
+      const [lo, hi] = [0.5 - half, 0.5 + half];
+      const list: Box[] = [[lo, lo, lo, hi, hi, hi]];
+      const arms: Record<string, Box> = {
+        north: [lo, lo, 0, hi, hi, lo],
+        south: [lo, lo, hi, hi, hi, 1],
+        west: [0, lo, lo, lo, hi, hi],
+        east: [hi, lo, lo, 1, hi, hi],
+        down: [lo, 0, lo, hi, lo, hi],
+        up: [lo, hi, lo, hi, 1, hi],
+      };
+      for (const [side, box] of Object.entries(arms)) if (prop(side) === "true") list.push(box);
+      return { quads: list.flatMap((b) => boxQuads(b, () => t[Face.Side])), collision: list, selection: list };
+    }
+    case "bed": {
+      // Built facing north (the head toward -z), then turned. A side shows Minecraft's texture of the
+      // opposite side: Craft's world is Minecraft's mirrored, and so the pillow stays at the head end
+      const color = info.name.slice(0, -"_bed".length);
+      const head = prop("part") === "head";
+      const part = head ? "head" : "foot";
+      const end = head ? Dir.NegZ : Dir.PosZ;
+      const tiles: Record<number, number> = {
+        [Dir.Up]: tileIndex(`${color}_bed_${part}_up`),
+        [Dir.Down]: tileIndex("bed_down"),
+        [Dir.PosX]: tileIndex(`${color}_bed_${part}_west`),
+        [Dir.NegX]: tileIndex(`${color}_bed_${part}_east`),
+        [end]: tileIndex(head ? "bed_head_north" : `${color}_bed_foot_south`),
+      };
+      const mattress: Box = [0, px(3), 0, 1, px(9), 1];
+      // Two wooden legs at the end
+      const z0 = head ? 0 : px(13);
+      const legs: Box[] = [
+        [0, 0, z0, px(3), px(3), z0 + px(3)],
+        [px(13), 0, z0, 1, px(3), z0 + px(3)],
+      ];
+      const quads = [...boxQuads(mattress, (d) => tiles[d], [Dir.Up, Dir.Down, Dir.PosX, Dir.NegX, end]), ...legs.flatMap((b) => boxQuads(b, () => tiles[Dir.Down]))];
+      const box: Box = [0, 0, 0, 1, px(9), 1];
+      return { quads: turnQuads(quads, TURNS[prop("facing")]), collision: [box], selection: [box] };
+    }
     case "lilypad": {
       // A leaf lying on the water, seen from above and below
       const leaf: Box = [0, px(0.25), 0, 1, px(0.25), 1];
@@ -259,9 +550,19 @@ function partsOf(state: number): Parts | null {
   }
 }
 
+/** The tint of a state's quads: its block's, but redstone's by its power and a stem's by its age. */
+function tintOf(s: number): number {
+  const b = STATE_BLOCK[s];
+  if (b === Block.RedstoneWire) return Tint.Redstone + Number(propertyOf(s, "power"));
+  if (b === Block.PumpkinStem || b === Block.MelonStem) return Tint.Stem + Number(propertyOf(s, "age"));
+  if (b === Block.AttachedPumpkinStem || b === Block.AttachedMelonStem) return Tint.Stem + 7;
+  return BLOCKS[b].tint;
+}
+
 const PARTS: readonly (Parts | null)[] = Array.from({ length: STATE_COUNT }, (_, s) => {
   const parts = partsOf(s);
-  for (const q of parts?.quads ?? []) q.tint = BLOCKS[STATE_BLOCK[s]].tint;
+  const tint = tintOf(s);
+  for (const q of parts?.quads ?? []) q.tint = tint;
   return parts;
 });
 
@@ -338,7 +639,7 @@ for (let s = 0; s < STATE_COUNT; s++) {
 /**
  * The direction (Dir) of the block a state rests or hangs on, which it can't stay without, or -1:
  * torches and ladders on their wall (or the floor), plants, carpet, snow and cactus on the block below,
- * door halves on the block below (the upper half on the lower one).
+ * door halves on the block below (the upper half on the lower one), a bed's halves on each other.
  */
 export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s) => {
   const shape = SHAPE[s];
@@ -346,7 +647,15 @@ export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s)
     const facing = propertyOf(s, "facing");
     return facing === "up" ? Dir.Down : FACING_DIR[facing] ^ 1;
   }
-  if (shape === "ladder") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
+  if (shape === "ladder" || shape === "vine") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
+  // Levers and buttons on the floor, a wall (behind them) or the ceiling
+  if (shape === "lever" || shape === "button") {
+    const face = propertyOf(s, "face");
+    return face === "floor" ? Dir.Down : face === "ceiling" ? Dir.Up : FACING_DIR[propertyOf(s, "facing")] ^ 1;
+  }
+  if (shape === "crop" || shape === "stem" || shape === "wire" || shape === "plate" || shape === "repeater" || shape === "comparator") return Dir.Down;
+  // A bed's halves hold each other: the head lies the way it faces from the foot
+  if (shape === "bed") return FACING_DIR[propertyOf(s, "facing")] ^ (propertyOf(s, "part") === "foot" ? 0 : 1);
   if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door" || shape === "tall" || shape === "lilypad") return Dir.Down;
   return -1;
 });

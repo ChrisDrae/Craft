@@ -47,8 +47,8 @@ export class WorldTicks extends SimObject {
   /** Called at the end of every tick (furnaces burn then). */
   onTick: (() => void) | null = null;
   private readonly world: VoxelWorld;
-  private readonly behaviors: ReadonlyMap<Block, TickBehavior>;
-  private readonly randomTicked: boolean;
+  private readonly behaviors: Map<Block, TickBehavior>;
+  private randomTicked: boolean;
   private readonly random: Random;
   /** Min-heap by (due, order). */
   private readonly queue: Entry[] = [];
@@ -59,9 +59,15 @@ export class WorldTicks extends SimObject {
   constructor(world: VoxelWorld, behaviors: ReadonlyMap<Block, TickBehavior> = new Map(), seed: number | string = "ticks") {
     super();
     this.world = world;
-    this.behaviors = behaviors;
+    this.behaviors = new Map(behaviors);
     this.randomTicked = [...behaviors.values()].some((b) => b.random);
     this.random = new Random(seed);
+  }
+
+  /** Adds (or replaces) what a block does when ticked (redstone's delays, once the block updates exist). */
+  behave(block: Block, behavior: TickBehavior): void {
+    this.behaviors.set(block, behavior);
+    if (behavior.random) this.randomTicked = true;
   }
 
   /** How far the clock is into the next tick (0-1), for smooth motion between ticks. */
@@ -115,6 +121,8 @@ export class WorldTicks extends SimObject {
   }
 
   override update(dt: number): void {
+    // A paused game stands still (a single player's game menu)
+    if (this.sim?.paused) return;
     this.elapsed += dt;
     let ran = 0;
     while (this.elapsed >= 1 / TICKS_PER_SECOND && ran < MAX_TICKS_PER_FRAME) {
