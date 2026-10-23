@@ -5,7 +5,7 @@ import { BLOCKS, Block, HOTBAR, stateName, stateOf } from "../src/blocks.js";
 import type { ChestEntity, FurnaceEntity } from "../src/blockEntities.js";
 import { itemByName } from "../src/items.js";
 import { readWorldFile } from "../src/save/worldFile.js";
-import { loadSettings, saveSettings } from "../src/settings.js";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../src/settings.js";
 import { freshStore, openWorld } from "./saveHelpers.js";
 
 /**
@@ -147,15 +147,27 @@ describe("saves from earlier versions, mobs", () => {
   });
 });
 
+describe("saves from earlier versions, commands", () => {
+  it("opens a world saved in format 8: a player's own game mode and spawn point", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-8.craftworld", import.meta.url))));
+    expect(data.player).toMatchObject({ mode: "creative", spawn: { x: 100.5, y: 80, z: -20.5 } });
+    expect(data.guests?.[0]).toMatchObject({ name: "Alex", mode: "spectator", spawn: null });
+    // Players from before commands play the world's way
+    const old = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-7.craftworld", import.meta.url))));
+    expect(old.player).toMatchObject({ mode: null, spawn: null });
+  });
+});
+
 describe("settings", () => {
   it("come back as saved, with defaults for anything missing, damaged or out of range", () => {
     const kept = new Map<string, string>();
     const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) };
-    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: null, fov: 70, sensitivity: 1, name: "" });
-    saveSettings({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "  Alex  " }, storage);
-    expect(loadSettings(storage)).toEqual({ renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "Alex" });
-    kept.set("craft.settings", JSON.stringify({ renderer: "vulkan", view: 9999, fov: "wide", sensitivity: -1 }));
-    expect(loadSettings(storage)).toEqual({ renderer: "webgl", view: 160, fov: 70, sensitivity: 0.25, name: "" });
+    expect(loadSettings(storage)).toEqual(DEFAULT_SETTINGS);
+    const keys = { ...DEFAULT_SETTINGS.keys, sneak: "ShiftLeft", sprint: "KeyR" };
+    saveSettings({ ...DEFAULT_SETTINGS, renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "  Alex  ", volume: { ...DEFAULT_SETTINGS.volume, music: 0 }, keys, particles: "minimal" }, storage);
+    expect(loadSettings(storage)).toEqual({ ...DEFAULT_SETTINGS, renderer: "canvas", view: 64, fov: 90, sensitivity: 1.5, name: "Alex", volume: { ...DEFAULT_SETTINGS.volume, music: 0 }, keys, particles: "minimal" });
+    kept.set("craft.settings", JSON.stringify({ renderer: "vulkan", view: 9999, fov: "wide", sensitivity: -1, volume: { master: 7 }, keys: { jump: "<script>" }, guiScale: "huge" }));
+    expect(loadSettings(storage)).toEqual({ ...DEFAULT_SETTINGS, renderer: "webgl", view: 160, fov: 70, sensitivity: 0.25, name: "", volume: { ...DEFAULT_SETTINGS.volume, master: 1 } });
     kept.set("craft.settings", "{not json");
     expect(loadSettings(storage).fov).toBe(70);
     expect(loadSettings(null).renderer).toBe("webgl");

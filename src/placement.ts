@@ -44,6 +44,7 @@ export function placementState(block: Block, aim: Aim, yaw: number): number | nu
       if (ny < 0) return null;
       return stateOf(block, { facing: ny > 0 ? "up" : normalFacing(nx, nz) });
     case "ladder":
+    case "vine":
       if (ny !== 0) return null;
       return stateOf(block, { facing: normalFacing(nx, nz) });
     case "slab":

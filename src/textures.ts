@@ -1,5 +1,5 @@
 import { Random, Texture } from "projector";
-import { DESTROY_TILES, ITEM_TILES, ORB_TILES, bedTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, plantTiles } from "./itemTextures.js";
+import { DESTROY_TILES, ITEM_TILES, ORB_TILES, PARTICLE_TILES, bedTiles, chestFromSheet, chestTiles, destroyStages, furnaceOn, itemTiles, orbTiles, orbsFromSheet, particleTiles, plantTiles } from "./itemTextures.js";
 import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 import { Atlas, TILE, type TilePixels } from "./atlas.js";
 import { Biome, tintColor } from "./biomes.js";
@@ -10,7 +10,7 @@ import type { TileUVs } from "./chunkMesh.js";
  * The textures in the atlas: the blocks' (TILE_NAMES, named after Minecraft's block texture files, in the
  * same order so blocks find them by index), then the items' ("item_stick") and the stages of cracks.
  */
-export const TILES: readonly string[] = [...TILE_NAMES, ...ITEM_TILES, ...DESTROY_TILES, ...ORB_TILES];
+export const TILES: readonly string[] = [...TILE_NAMES, ...ITEM_TILES, ...DESTROY_TILES, ...ORB_TILES, ...PARTICLE_TILES];
 const TILE_AT: ReadonlyMap<string, number> = new Map(TILES.map((n, i) => [n, i]));
 
 /** A texture's slot in the atlas (TILES), or -1. */
@@ -59,6 +59,7 @@ const TINTED: Readonly<Record<string, number>> = {
   large_fern_bottom: Tint.Grass,
   sugar_cane: Tint.Grass,
   oak_leaves: Tint.Foliage,
+  vine: Tint.Foliage,
   jungle_leaves: Tint.Foliage,
   acacia_leaves: Tint.Foliage,
   dark_oak_leaves: Tint.Foliage,
@@ -411,6 +412,14 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
       return scale(hex("#2a8a3a"), (Math.abs(dx) < 0.6 || Math.abs(dy) < 0.6 ? 0.8 : 1) * jitter(rnd, 0.2));
     }),
   );
+  tiles.set(
+    "vine",
+    paint("vine", (x, y, rnd) => {
+      // Strands wandering down, with leaves along them
+      const strand = (x + Math.floor(Math.sin(y * 0.7 + x) * 1.5)) % 5 === 0;
+      return strand || rnd.next() < 0.18 ? scale(hex("#3a7a2a"), jitter(rnd, 0.35)) : [0, 0, 0, 0];
+    }),
+  );
   const pumpkin = hex("#e08a1d");
   tiles.set("pumpkin_side", paint("pumpkin side", (x, _y, rnd) => scale(pumpkin, (x % 4 === 0 ? 0.78 : 1) * jitter(rnd, 0.1))));
   tiles.set(
@@ -445,7 +454,7 @@ export function proceduralTiles(): Map<TileName, TilePixels> {
     if (tile) tiles.set(name, untint(tile, tintColor(kind, Biome.Plains)));
   }
   tiles.set("furnace_front_on", furnaceOn(tiles.get("furnace_front")!));
-  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles()]) tiles.set(name, tile);
+  for (const [name, tile] of [...chestTiles(), ...itemTiles(), ...destroyStages(), ...bedTiles(), ...plantTiles(), ...orbTiles(), ...particleTiles()]) tiles.set(name, tile);
   for (const name of TILES) if (!tiles.has(name)) throw new Error(`No procedural texture for ${name}`);
   return tiles;
 }

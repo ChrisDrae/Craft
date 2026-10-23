@@ -105,6 +105,7 @@ export const Block = {
   Melon: 138,
   BrownMushroom: 139,
   RedMushroom: 140,
+  Vine: 141,
 } as const;
 export type Block = number;
 
@@ -146,7 +147,9 @@ export type Shape =
   /** A chest: a box a pixel in from the sides, 14 pixels high (two side by side make one long box). */
   | "chest"
   /** Half of a bed: a mattress 9 pixels high on two legs, the head and the foot each a block. */
-  | "bed";
+  | "bed"
+  /** Vines: a sheet of leaves on the wall behind, climbed like a ladder, walked through. */
+  | "vine";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
@@ -246,7 +249,7 @@ function materialFor(color: string, opacity: number): Material {
 }
 
 /** Shapes without collision: you walk through plants, torches and fluids. */
-const PASSABLE: readonly Shape[] = ["cross", "torch", "fluid", "tall"];
+const PASSABLE: readonly Shape[] = ["cross", "torch", "fluid", "tall", "vine"];
 
 function block(id: Block, name: string, label: string, colors: Colors, options: BlockOptions = {}): BlockInfo {
   const top = colors.top;
@@ -423,6 +426,7 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Melon, "melon", "melon", { top: "#a3a428", side: "#6f9a2a" }, { textures: { top: "melon_top", side: "melon_side" } }),
   block(Block.BrownMushroom, "brown_mushroom", "brown mushroom", { top: "#9a7558" }, { ...PLANT, emission: 1 }),
   block(Block.RedMushroom, "red_mushroom", "red mushroom", { top: "#c8322a" }, PLANT),
+  block(Block.Vine, "vine", "vines", { top: "#3a7a2a" }, { shape: "vine", opacity: "cutout", replaceable: true, tint: Tint.Foliage, properties: [FACING] }),
 ];
 
 /** Whether a block is a bed (of any color). */

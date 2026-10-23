@@ -586,6 +586,37 @@ start rather than fitted to it later.
 
 ### Phase 8: Feel: sound, particles, hand, camera, UI (M)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Sound (`src/audio.ts`): Web Audio, events by Minecraft's names from its sounds.json, copied out of the
+  version's asset index by `npm run textures` (241 files, 23 MB with eight music tracks; music for a world
+  in its own 'music.creative' or 'music.game'). Positional within 16 blocks, a volume per kind (master,
+  music, blocks, monsters, animals, players, ambient). Footsteps by the block underfoot every 1.67 blocks,
+  breaking, placing, mining hits, doors, chests, furnaces crackling, lava popping, eating and burping,
+  picking up, experience and levels, hurts and falls, splashes, bows and arrows, mobs calling, hurt and
+  dying, creepers' fuses, explosions, caves; music every 10 to 20 minutes. Without imported sounds Craft
+  makes small ones of its own and plays no music.
+- Particles (`src/particles.ts`): one mesh of camera-facing quads (one draw call, so Projector's R18 wasn't
+  needed): block pieces with the block's texture, mining bits, sprint dust, splashes, torch and furnace
+  smoke and flames (from blocks near the player picked at random, as Minecraft's), explosions, critical
+  hits, crumbs while eating, lava drops. Minecraft's particle textures when imported. WebGL only.
+- The hand (`src/hand.ts`): the arm (in the player's skin) or the held item, on Projector's new Front layer
+  (R15, Projector 0.5.0: drawn last over a cleared depth buffer); it swings, dips when the item changes,
+  raises food while eating and draws a bow back.
+- Camera (`src/camera.ts`): Minecraft's bobbing, a wider view sprinting and flying, a tilt when hurt, and F5
+  for third person behind and in front, as near as walls allow, showing the player's model.
+- Players are drawn with Minecraft's player model now (overlay layers included), in Minecraft's nine
+  default skins by id when imported, Craft's own skin in their shirt color otherwise.
+- Sneaking (C by default, as Craft's sprint is Shift): a third of the speed, the eyes lower, no stepping
+  off edges, holding on to ladders. Vines grow on jungle and swamp trees and are climbed (generator 4).
+- F3 shows frames, the renderer's work, position, block and chunk, facing, biome, light, time, the block
+  looked at, loaded chunks and mobs.
+- Chat (T) and commands (/): /gamemode, /time, /tp, /give, /kill, /spawnpoint, /seed, /difficulty, /summon,
+  /weather (with Phase 9), /help; for the world's host (not guests, not hardcore). A player's own game
+  mode and spawn point are saved (save format 8).
+- Options: volumes, the hotbar's size, smooth lighting, view bobbing, FOV effects, particles, and every key.
+- Multiplayer (protocol 5): chat; sounds and the pieces of others' broken blocks reach the players near.
+
+
 Parts of this phase can come at any point; sound in particular depends on nothing else.
 
 - **Sound** (`src/audio.ts`, Web Audio): positional sounds for breaking, placing and footsteps per block's
@@ -674,4 +705,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 7 and M are done; next is Phase 8, feel: sound, particles, the hand, camera and UI.
+Phases 0 to 8 and M are done; next is Phase 9: farming, weather and the basics of redstone.

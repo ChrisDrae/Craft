@@ -1,6 +1,13 @@
 import { Canvas2DBackend, DirectionalLight, HemisphereLight, Simulation, WebGLBackend, type RenderBackend } from "projector";
 import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, furnaceAccepts, loadEntity, takeXp, tickFurnaces, type BlockEntity } from "./blockEntities.js";
-import { BLOCKS, Block, DIR_X, DIR_Z, FACING_DIR, HOTBAR, LEFT_OF, RIGHT_OF, SOLID, blockOf, isBed, propertyOf } from "./blocks.js";
+import { BLOCKS, Block, DIR_X, DIR_Z, FACING_DIR, FLUID, HOTBAR, LEFT_OF, RIGHT_OF, SHAPE, SOLID, STATE_BLOCK, blockOf, isBed, propertyOf } from "./blocks.js";
+import { Sounds, soundGroup, type SoundCategory } from "./audio.js";
+import { CameraEffects } from "./camera.js";
+import { MESHING } from "./chunkMesh.js";
+import { runCommand, type CommandContext } from "./commands.js";
+import { Hand } from "./hand.js";
+import { Particles } from "./particles.js";
+import { levelOf } from "./vitals.js";
 import { WORLD_HEIGHT, type ChunkGenerator } from "./chunk.js";
 import { Drops } from "./drops.js";
 import { Icons } from "./icons.js";
@@ -26,15 +33,16 @@ import { Hosting } from "./net/rtc.js";
 import type { GameMode, GuestRecord, PlayerLife, PlayerRecord, Position, WorldMeta } from "./save/format.js";
 import type { WorldStore } from "./save/store.js";
 import { WorldSave } from "./save/worldSave.js";
-import { playerId, viewDistance, type Settings } from "./settings.js";
+import { playerId, viewDistance, type KeyAction, type Settings } from "./settings.js";
 import { DAY, Sky, css } from "./sky.js";
 import { BREAKING, Survival } from "./survival.js";
 import { Terrain, type TerrainTextures } from "./terrain.js";
 import { blockBehaviors } from "./fluids.js";
-import { AtlasTexture, animatedFrames, blockAtlas, importedTextures, proceduralTiles } from "./textures.js";
+import { AtlasTexture, animatedFrames, atlasIndex, blockAtlas, importedTextures, proceduralTiles } from "./textures.js";
 import { TICKS_PER_SECOND, WorldTicks } from "./ticks.js";
 import { BlockUpdates } from "./updates.js";
 import { formatWhen, h } from "./ui/dom.js";
+import { debugLines } from "./ui/debug.js";
 import { Hud, hudSprites } from "./ui/hud.js";
 import { ItemScreen } from "./ui/items.js";
 import { optionsScreen } from "./ui/options.js";
@@ -50,6 +58,15 @@ const SLEEP_TICKS = 100;
 const LOCAL = "host";
 /** Milliseconds between the host's mob updates, over which a guest moves them. */
 const MOB_UPDATES = 100;
+/** Particles by the setting: all, fewer, the fewest. */
+const PARTICLES: Readonly<Record<Settings["particles"], number>> = { all: 1, decreased: 0.5, minimal: 0.15 };
+/** Lines of chat shown while it is open. */
+const CHAT_LINES = 12;
+
+/** A key's name as players know it: "KeyW" is W, "ShiftLeft" Shift. */
+export function keyName(code: string): string {
+  return code.replace(/^Key|^Digit/, "").replace(/(Left|Right)$/, "").replace("Slash", "/");
+}
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -93,8 +110,8 @@ function recordOf(g: Guest): GuestData {
 }
 
 function stateOf(r: GuestData): GuestState {
-  const { position, yaw, pitch, selected, inventory, vitals, bed, spectating, flying } = r;
-  return { position: { ...position }, yaw, pitch, selected, inventory: [...inventory], vitals: { ...vitals }, bed, spectating, flying };
+  const { position, yaw, pitch, selected, inventory, vitals, bed, spectating, flying, mode, spawn } = r;
+  return { position: { ...position }, yaw, pitch, selected, inventory: [...inventory], vitals: { ...vitals }, bed, spectating, flying, mode, spawn };
 }
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -141,6 +158,12 @@ export async function startGame(options: GameOptions): Promise<void> {
   const burningEl = element("burning", HTMLElement);
   const sleepEl = element("sleep", HTMLElement);
   const eatingEl = element("eating", HTMLElement);
+  const chatEl = element("chat", HTMLFormElement);
+  const chatInput = element("chat-input", HTMLInputElement);
+  const chatLog = element("chatlog", HTMLElement);
+  const debugEl = element("debug", HTMLElement);
+  MESHING.smooth = settings.smoothLighting;
+  document.documentElement.style.setProperty("--gui", String(settings.guiScale));
 
   const backend = createBackend(canvas, options.renderer);
   const textured = backend instanceof WebGLBackend;
@@ -217,9 +240,12 @@ export async function startGame(options: GameOptions): Promise<void> {
   let bed: Position | null = null;
   /** Died in hardcore: looking on. */
   let spectating = false;
+  /** The player's own game mode (/gamemode) instead of the world's, and their own spawn point (/spawnpoint). */
+  let personal: PlayMode | null = null;
+  let ownSpawn: Position | null = null;
   /** Sets everything that follows from how the player plays now. */
   function applyMode(): void {
-    const playing: PlayMode = spectating ? "spectator" : mode;
+    const playing: PlayMode = spectating ? "spectator" : (personal ?? mode);
     survival.mode = interaction.mode = playing;
     survival.difficulty = difficulty;
     player.mayFly = playing !== "survival";
@@ -236,7 +262,10 @@ export async function startGame(options: GameOptions): Promise<void> {
     const session = guest;
     terrain.onUnload = (chunk) => session.drop(chunk);
     session.onReplace = (chunk) => terrain.drop(chunk);
-    interaction.onAction = (a, held) => session.act(a, held);
+    interaction.onAction = (a, held) => {
+      session.act(a, held);
+      actionEffect(a);
+    };
     sim.onUpdate((dt) => session.report(dt, player));
   }
 
@@ -248,7 +277,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   drops.collectors = () =>
     guest
       ? []
-      : [...(collecting() ? [{ position: player.position, take: (s: ItemStack) => inventory.add(s), xp: (n: number) => (survival.vitals.xp += n) }] : []), ...(host?.collectors() ?? [])];
+      : [...(collecting() ? [{ position: player.position, take: (s: ItemStack) => pickUp(s), xp: (n: number) => gainXp(n) }] : []), ...(host?.collectors() ?? [])];
   const icons = new Icons(tiles);
   const itemView = sim.add(new ItemView(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null));
   itemView.drops = () =>
@@ -275,7 +304,14 @@ export async function startGame(options: GameOptions): Promise<void> {
         difficulty: () => difficulty,
         time: () => ticks.time,
         onHurtPlayer: (id, amount, source, by, push) => (id === LOCAL ? hurtHere(amount, source, by, push) : host?.hurt(id, amount, source, by, push)),
-        onExplosion: (x, y, z, power) => host?.exploded(x, y, z, power),
+        onExplosion: (x, y, z, power) => {
+          host?.exploded(x, y, z, power);
+          explosionEffect(x, y, z, power);
+        },
+        onSound: (event, x, y, z, category) => {
+          sounds.play(event, category, { x, y, z });
+          host?.sound(event, x, y, z, category);
+        },
         onArrowPickup: (id) => (id === LOCAL ? inventory.add(stack(Items.Arrow)) === null : (host?.give(id, { item: "arrow", count: 1 }) ?? false)),
       });
   /** The players as mobs see them: the one here and the guests. */
@@ -397,6 +433,12 @@ export async function startGame(options: GameOptions): Promise<void> {
     return best;
   };
   interaction.onAttack = (id, damage, crit, knockback) => {
+    const strong = interaction.attackStrength > 0.9 || damage > 3;
+    sounds.play(crit ? "entity.player.attack.crit" : strong ? "entity.player.attack.strong" : "entity.player.attack.weak", "players", player.position);
+    if (crit) {
+      const d = sim.camera.getForward({ x: 0, y: 0, z: 0 });
+      particles?.crit(player.position.x + d.x * 2, player.eyeY + d.y * 2 - 0.5, player.position.z + d.z * 2);
+    }
     if (guest) {
       guest.attack(id, damage, crit, knockback);
       return;
@@ -421,6 +463,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     const speed = power * 3 * 20;
     const velocity = { x: d.x * speed, y: d.y * speed, z: d.z * speed };
     const crit = power >= 1;
+    sounds.play("entity.arrow.shoot", "players", player.position, 1, 1 / (Math.random() * 0.4 + 1.2) + power * 0.5);
     if (guest) guest.shoot(from, velocity, crit);
     else mobs!.shoot(from, velocity, { player: LOCAL }, crit, mode === "survival");
   };
@@ -428,7 +471,9 @@ export async function startGame(options: GameOptions): Promise<void> {
   // What broken blocks drop in survival, with experience from ores (the host does a guest's), and what a
   // broken chest or furnace held; breaking makes a little hungry
   interaction.onBroken = (x, y, z, state, held) => {
-    if (mode !== "survival") return;
+    blockEffect("break", x, y, z, state);
+    host?.effect("break", x, y, z, state);
+    if (interaction.mode !== "survival") return;
     survival.vitals.exert(BREAKING);
     if (guest) return;
     drops.spill(x, y, z, dropsOf(state, held, Math.random));
@@ -445,7 +490,72 @@ export async function startGame(options: GameOptions): Promise<void> {
   };
   // Eating: when hungry, held for EAT_TIME
   interaction.canEat = () => interaction.mode === "survival" && survival.vitals.hungry;
-  interaction.onEat = (food) => survival.vitals.eat(food);
+  interaction.onEat = (food) => {
+    survival.vitals.eat(food);
+    sounds.play("entity.player.burp", "players", player.position, 0.5, Math.random() * 0.1 + 0.9);
+  };
+  if (!joined) {
+    interaction.onAction = (a) => actionEffect(a);
+  }
+
+  // Sound and particles ------------------------------------------------------------------------
+  const sounds = new Sounds(() => settings.volume);
+  await sounds.load();
+  const particles = textures ? sim.add(new Particles(world, lightMap, { texture: textures.texture, uvs: textures.uvs })) : null;
+  if (particles) particles.amount = PARTICLES[settings.particles];
+  const at = (x: number, y: number, z: number): { x: number; y: number; z: number } => ({ x: x + 0.5, y: y + 0.5, z: z + 0.5 });
+  /** A block's sound of an action (break, place, step, hit), as Minecraft plays them: breaking a little louder and lower. */
+  function blockSound(state: number, action: "break" | "place" | "step" | "hit" | "fall", where: { x: number; y: number; z: number }, volume: number = 1, pitch: number = 1): void {
+    const group = soundGroup(STATE_BLOCK[state]);
+    if (group) sounds.play(`block.${group}.${action}`, action === "step" ? "players" : "blocks", where, volume, pitch);
+  }
+  /** Someone broke, placed or used a block: its pieces, and its sound. */
+  function blockEffect(kind: "break" | "place" | "use", x: number, y: number, z: number, state: number): void {
+    if (kind === "break") {
+      particles?.breakBlock(x, y, z, state);
+      blockSound(state, "break", at(x, y, z), 1, 0.8);
+    } else if (kind === "place") {
+      blockSound(state, "place", at(x, y, z), 1, 0.8);
+    } else {
+      const shape = SHAPE[state];
+      if (shape === "door" || shape === "trapdoor") sounds.play(`block.wooden_${shape}.${propertyOf(state, "open") === "true" ? "open" : "close"}`, "blocks", at(x, y, z), 1, Math.random() * 0.1 + 0.9);
+    }
+  }
+  /** The player's own placing and using (breaking goes through onBroken): heard and seen here and by the guests. */
+  function actionEffect(a: { act: "break" | "place" | "use"; x: number; y: number; z: number; nx: number; ny: number; nz: number }): void {
+    hand.swing();
+    if (a.act === "break") return;
+    const [x, y, z] = a.act === "place" ? [a.x + a.nx, a.y + a.ny, a.z + a.nz] : [a.x, a.y, a.z];
+    let state = world.get(x, y, z);
+    // Short grass gives way to what is placed: then it went in the block aimed at
+    if (a.act === "place" && state === Block.Air) state = world.get(a.x, a.y, a.z);
+    blockEffect(a.act, x, y, z, state);
+    host?.effect(a.act, x, y, z, state);
+  }
+  /** A guest's action, here on the host. */
+  function guestActed(a: { act: "break" | "place" | "use"; x: number; y: number; z: number; nx: number; ny: number; nz: number }, before: number): void {
+    if (a.act === "break") blockEffect("break", a.x, a.y, a.z, before);
+    else if (a.act === "place") blockEffect("place", a.x + a.nx, a.y + a.ny, a.z + a.nz, world.get(a.x + a.nx, a.y + a.ny, a.z + a.nz));
+    else blockEffect("use", a.x, a.y, a.z, world.get(a.x, a.y, a.z));
+  }
+  function explosionEffect(x: number, y: number, z: number, power: number): void {
+    sounds.play("entity.generic.explode", "blocks", { x, y, z }, 4, (1 + (Math.random() - Math.random()) * 0.2) * 0.7);
+    particles?.explosion(x, y, z, power);
+  }
+  /** Picking up a stack: whatever fits, with a pop. */
+  function pickUp(s: ItemStack): ItemStack | null {
+    const left = inventory.add(s);
+    if (!left || left.count < s.count) sounds.play("entity.item.pickup", "players", player.position, 0.2, ((Math.random() - Math.random()) * 0.7 + 1) * 2);
+    return left;
+  }
+  /** Experience picked up: a chime, and every fifth level a fanfare. */
+  function gainXp(n: number): void {
+    const before = levelOf(survival.vitals.xp).level;
+    survival.vitals.xp += n;
+    const after = levelOf(survival.vitals.xp).level;
+    if (after > before && after % 5 === 0) sounds.play("entity.player.levelup", "players", player.position, 0.75);
+    else sounds.play("entity.experience_orb.pickup", "players", player.position, 0.1, 0.5 + Math.random() * 0.7);
+  }
 
   /** Throws a stack out in front of the player, the way they look. */
   function throwStack(s: ItemStack): void {
@@ -486,10 +596,13 @@ export async function startGame(options: GameOptions): Promise<void> {
       }
     });
     session.onGiven = (s) => {
-      const left = inventory.add(s);
+      const left = pickUp(s);
       if (left) throwStack(left);
     };
-    session.onXp = (n) => (survival.vitals.xp += n);
+    session.onXp = (n) => gainXp(n);
+    session.onSound = (event, x, y, z, category) => sounds.play(event, category as SoundCategory, { x, y, z });
+    session.onEffect = (kind, x, y, z, state) => blockEffect(kind, x, y, z, state);
+    session.onExplosion = (x, y, z, power) => explosionEffect(x, y, z, power);
     session.onNotice = (text) => notice(text);
     session.onRules = (d) => {
       difficulty = d;
@@ -524,11 +637,112 @@ export async function startGame(options: GameOptions): Promise<void> {
   const others = (): PlayerView[] =>
     guest ? guest.others : (host?.guests ?? []).map((g) => ({ id: g.id, name: g.name, ...g.state.position, yaw: g.state.yaw, pitch: g.state.pitch }));
   interaction.others = () => others();
-  const avatars = sim.add(new Avatars(world, lightMap, element("nametags", HTMLElement), canvas));
+  // The view: bobbing, a wider view sprinting, a tilt when hurt, third person (after the crosshair's aim)
+  const view3 = sim.add(new CameraEffects(world, player));
+  view3.fov = (settings.fov * Math.PI) / 180;
+  view3.bobbing = settings.bobbing;
+  view3.fovEffects = settings.fovEffects;
+  view3.hurt = () => survival.vitals.hurt;
+  const selfId = joined ? playerId() : LOCAL;
+  const avatars = sim.add(new Avatars(world, lightMap, element("nametags", HTMLElement), canvas, imported?.mobs ?? null, textured));
   avatars.players = others;
+  avatars.self = () => (view3.perspective !== "first" && !spectating && !player.asleep ? { id: selfId, name: "", x: player.position.x, y: player.position.y, z: player.position.z, yaw: player.yaw, pitch: player.pitch } : null);
   // After the player, so it follows the camera where the player put it; drawn on WebGL only
   const sky = sim.add(new Sky(ticks, lightMap, imported?.sky ?? null));
   sky.visible = textured;
+  // The hand in front of the view
+  const hand = sim.add(new Hand(world, lightMap, textures ? { texture: textures.texture, uvs: textures.uvs } : null, avatars.skinFor(selfId), textured));
+  hand.held = () => inventory.held;
+  hand.showing = () => view3.perspective === "first" && !spectating && !player.asleep && started && !survival.vitals.dead;
+  hand.using = () => ({ eating: interaction.eating, drawing: interaction.drawing });
+  player.keys = settings.keys;
+
+  // Sounds and pieces every frame: the listener with the camera, footsteps, mining, eating, splashes, and
+  // the world around now and then (torches smoking, furnaces burning, lava popping, caves)
+  let lastStep = 0;
+  let hitTimer = 0;
+  let eatTimer = 0;
+  let wasWet = false;
+  let caveTimer = 60;
+  sim.onUpdate((dt) => {
+    const c = sim.camera;
+    const f = c.getForward({ x: 0, y: 0, z: 0 });
+    sounds.listen(c.position.x, c.position.y, c.position.z, f.x, f.y, f.z);
+    sounds.tickMusic(dt, interaction.mode === "creative");
+    if (sim.paused) return;
+    const p = player.position;
+    // A step every 1.67 blocks walked, of the block underfoot (snow or carpet on it, if any)
+    const step = Math.floor(view3.walked);
+    if (step !== lastStep) {
+      lastStep = step;
+      const on = world.get(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z));
+      const below = SHAPE[on] === "snow" || SHAPE[on] === "carpet" ? on : world.get(Math.floor(p.x), Math.floor(p.y - 0.2), Math.floor(p.z));
+      if (!player.sneaking && below !== Block.Air && FLUID[below] === 0) {
+        blockSound(below, "step", { x: p.x, y: p.y, z: p.z }, 0.15);
+        if (player.sprinting) particles?.footstep(p.x, p.y, p.z, below);
+      }
+    }
+    // Mining: the block's hit sound and bits, four times a second
+    const t = interaction.target;
+    if (interaction.progress !== null && t) {
+      hitTimer -= dt;
+      if (hitTimer <= 0) {
+        hitTimer = 0.25;
+        blockSound(t.block, "hit", at(t.x, t.y, t.z), 0.25, 0.5);
+        particles?.hitBlock(t.x, t.y, t.z, t.block, t.nx, t.ny, t.nz);
+        hand.swing();
+      }
+    }
+    // Eating: munching and crumbs
+    if (interaction.eating !== null && inventory.held) {
+      eatTimer -= dt;
+      if (eatTimer <= 0) {
+        eatTimer = 0.2;
+        sounds.play("entity.generic.eat", "players", p, 0.5 + 0.5 * Math.random(), (Math.random() - Math.random()) * 0.2 + 1);
+        const front = { x: p.x + f.x * 0.4, y: player.eyeY - 0.15, z: p.z + f.z * 0.4 };
+        const item = ITEMS[inventory.held.item];
+        if (textures && item.texture) particles?.crumbs(front.x, front.y, front.z, atlasIndex(`item_${item.texture}`));
+      }
+    }
+    // Into water from a fall: a splash
+    const wet = player.inWater;
+    if (wet && !wasWet && player.velocity.y < -4) {
+      sounds.play("entity.player.splash", "players", p, 0.6, 1 + (Math.random() - Math.random()) * 0.4);
+      particles?.splash(p.x, Math.floor(p.y) + 1, p.z);
+    }
+    wasWet = wet;
+    // The blocks around, at random, as Minecraft's animated blocks
+    for (let i = 0; i < 24; i++) {
+      const x = Math.floor(p.x + (Math.random() - 0.5) * 32);
+      const y = Math.floor(p.y + (Math.random() - 0.5) * 32);
+      const z = Math.floor(p.z + (Math.random() - 0.5) * 32);
+      const s = world.get(x, y, z);
+      const b = STATE_BLOCK[s];
+      if (b === Block.Torch) {
+        const facing = propertyOf(s, "facing");
+        const off = facing === "up" ? [0, 0] : [[0, 0.27], [0, -0.27], [-0.27, 0], [0.27, 0]][["north", "south", "east", "west"].indexOf(facing)];
+        const ty = y + (facing === "up" ? 0.7 : 0.92);
+        particles?.smoke(x + 0.5 + off[0], ty, z + 0.5 + off[1]);
+        particles?.flame(x + 0.5 + off[0], ty, z + 0.5 + off[1]);
+      } else if (b === Block.Furnace && propertyOf(s, "lit") === "true") {
+        const d = FACING_DIR[propertyOf(s, "facing")];
+        const fx = x + 0.5 + DIR_X[d] * 0.52;
+        const fz = z + 0.5 + DIR_Z[d] * 0.52;
+        particles?.flame(fx, y + 0.3, fz);
+        particles?.smoke(fx, y + 0.4, fz);
+        if (Math.random() < 0.1) sounds.play("block.furnace.fire_crackle", "blocks", at(x, y, z));
+      } else if (b === Block.Lava && world.get(x, y + 1, z) === Block.Air && Math.random() < 0.05) {
+        particles?.lava(x + Math.random(), y + 1, z + Math.random());
+        sounds.play("block.lava.pop", "blocks", at(x, y, z), 0.2 + Math.random() * 0.2, 0.9 + Math.random() * 0.15);
+      }
+    }
+    // Deep down in the dark now and then a cave's sound
+    caveTimer -= dt;
+    if (caveTimer <= 0) {
+      caveTimer = 60 + Math.random() * 120;
+      if (world.getLight(Math.floor(p.x), Math.floor(player.eyeY), Math.floor(p.z)) >> 4 === 0 && Math.random() < 0.5) sounds.play("ambient.cave", "ambient", { x: p.x + (Math.random() - 0.5) * 16, y: p.y, z: p.z + (Math.random() - 0.5) * 16 }, 0.7, 0.8 + Math.random() * 0.2);
+    }
+  });
 
   // Guests who left since the last save, kept for it (and for when they come back before then)
   const leftGuests = new Map<string, GuestData>();
@@ -590,6 +804,8 @@ export async function startGame(options: GameOptions): Promise<void> {
     survival.vitals.load(l.vitals);
     bed = l.bed ? { ...l.bed } : null;
     spectating = hardcore && l.spectating;
+    personal = hardcore ? null : (l.mode ?? null);
+    ownSpawn = l.spawn ? { ...l.spawn } : null;
     applyMode();
     player.flying = player.flying || (player.mayFly && l.flying);
   };
@@ -637,7 +853,7 @@ export async function startGame(options: GameOptions): Promise<void> {
 
   /** How the player is, for saving (and the host's keeping of a guest). */
   function life(): PlayerLife {
-    return { vitals: survival.vitals.save(), bed, spectating, flying: player.flying };
+    return { vitals: survival.vitals.save(), bed, spectating, flying: player.flying, mode: personal, spawn: ownSpawn };
   }
 
   // The status bar, the red flash of a hit, flames while burning, the darkness of sleep, eating's progress
@@ -718,6 +934,11 @@ export async function startGame(options: GameOptions): Promise<void> {
     interaction.release(2);
     updatePause();
     if (on) return;
+    // Chatting: the mouse is free for typing, the game goes on behind
+    if (chatOpen) {
+      menu.hidden = true;
+      return;
+    }
     friendsShown = false;
     if (ended !== null) showEnded(ended);
     else if (survival.vitals.dead) showDeath();
@@ -733,6 +954,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   function play(): void {
     if (ended !== null || survival.vitals.dead) return;
     started = true;
+    sounds.start();
     Promise.resolve(canvas.requestPointerLock()).catch(() => {
       // Where the browser refuses pointer lock (some embedded or automated browsers), dragging looks around
       // and a click without dragging acts instead
@@ -795,15 +1017,18 @@ export async function startGame(options: GameOptions): Promise<void> {
           "ul",
           { class: "keys" },
           ...[
-            ["WASD", "move"],
-            ["Space", "jump, swim up"],
-            ["Shift", "sprint"],
+            [["forward", "left", "back", "right"].map((a) => keyName(settings.keys[a as KeyAction])).join(""), "move"],
+            [keyName(settings.keys.jump), "jump, swim up"],
+            [keyName(settings.keys.sprint), "sprint"],
+            [keyName(settings.keys.sneak), "sneak"],
             ["Left click", "break, hit"],
             ["Right click", mode === "survival" ? "place, use, eat or draw a bow (hold)" : "place, use, draw a bow (hold)"],
-            ...(mode === "creative" ? [["Space twice", "fly (Shift down)"]] : []),
+            ...(mode === "creative" ? [[`${keyName(settings.keys.jump)} twice`, `fly (${keyName(settings.keys.sprint)} down)`]] : []),
             ["1–9, wheel", "choose from the hotbar"],
-            ["E", mode === "creative" ? "all items" : "inventory"],
-            ["Q", "throw the held item (Ctrl: all of it)"],
+            [keyName(settings.keys.inventory), mode === "creative" ? "all items" : "inventory"],
+            [keyName(settings.keys.drop), "throw the held item (Ctrl: all of it)"],
+            [`${keyName(settings.keys.chat)}, ${keyName(settings.keys.command)}`, "chat, commands"],
+            [`${keyName(settings.keys.perspective)}, ${keyName(settings.keys.debug)}`, "third person, debug screen"],
             ["Esc", "this menu"],
           ].map(([key, what]) => h("li", {}, h("b", {}, key), what)),
         ),
@@ -851,6 +1076,7 @@ export async function startGame(options: GameOptions): Promise<void> {
             if (friendsShown && menu.isConnected && !menu.hidden) showFriends();
           },
           onNotice: (text) => notice(text),
+          onAct: (_id, a, before) => guestActed(a, before),
         }),
       );
       const session = host;
@@ -947,8 +1173,18 @@ export async function startGame(options: GameOptions): Promise<void> {
           terrain.renderDistance = view();
           fogKey = "";
           updateFog();
-          sim.camera.fov = (s.fov * Math.PI) / 180;
+          view3.fov = (s.fov * Math.PI) / 180;
+          view3.bobbing = s.bobbing;
+          view3.fovEffects = s.fovEffects;
           player.sensitivity = LOOK_SPEED * s.sensitivity;
+          player.keys = s.keys;
+          sounds.applyVolumes();
+          if (particles) particles.amount = PARTICLES[s.particles];
+          document.documentElement.style.setProperty("--gui", String(s.guiScale));
+          if (MESHING.smooth !== s.smoothLighting) {
+            MESHING.smooth = s.smoothLighting;
+            for (const chunk of world.chunks.values()) for (const section of chunk.sections) section.dirty = true;
+          }
         },
         showPauseMenu,
       ),
@@ -965,6 +1201,7 @@ export async function startGame(options: GameOptions): Promise<void> {
     }
   });
   canvas.addEventListener("mousedown", (e) => {
+    if (locked() && e.button === 0 && !spectating && !player.asleep) hand.swing();
     if (locked()) interaction.press(e.button);
     else if (dragMode && player.controls) drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
   });
@@ -986,20 +1223,168 @@ export async function startGame(options: GameOptions): Promise<void> {
       items.close();
       return;
     }
+    if (chatOpen) return;
     if (!player.controls) return;
+    const keys = settings.keys;
+    // The debug screen and the view work in any state of play, and the browser's own uses of the keys don't
+    if (e.code === keys.debug) {
+      e.preventDefault();
+      debugShown = !debugShown;
+      debugEl.hidden = !debugShown;
+      return;
+    }
+    if (e.code === keys.perspective) {
+      e.preventDefault();
+      view3.perspective = view3.perspective === "first" ? "behind" : view3.perspective === "behind" ? "front" : "first";
+      return;
+    }
+    if (e.code === keys.chat || e.code === keys.command) {
+      e.preventDefault();
+      openChat(e.code === keys.command ? "/" : "");
+      return;
+    }
     if (player.asleep) {
-      if (e.code === "Space" || e.code.startsWith("Shift")) wakeUp();
+      if (e.code === keys.jump || e.code === keys.sneak || e.code === keys.sprint) wakeUp();
       return;
     }
     if (spectating && e.code !== "Escape") return;
     const digit = /^Digit([1-9])$/.exec(e.code);
     if (digit) interaction.select(Number(digit[1]) - 1);
-    if (e.code === "KeyE") showItems(() => (mode === "creative" ? items.showCreative() : items.showInventory()));
-    if (e.code === "KeyQ") {
+    if (e.code === keys.inventory) showItems(() => (interaction.mode === "creative" ? items.showCreative() : items.showInventory()));
+    if (e.code === keys.drop) {
       const s = interaction.throwHeld(e.ctrlKey);
       if (s) throwStack(s);
     }
     if (e.code === "Escape" && dragMode) setPlaying(false);
+  });
+
+  // Chat (T) and commands (/): lines for everyone, commands for the world's host
+  let chatOpen = false;
+  const chatLines: string[] = [];
+  function openChat(prefix: string): void {
+    chatOpen = true;
+    chatEl.hidden = false;
+    chatLog.hidden = false;
+    chatLog.replaceChildren(...chatLines.slice(-CHAT_LINES).map((l) => h("div", {}, l)));
+    chatInput.value = prefix;
+    // The key that opened the chat isn't typed into it
+    setTimeout(() => chatInput.focus(), 0);
+    if (locked()) document.exitPointerLock();
+    else setPlaying(false);
+  }
+  function closeChat(): void {
+    chatOpen = false;
+    chatEl.hidden = true;
+    chatLog.hidden = true;
+    chatInput.blur();
+    play();
+  }
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.code === "Escape") {
+      e.preventDefault();
+      closeChat();
+    }
+  });
+  chatEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim().slice(0, 256);
+    closeChat();
+    if (!text) return;
+    if (text.startsWith("/")) {
+      if (guest) notice("Commands are the host's: they run where the world is");
+      else if (hardcore) notice("Commands can't be used in hardcore");
+      else runCommand(text, commands);
+      return;
+    }
+    const name = settings.name || (guest ? "Guest" : "Player");
+    if (guest) guest.chat(text);
+    else if (host) host.announce(`<${name}> ${text}`);
+    else notice(`<${name}> ${text}`);
+  });
+  /** What commands do to this game. */
+  const commands: CommandContext = {
+    seed,
+    get position() {
+      return player.position;
+    },
+    say: (text) => notice(text),
+    setMode: (m) => {
+      personal = m === mode ? null : m;
+      applyMode();
+      refreshHotbar();
+    },
+    time: () => ticks.time,
+    setTime: (t) => {
+      ticks.time = Math.max(0, Math.floor(t));
+      host?.syncTime();
+    },
+    teleport: (x, y, z) => {
+      Object.assign(player.position, { x, y, z });
+      player.velocity.x = player.velocity.y = player.velocity.z = 0;
+      player.fallDistance = 0;
+    },
+    players: () => (host?.guests ?? []).map((g) => ({ name: g.name, position: g.state.position })),
+    give: (item, count) => {
+      for (let left = count; left > 0; ) {
+        const n = Math.min(left, ITEMS[item].maxStack);
+        left -= n;
+        const rest = inventory.add(stack(item, n));
+        if (rest) throwStack(rest);
+      }
+    },
+    kill: () => survival.hurt(1e6, "kill", null),
+    setSpawn: (x, y, z) => {
+      ownSpawn = { x, y, z };
+    },
+    setDifficulty: (d) => {
+      if (hardcore) return false;
+      difficulty = d;
+      applyMode();
+      if (save) save.meta = { ...save.meta, difficulty };
+      host?.rulesChanged();
+      return true;
+    },
+    summon: (kind, x, y, z) => {
+      if (!mobs) return false;
+      mobs.spawn(kind, x, y, z);
+      return true;
+    },
+  };
+
+  // The debug screen (F3): frames, where the player is and what is around, what is drawn
+  let debugShown = false;
+  let debugTimer = 0;
+  const frameTimes: number[] = [];
+  sim.onUpdate((dt) => {
+    frameTimes.push(dt);
+    if (frameTimes.length > 120) frameTimes.shift();
+    if (!debugShown) return;
+    debugTimer -= dt;
+    if (debugTimer > 0) return;
+    debugTimer = 0.25;
+    const p = player.position;
+    const bx = Math.floor(p.x);
+    const by = Math.floor(p.y);
+    const bz = Math.floor(p.z);
+    const light = world.getLight(bx, by, bz);
+    const t = interaction.target;
+    debugEl.textContent = debugLines({
+      frames: frameTimes,
+      renderer: textured ? "WebGL 2" : "Canvas 2D",
+      stats: backend.stats,
+      position: p,
+      yaw: player.yaw,
+      pitch: player.pitch,
+      biome: world.chunk(bx >> 4, bz >> 4)?.biomes[(bz & 15) * 16 + (bx & 15)] ?? null,
+      sky: light >> 4,
+      block: light & 15,
+      target: t ? { x: t.x, y: t.y, z: t.z, state: t.block } : null,
+      time: ticks.time,
+      chunks: world.chunks.size,
+      mobs: mobs ? mobs.mobs.size : (guest?.mobs.length ?? 0),
+      mode: interaction.mode,
+      sharing: guest ? "a friend's world" : hosting ? `hosting ${hosting.code}, ${host?.guests.length ?? 0} playing` : "alone",
+    }).join("\n");
   });
 
   // The hotbar: the first nine slots of the inventory, with counts and how worn tools are
@@ -1046,6 +1431,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Screens with items: the inventory (E), the creative list, crafting tables, chests, furnaces
   const items = new ItemScreen(menu, { icons, inventory, spill: throwStack });
   items.onClose = () => {
+    if (openContainer?.entity.kind === "chest") sounds.play("block.chest.close", "blocks", at(openContainer.x, openContainer.y, openContainer.z), 0.5, Math.random() * 0.1 + 0.9);
     if (openContainer && guest) guest.close(openContainer.x, openContainer.y, openContainer.z);
     openContainer = null;
     play();
@@ -1101,6 +1487,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   function showContainer(x: number, y: number, z: number, state: number, e: BlockEntity): void {
     openContainer = { x, y, z, entity: e };
     if (e.kind === "chest") {
+      sounds.play("block.chest.open", "blocks", at(x, y, z), 0.5, Math.random() * 0.1 + 0.9);
       const slots = chestSlots(x, y, z, state, e);
       showItems(() => items.showChest(slots, slots.length > 27 ? "Large chest" : "Chest"));
     } else {
@@ -1148,8 +1535,11 @@ export async function startGame(options: GameOptions): Promise<void> {
   }
 
   // Death: what the player carried and some of their experience fall where they died; everyone is told
-  survival.vitals.onHurt = () => {
+  survival.vitals.onHurt = (amount, source) => {
     if (player.asleep) wakeUp();
+    // A fall lands with a thud; any other hurt with the player's cry
+    if (source === "fall") sounds.play(amount > 4 ? "entity.player.big_fall" : "entity.player.small_fall", "players", player.position);
+    else sounds.play("entity.player.hurt", "players", player.position, 1, (Math.random() - Math.random()) * 0.2 + 1);
   };
   survival.onDeath = () => {
     const v = survival.vitals;
@@ -1222,7 +1612,7 @@ export async function startGame(options: GameOptions): Promise<void> {
         notice("Your home bed was missing or obstructed");
         bed = null;
       }
-      Object.assign(player.position, home ?? spawnPoint);
+      Object.assign(player.position, home ?? ownSpawn ?? spawnPoint);
       if (!home) player.position.y += 0.01;
       player.velocity.x = player.velocity.y = player.velocity.z = 0;
       player.fallDistance = 0;
@@ -1302,6 +1692,9 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Who comes and goes
   const noticeEl = element("notice", HTMLElement);
   function notice(text: string): void {
+    chatLines.push(text);
+    if (chatLines.length > 100) chatLines.shift();
+    if (chatOpen) chatLog.replaceChildren(...chatLines.slice(-CHAT_LINES).map((l) => h("div", {}, l)));
     const line = h("div", {}, text);
     noticeEl.append(line);
     setTimeout(() => (line.style.opacity = "0"), 4000);
@@ -1348,6 +1741,11 @@ export async function startGame(options: GameOptions): Promise<void> {
   Object.assign(globalThis, {
     craft: {
       mobs,
+      sounds,
+      particles,
+      hand,
+      view: view3,
+      commands,
       sim,
       backend,
       world,

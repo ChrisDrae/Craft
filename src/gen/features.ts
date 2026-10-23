@@ -119,6 +119,34 @@ function trunk(w: ChunkWriter, x: number, y: number, z: number, height: number, 
  * ground): the parts of it inside the writer's chunk. Its shape comes from `seed` alone, so every chunk
  * it reaches into grows the same tree.
  */
+/**
+ * Vines on a tree, as Minecraft's jungles and swamps have them: hanging from the sides of its leaves (and
+ * climbing its trunk), one to four blocks down, on about a quarter of the open sides.
+ */
+function hangVines(w: ChunkWriter, rng: Rng, x: number, y0: number, z: number, r: number, h: number, leaves: Block, wood: Block): void {
+  const sides: ReadonlyArray<readonly [number, number, string]> = [
+    [1, 0, "east"],
+    [-1, 0, "west"],
+    [0, 1, "south"],
+    [0, -1, "north"],
+  ];
+  for (let y = y0; y <= y0 + h; y++) {
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const b = w.get(x + dx, y, z + dz);
+        if (b !== leaves && !(b === wood && y > y0 - 3)) continue;
+        for (const [sx, sz, facing] of sides) {
+          if (rng.next() > 0.25) continue;
+          const vx = x + dx + sx;
+          const vz = z + dz + sz;
+          const length = rng.int(1, 4);
+          for (let k = 0; k < length && w.get(vx, y - k, vz) === Block.Air; k++) w.set(vx, y - k, vz, stateOf(Block.Vine, { facing }));
+        }
+      }
+    }
+  }
+}
+
 export function growTree(w: ChunkWriter, kind: TreeKind, x: number, y: number, z: number, seed: number): void {
   const rng = new Rng(seed);
   switch (kind) {
@@ -130,6 +158,7 @@ export function growTree(w: ChunkWriter, kind: TreeKind, x: number, y: number, z
       const height = kind === "birch" ? rng.int(5, 7) : rng.int(4, 6);
       crown(w, rng, x, y + height, z, leaves, kind === "swamp_oak" ? 3 : 2);
       trunk(w, x, y, z, height, wood);
+      if (kind === "swamp_oak") hangVines(w, rng, x, y + height - 3, z, 4, 5, leaves, wood);
       return;
     }
     case "spruce": {
@@ -154,6 +183,7 @@ export function growTree(w: ChunkWriter, kind: TreeKind, x: number, y: number, z
       const height = rng.int(8, 12);
       crown(w, rng, x, y + height, z, Block.JungleLeaves, 3);
       trunk(w, x, y, z, height, Block.JungleLog);
+      hangVines(w, rng, x, y + height - 3, z, 4, 5, Block.JungleLeaves, Block.JungleLog);
       return;
     }
     case "mega_jungle": {

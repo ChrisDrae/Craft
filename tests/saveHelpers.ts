@@ -35,7 +35,7 @@ export function newMeta(id: string, seed: string = "saves"): WorldMeta {
 }
 
 /** A player as a new one is: alive and well. */
-export const LIFE: PlayerLife = { vitals: { ...FRESH_VITALS }, bed: null, spectating: false, flying: false };
+export const LIFE: PlayerLife = { vitals: { ...FRESH_VITALS }, bed: null, spectating: false, flying: false, mode: null, spawn: null };
 
 export const standing: PlayerState = {
   position: { x: 1.5, y: 80, z: 2.5 },
@@ -48,6 +48,8 @@ export const standing: PlayerState = {
   bed: { x: 3, y: 79, z: 5 },
   spectating: false,
   flying: false,
+  mode: null,
+  spawn: null,
 };
 
 /** A world being played as the game does it: generated directly, with ticks and a save. */

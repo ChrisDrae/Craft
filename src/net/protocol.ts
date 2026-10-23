@@ -12,7 +12,7 @@ import type { DamageSource, Difficulty } from "../vitals.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
@@ -67,6 +67,8 @@ export type ToHost =
   | { t: "shoot"; x: number; y: number; z: number; vx: number; vy: number; vz: number; crit: boolean }
   /** Using the held item on a mob (shears on a sheep). */
   | { t: "useMob"; id: number; held: SavedStack | null }
+  /** A line of chat, for everyone. */
+  | { t: "chat"; text: string }
   /** Lying in a bed, or up again. The night passes when every player sleeps. */
   | { t: "sleep"; asleep: boolean }
   /** Picking up an item lying about: as much as fits, at most `max`. */
@@ -105,6 +107,10 @@ export type ToGuest =
   | { t: "hurt"; amount: number; source: DamageSource; by: string; push: { x: number; y: number; z: number } }
   /** Something blew up there. */
   | { t: "explosion"; x: number; y: number; z: number; power: number }
+  /** A sound there (Minecraft's event name), of a kind (its volume setting). */
+  | { t: "sound"; event: string; x: number; y: number; z: number; category: string }
+  /** Someone broke, placed or used a block there (what it was or is): its pieces and sound. */
+  | { t: "effect"; kind: "break" | "place" | "use"; x: number; y: number; z: number; state: number }
   /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
   | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };

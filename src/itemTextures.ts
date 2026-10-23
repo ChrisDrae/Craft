@@ -14,6 +14,15 @@ import { hex, jitter, paint, scale, type Rgb } from "./paint.js";
 export const ITEM_TILES: readonly string[] = ITEMS.filter((i) => i.texture !== null).map((i) => `item_${i.texture}`);
 /** The ten stages of cracks, from a few to many (Minecraft's block/destroy_stage_N.png). */
 export const DESTROY_TILES: readonly string[] = Array.from({ length: 10 }, (_, i) => `destroy_stage_${i}`);
+/** The particle textures: Minecraft's particle/<name>.png as particle_<name>, or Craft's drawings. */
+export const PARTICLE_TILES: readonly string[] = [
+  ...Array.from({ length: 8 }, (_, i) => `particle_generic_${i}`),
+  ...Array.from({ length: 4 }, (_, i) => `particle_splash_${i}`),
+  "particle_flame",
+  "particle_critical_hit",
+  "particle_lava",
+  ...Array.from({ length: 16 }, (_, i) => `particle_explosion_${i}`),
+];
 /** Orbs of experience from small to large, gray to be colored as they are drawn. */
 export const ORB_TILES: readonly string[] = Array.from({ length: 11 }, (_, i) => `experience_orb_${i}`);
 
@@ -376,6 +385,29 @@ export function furnaceOn(front: TilePixels): TilePixels {
       const glow = y >= 11 ? [255, 160, 40] : [230, 90, 20];
       out.set([glow[0], glow[1], glow[2], 255], o);
     }
+  }
+  return out;
+}
+
+/** Craft's particles: soft puffs of smoke from large to small, droplets, a flame, a star, puffs of a blast. */
+export function particleTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  for (let i = 0; i < 8; i++) {
+    const r = 2 + i * 0.75;
+    out.set(`particle_generic_${i}`, paint(`smoke ${i}`, (x, y, rnd) => (Math.hypot(x - 7.5, y - 7.5) <= r && rnd.next() < 0.85 ? scale([235, 235, 235], jitter(rnd, 0.15)) : CLEAR)));
+  }
+  for (let i = 0; i < 4; i++) out.set(`particle_splash_${i}`, layered(`splash ${i}`, [[disc(7.5, 8.5 - i, 2.5 - i * 0.3), [90, 140, 230]], [disc(7, 7.5 - i, 0.8), [200, 225, 255]]]));
+  out.set("particle_flame", layered("flame", [[(x, y) => ((x - 7.5) / 3) ** 2 + ((y - 9) / 5.5) ** 2 <= 1, [255, 140, 20]], [(x, y) => ((x - 7.5) / 1.6) ** 2 + ((y - 10) / 3) ** 2 <= 1, [255, 230, 120]]]));
+  out.set("particle_critical_hit", layered("crit", [[any(line(7.5, 2, 7.5, 13, 0.8), line(2, 7.5, 13, 7.5, 0.8), line(4, 4, 11, 11, 0.6), line(4, 11, 11, 4, 0.6)), [240, 240, 255], 0.05]]));
+  out.set("particle_lava", layered("lava", [[disc(7.5, 7.5, 3), [255, 120, 20]], [disc(7, 7, 1.5), [255, 220, 90]]]));
+  for (let i = 0; i < 16; i++) {
+    const r = 3 + i * 0.3;
+    out.set(`particle_explosion_${i}`, paint(`blast ${i}`, (x, y, rnd) => {
+      const d = Math.hypot(x - 7.5, y - 7.5);
+      if (d > r + rnd.next() * 2) return CLEAR;
+      const k = 1 - i / 20;
+      return d < r * 0.5 ? scale([255, 240, 200], k * jitter(rnd, 0.2)) : scale([200, 190, 180], k * jitter(rnd, 0.3));
+    }));
   }
   return out;
 }

@@ -56,6 +56,47 @@ function inTile(uvs: TileUVs, tile: number, u: number, v: number): [number, numb
 }
 
 /**
+ * The mesh an item is drawn with, centered on the origin: a block item as a small cube with its faces'
+ * textures, another as its picture standing up, seen from both sides; a box without textures (Canvas 2D).
+ */
+export function itemMesh(item: Item, atlas: { texture: Texture; uvs: TileUVs } | null): Mesh {
+  let mesh: Mesh;
+  const info = ITEMS[item];
+  const block = info.block;
+  if (!atlas) {
+    return Mesh.box(CUBE_SIZE);
+  } else if (block !== null && CUBES.has(BLOCKS[block].shape)) {
+    const quads = [0, 1, 2, 3, 4, 5].map((d) => {
+      const corners: number[] = [];
+      const uvs: number[] = [];
+      for (let k = 0; k < 4; k++) {
+        const c = d * 12 + k * 3;
+        corners.push((CORNERS[c] - 0.5) * CUBE_SIZE, (CORNERS[c + 1] - 0.5) * CUBE_SIZE, (CORNERS[c + 2] - 0.5) * CUBE_SIZE);
+        const [u, v] = cornerUV(d, CORNERS[c], CORNERS[c + 1], CORNERS[c + 2]);
+        uvs.push(...inTile(atlas.uvs, FACE_TILE[block * 6 + d], u, v));
+      }
+      const tint = FACE_TINT[block * 6 + d];
+      const color = tint === Tint.None ? [255, 255, 255] : tintColor(tint, Biome.Plains);
+      return { corners, uvs, color: color.map((c) => c / 255) };
+    });
+    mesh = quadMesh(quads);
+  } else {
+    // A picture standing up, seen from both sides
+    const name = block !== null ? BLOCKS[block].textures[BLOCKS[block].shape === "tall" ? Face.Top : Face.Side] : `item_${info.texture}`;
+    const tile = atlasIndex(name);
+    const s = FLAT_SIZE / 2;
+    const tint = block !== null ? BLOCKS[block].tint : Tint.None;
+    const color = (tint === Tint.None ? [255, 255, 255] : tintColor(tint, Biome.Plains)).map((c) => c / 255);
+    const uv = [...inTile(atlas.uvs, tile, 0, 1), ...inTile(atlas.uvs, tile, 1, 1), ...inTile(atlas.uvs, tile, 1, 0), ...inTile(atlas.uvs, tile, 0, 0)];
+    mesh = quadMesh([
+      { corners: [-s, -s, 0, s, -s, 0, s, s, 0, -s, s, 0], uvs: uv, color },
+      { corners: [s, -s, 0, -s, -s, 0, -s, s, 0, s, s, 0], uvs: uv, color },
+    ]);
+  }
+  return mesh;
+}
+
+/**
  * The items lying about, drawn as Minecraft does: block items as small spinning cubes with their faces'
  * textures, other items as their picture, turning and bobbing; as bright as the light where they lie.
  * Orbs of experience face the camera, glowing green and yellow by turns. Also the cracks over the block
@@ -85,44 +126,13 @@ export class ItemView extends SimObject {
     super();
   }
 
-  /** The mesh an item is drawn with, centered on the origin (made once per item). */
+  /** The mesh an item is drawn with (made once per item). */
   private meshOf(item: Item): Mesh {
     let mesh = this.meshes.get(item);
-    if (mesh) return mesh;
-    const info = ITEMS[item];
-    const block = info.block;
-    const atlas = this.atlas;
-    if (!atlas) {
-      mesh = Mesh.box(CUBE_SIZE);
-    } else if (block !== null && CUBES.has(BLOCKS[block].shape)) {
-      const quads = [0, 1, 2, 3, 4, 5].map((d) => {
-        const corners: number[] = [];
-        const uvs: number[] = [];
-        for (let k = 0; k < 4; k++) {
-          const c = d * 12 + k * 3;
-          corners.push((CORNERS[c] - 0.5) * CUBE_SIZE, (CORNERS[c + 1] - 0.5) * CUBE_SIZE, (CORNERS[c + 2] - 0.5) * CUBE_SIZE);
-          const [u, v] = cornerUV(d, CORNERS[c], CORNERS[c + 1], CORNERS[c + 2]);
-          uvs.push(...inTile(atlas.uvs, FACE_TILE[block * 6 + d], u, v));
-        }
-        const tint = FACE_TINT[block * 6 + d];
-        const color = tint === Tint.None ? [255, 255, 255] : tintColor(tint, Biome.Plains);
-        return { corners, uvs, color: color.map((c) => c / 255) };
-      });
-      mesh = quadMesh(quads);
-    } else {
-      // A picture standing up, seen from both sides
-      const name = block !== null ? BLOCKS[block].textures[BLOCKS[block].shape === "tall" ? Face.Top : Face.Side] : `item_${info.texture}`;
-      const tile = atlasIndex(name);
-      const s = FLAT_SIZE / 2;
-      const tint = block !== null ? BLOCKS[block].tint : Tint.None;
-      const color = (tint === Tint.None ? [255, 255, 255] : tintColor(tint, Biome.Plains)).map((c) => c / 255);
-      const uv = [...inTile(atlas.uvs, tile, 0, 1), ...inTile(atlas.uvs, tile, 1, 1), ...inTile(atlas.uvs, tile, 1, 0), ...inTile(atlas.uvs, tile, 0, 0)];
-      mesh = quadMesh([
-        { corners: [-s, -s, 0, s, -s, 0, s, s, 0, -s, s, 0], uvs: uv, color },
-        { corners: [s, -s, 0, -s, -s, 0, -s, s, 0, s, s, 0], uvs: uv, color },
-      ]);
+    if (!mesh) {
+      mesh = itemMesh(item, this.atlas);
+      this.meshes.set(item, mesh);
     }
-    this.meshes.set(item, mesh);
     return mesh;
   }
 

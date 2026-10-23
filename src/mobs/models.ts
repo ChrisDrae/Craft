@@ -23,6 +23,8 @@ export interface Cube {
   mirror?: boolean;
   /** Its color: for Canvas 2D, and the base of Craft's own skin. */
   color: string;
+  /** A second layer over a part (a player's hat, jacket, sleeves): textured only, see-through where the skin is. */
+  overlay?: boolean;
 }
 
 /** A part: its pivot, its rotation at rest (x, y, z in radians), its boxes. */
@@ -69,7 +71,28 @@ function legs(height: number, x: number, hindZ: number, frontZ: number, color: s
   return [leg("right_hind_leg", -x, hindZ, false), leg("left_hind_leg", x, hindZ, true), leg("right_front_leg", -x, frontZ, false), leg("left_front_leg", x, frontZ, true)];
 }
 
+/** A player: the humanoid with left limbs of their own, and a second layer (hat, jacket, sleeves, trousers). */
+function player(): Model {
+  const o = { overlay: true };
+  return {
+    width: 64,
+    height: 64,
+    parts: [
+      { name: "head", pivot: [0, 0, 0], cubes: [cube(0, 0, -4, -8, -4, 8, 8, 8, "#c8a080"), cube(32, 0, -4, -8, -4, 8, 8, 8, "", { ...o, grow: 0.5 })] },
+      { name: "body", pivot: [0, 0, 0], cubes: [cube(16, 16, -4, 0, -2, 8, 12, 4, "#3a8aa8"), cube(16, 32, -4, 0, -2, 8, 12, 4, "", { ...o, grow: 0.25 })] },
+      { name: "right_arm", pivot: [-5, 2, 0], cubes: [cube(40, 16, -3, -2, -2, 4, 12, 4, "#c8a080"), cube(40, 32, -3, -2, -2, 4, 12, 4, "", { ...o, grow: 0.25 })] },
+      { name: "left_arm", pivot: [5, 2, 0], cubes: [cube(32, 48, -1, -2, -2, 4, 12, 4, "#c8a080"), cube(48, 48, -1, -2, -2, 4, 12, 4, "", { ...o, grow: 0.25 })] },
+      { name: "right_leg", pivot: [-1.9, 12, 0], cubes: [cube(0, 16, -2, 0, -2, 4, 12, 4, "#3a3a8a"), cube(0, 32, -2, 0, -2, 4, 12, 4, "", { ...o, grow: 0.25 })] },
+      { name: "left_leg", pivot: [1.9, 12, 0], cubes: [cube(16, 48, -2, 0, -2, 4, 12, 4, "#3a3a8a"), cube(0, 48, -2, 0, -2, 4, 12, 4, "", { ...o, grow: 0.25 })] },
+    ],
+  };
+}
+
+/** A player's right arm alone, as the first-person hand. */
+export const ARM: Model = { width: 64, height: 64, parts: [{ name: "right_arm", pivot: [0, 24, 0], cubes: [cube(40, 16, -2, -6, -2, 4, 12, 4, "#c8a080"), cube(40, 32, -2, -6, -2, 4, 12, 4, "", { overlay: true, grow: 0.25 })] }] };
+
 export const MODELS = {
+  player: player(),
   zombie: humanoid(64, 4, { head: "#4f7a3a", body: "#2a9a9a", arm: "#4f7a3a", leg: "#3a3a8a" }),
   skeleton: humanoid(32, 2, { head: "#c8c8c8", body: "#b8b8b8", arm: "#c8c8c8", leg: "#c8c8c8" }),
   creeper: {
@@ -214,6 +237,8 @@ export class PosedModel {
     const faces: number[][] = [];
     model.parts.forEach((part, p) => {
       for (const c of part.cubes) {
+        // Without textures the second layer would only hide the first
+        if (c.overlay && !textured) continue;
         const g = c.grow ?? 0;
         let [x0, x1] = [c.x - g, c.x + c.w + g];
         const [y0, y1, z0, z1] = [c.y - g, c.y + c.h + g, c.z - g, c.z + c.d + g];
@@ -240,7 +265,7 @@ export class PosedModel {
           [[5, 1, 2, 6], u2, v1, u4, v2, [1, 0, 0]],
           [[4, 5, 6, 7], u4, v1, u5, v2, [0, 0, 1]],
         ];
-        const rgb = [1, 3, 5].map((i) => parseInt(c.color.slice(i, i + 2), 16) / 255);
+        const rgb = c.overlay ? [1, 1, 1] : [1, 3, 5].map((i) => parseInt(c.color.slice(i, i + 2), 16) / 255);
         for (const [idx, pu0, pv0, pu1, pv1, n] of polys) {
           // Minecraft's corner order: (u1, v0), (u0, v0), (u0, v1), (u1, v1); a mirrored box turns it round
           let quad = idx.map((i, k): [number[], number, number] => [vtx[i], k === 0 || k === 3 ? pu1 : pu0, k < 2 ? pv0 : pv1]);
@@ -316,6 +341,8 @@ export function paintSkin(model: Model, details?: (g: CanvasRenderingContext2D) 
   const rnd = (): number => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const part of model.parts) {
     for (const c of part.cubes) {
+      // The second layer stays clear
+      if (c.overlay) continue;
       const { u, v, w, h, d } = c;
       const rects: Array<[number, number, number, number, number]> = [
         [u + d, v, w, d, 1.08],

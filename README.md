@@ -27,6 +27,9 @@ beds, and eats the food held (hold it). 1–9 or the wheel pick a hotbar slot, t
 block you aim at, E opens the inventory (every item in creative), Q throws the held item (Ctrl+Q the whole
 stack), Esc opens the game menu (options, difficulty, save and quit); a game played alone pauses there.
 The left button also hits the mob under the crosshair; the right one draws a held bow, or shears a sheep.
+C sneaks, T opens the chat and / a command (`/help` lists them), F5 shows the player from behind and in
+front, F3 the debug screen. Every key can be changed in Options, as can the volumes, the hotbar's size,
+smooth lighting, view bobbing and the particles.
 
 <sub>The pictures here show Craft's own textures, painted in code. Minecraft's can be used instead on your
 own computer (see below).</sub>
@@ -269,7 +272,9 @@ npm run textures -- <file>          # a client jar or a resource pack zip
 ```
 
 This copies the block and item textures Craft needs (water and lava animated, the chest from its model's
-texture, the cracks of breaking), and the sun, the moon's phases and the clouds, into `textures/minecraft/`.
+texture, the cracks of breaking), the mobs', the players' skins, particles, the status bar, the sun, the
+moon's phases and the clouds, into `textures/minecraft/`, and from the version's assets (in `.minecraft`)
+the sounds Craft plays and a few music tracks.
 They belong to Mojang, so they stay on your machine: git ignores the folder and `npm run build` leaves it
 out (a built Craft always uses its own textures). Delete the folder to go back to them.
 

@@ -296,7 +296,7 @@ describe("staying alive with friends", () => {
     const welcome = await session.welcome;
     expect(welcome).toMatchObject({ difficulty: "normal", hardcore: false, spawn: { x: 8.5, y: 10, z: 8.5 } });
     expect(welcome.you.vitals.health).toBe(20);
-    session.life({ vitals: { health: 6, food: 9, saturation: 0, exhaustion: 1, air: 300, fire: 0, xp: 30 }, bed: { x: 1, y: 10, z: 2 }, spectating: false, flying: false });
+    session.life({ vitals: { health: 6, food: 9, saturation: 0, exhaustion: 1, air: 300, fire: 0, xp: 30 }, bed: { x: 1, y: 10, z: 2 }, spectating: false, flying: false, mode: null, spawn: null });
     await run(2);
     expect(host.guests[0].state).toMatchObject({ vitals: { health: 6, food: 9, xp: 30 }, bed: { x: 1, y: 10, z: 2 } });
   });

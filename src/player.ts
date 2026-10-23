@@ -1,5 +1,6 @@
 import type { Vec3 } from "projector";
-import { DIR_X, DIR_Z, FLUID, SHAPE } from "./blocks.js";
+import { DIR_X, DIR_Z, FLUID, SHAPE, SOLID } from "./blocks.js";
+import { DEFAULT_KEYS, type KeyAction } from "./settings.js";
 import { Entity } from "./entity.js";
 import { fluidLevel, isFalling } from "./fluids.js";
 import type { VoxelWorld } from "./world.js";
@@ -7,6 +8,8 @@ import type { VoxelWorld } from "./world.js";
 export const PLAYER_HALF_WIDTH = 0.3;
 export const PLAYER_HEIGHT = 1.8;
 export const EYE_HEIGHT = 1.62;
+/** Sneaking, the eyes are this high (Minecraft's 1.27). */
+export const SNEAK_EYE_HEIGHT = 1.27;
 const GRAVITY = 28;
 const JUMP_SPEED = 8.4;
 const WALK_SPEED = 4.3;
@@ -49,6 +52,7 @@ export interface PlayerInput {
   sprint: boolean;
   /** Down while flying (Shift). */
   descend: boolean;
+  sneak: boolean;
 }
 
 /** How far the player moved, by way of moving, since it was last taken (for hunger). */
@@ -75,7 +79,11 @@ export interface Bed {
  */
 export class Player extends Entity {
   /** Read every physics step; filled from the keyboard each frame (set directly when there is none). */
-  readonly input: PlayerInput = { forward: 0, strafe: 0, jump: false, sprint: false, descend: false };
+  readonly input: PlayerInput = { forward: 0, strafe: 0, jump: false, sprint: false, descend: false, sneak: false };
+  /** The keys for moving (the settings'). */
+  keys: Readonly<Record<KeyAction, string>> = DEFAULT_KEYS;
+  /** How high the eyes are over the feet now (lower sneaking). */
+  eyeHeight: number = EYE_HEIGHT;
   /** Radians; yaw 0 looks along +z and grows to the right, pitch grows looking up. */
   yaw: number = 0;
   pitch: number = 0;
@@ -113,7 +121,12 @@ export class Player extends Entity {
   }
 
   get eyeY(): number {
-    return this.position.y + EYE_HEIGHT;
+    return this.position.y + this.eyeHeight;
+  }
+
+  /** Sneaking: on foot, holding the sneak key. */
+  get sneaking(): boolean {
+    return this.input.sneak && !this.flying && !this.noClip;
   }
 
   look(dx: number, dy: number): void {
@@ -140,12 +153,17 @@ export class Player extends Entity {
     if (!kb) return;
     const i = this.input;
     const on = this.controls && !this.asleep;
-    i.forward = on ? kb.axis("KeyS", "KeyW") : 0;
-    i.strafe = on ? kb.axis("KeyA", "KeyD") : 0;
-    i.jump = on && kb.isDown("Space");
-    i.sprint = on && (kb.isDown("ShiftLeft") || kb.isDown("ShiftRight"));
-    i.descend = i.sprint;
+    const k = this.keys;
+    i.forward = on ? kb.axis(k.back, k.forward) : 0;
+    i.strafe = on ? kb.axis(k.left, k.right) : 0;
+    i.jump = on && kb.isDown(k.jump);
+    i.sprint = on && kb.isDown(k.sprint);
+    i.sneak = on && kb.isDown(k.sneak);
+    i.descend = i.sprint || i.sneak;
     this.tapSpace(i.jump);
+    // The eyes lower smoothly when sneaking
+    const eye = this.sneaking ? SNEAK_EYE_HEIGHT : EYE_HEIGHT;
+    this.eyeHeight += (eye - this.eyeHeight) * Math.min(1, dt * 12);
   }
 
   /** A double tap of Space starts or stops flying, where flying is allowed. */
@@ -182,7 +200,8 @@ export class Player extends Entity {
     this.inLava = fluid === 2;
     const wading = this.inWater || this.fluidAt(0.05) !== 0;
     const headOut = this.fluidAt(EYE_HEIGHT) === 0;
-    this.onLadder = SHAPE[this.blockAt(0.1)] === "ladder" || SHAPE[this.blockAt(1)] === "ladder";
+    const climbable = (s: number): boolean => SHAPE[s] === "ladder" || SHAPE[s] === "vine";
+    this.onLadder = climbable(this.blockAt(0.1)) || climbable(this.blockAt(1));
 
     // Forward is (sin yaw, cos yaw) and right is (cos yaw, -sin yaw) on the ground plane
     const sin = Math.sin(this.yaw);
@@ -194,7 +213,7 @@ export class Player extends Entity {
       wx /= len;
       wz /= len;
     }
-    const speed = this.inLava ? LAVA_SPEED : this.inWater ? SWIM_SPEED : sprint ? SPRINT_SPEED : WALK_SPEED;
+    const speed = this.inLava ? LAVA_SPEED : this.inWater ? SWIM_SPEED : sprint ? SPRINT_SPEED : this.sneaking ? WALK_SPEED * 0.3 : WALK_SPEED;
     const grip = this.onGround || this.inWater ? GROUND_GRIP : AIR_GRIP;
     const k = Math.min(1, grip * dt);
     vel.x += (wx * speed - vel.x) * k;
@@ -210,10 +229,16 @@ export class Player extends Entity {
     } else {
       vel.y -= GRAVITY * dt;
     }
-    // On a ladder: up while pushing into it or holding Space, slowly down otherwise
+    // On a ladder: up while pushing into it or holding Space, holding on while sneaking, slowly down otherwise
     if (this.onLadder) {
       if (jump || this.pushingWall) vel.y = LADDER_UP;
+      else if (this.sneaking) vel.y = Math.max(vel.y, 0);
       else vel.y = Math.max(vel.y, -LADDER_DOWN);
+    }
+    // Sneaking on the ground: no stepping off an edge
+    if (this.sneaking && this.onGround && !this.inWater) {
+      if (!this.standsAt(this.position.x + vel.x * dt, this.position.z)) vel.x = 0;
+      if (!this.standsAt(this.position.x, this.position.z + vel.z * dt)) vel.z = 0;
     }
     // Jumping works from any ground, the bottom of shallow water too
     if (jump && this.onGround) {
@@ -230,6 +255,21 @@ export class Player extends Entity {
     if (this.inWater) this.exertion.swum += Math.hypot(moved, this.position.y - before.y);
     else if (sprint) this.exertion.sprinted += moved;
     this.fall(before.y - this.position.y);
+  }
+
+  /** Whether the player would have ground under some part of their feet at (x, z). */
+  private standsAt(x: number, z: number): boolean {
+    const w = this.halfWidth;
+    const y = Math.floor(this.position.y - 0.6);
+    for (const [dx, dz] of [
+      [-w, -w],
+      [w, -w],
+      [-w, w],
+      [w, w],
+    ]) {
+      for (let yy = Math.floor(this.position.y - 0.01); yy >= y; yy--) if (SOLID[this.world.get(Math.floor(x + dx), yy, Math.floor(z + dz))]) return true;
+    }
+    return false;
   }
 
   /** Counts a fall's height, and lands it: water and ladders catch the player. */

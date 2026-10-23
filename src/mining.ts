@@ -59,6 +59,7 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.OakFence]: WOOD_LIKE,
   [Block.Pumpkin]: by("axe", 1),
   [Block.Melon]: by("axe", 1),
+  [Block.Vine]: by("axe", 0.2),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
   [Block.Glowstone]: hand(0.3),
@@ -171,6 +172,8 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return one(Items.GlowstoneDust, between(2, 4));
     case Block.Melon:
       return one(Items.MelonSlice, between(3, 7));
+    case Block.Vine:
+      return held?.item === Items.Shears ? one(Block.Vine) : [];
     case Block.Bookshelf:
       return one(Items.Book, 3);
     case Block.DeadBush:

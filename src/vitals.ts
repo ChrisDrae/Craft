@@ -14,7 +14,7 @@ export const DIFFICULTIES: readonly Difficulty[] = ["peaceful", "easy", "normal"
 export type PlayMode = "survival" | "creative" | "spectator";
 
 /** What hurts. */
-export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion";
+export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion" | "kill";
 
 export const MAX_HEALTH = 20;
 export const MAX_FOOD = 20;
@@ -40,6 +40,7 @@ export const DEATH_MESSAGES: Readonly<Record<DamageSource, string>> = {
   mob: "was slain by",
   arrow: "was shot by",
   explosion: "was blown up by",
+  kill: "was killed",
 };
 
 /** How a player died: "drowned", "was slain by Zombie"; an explosion without a known cause "blew up". */
@@ -177,7 +178,7 @@ export class Vitals {
    */
   damage(amount: number, source: DamageSource, rules: Rules, armor: Armor | null = null, by: string | null = null): boolean {
     if (this.dead || amount <= 0) return false;
-    if (rules.mode === "spectator" || (rules.mode === "creative" && source !== "void")) return false;
+    if (rules.mode === "spectator" || (rules.mode === "creative" && source !== "void" && source !== "kill")) return false;
     let dealt = amount;
     if (this.hurt > 10) {
       if (amount <= this.lastHurt) return false;

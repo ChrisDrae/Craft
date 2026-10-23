@@ -75,6 +75,10 @@ export class GuestSession extends SimObject {
   onHurt: ((amount: number, source: DamageSource, by: string, push: { x: number; y: number; z: number }) => void) | null = null;
   /** Called when something blew up nearby. */
   onExplosion: ((x: number, y: number, z: number, power: number) => void) | null = null;
+  /** Called with a sound to play there. */
+  onSound: ((event: string, x: number, y: number, z: number, category: string) => void) | null = null;
+  /** Called when someone else broke, placed or used a block nearby. */
+  onEffect: ((kind: "break" | "place" | "use", x: number, y: number, z: number, state: number) => void) | null = null;
   /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
   onContainer: ((x: number, y: number, z: number, entity: SavedEntity | null) => void) | null = null;
   /** Called when the host says goodbye or the link breaks, after the welcome. */
@@ -182,6 +186,12 @@ export class GuestSession extends SimObject {
       case "explosion":
         this.onExplosion?.(msg.x, msg.y, msg.z, msg.power);
         return;
+      case "sound":
+        this.onSound?.(String(msg.event), msg.x, msg.y, msg.z, String(msg.category));
+        return;
+      case "effect":
+        this.onEffect?.(msg.kind, msg.x, msg.y, msg.z, msg.state);
+        return;
       case "container":
         this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);
         return;
@@ -221,6 +231,11 @@ export class GuestSession extends SimObject {
   /** Looses an arrow on the host's side. */
   shoot(from: { x: number; y: number; z: number }, velocity: { x: number; y: number; z: number }, crit: boolean): void {
     this.send({ t: "shoot", x: from.x, y: from.y, z: from.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, crit });
+  }
+
+  /** Says something to everyone. */
+  chat(text: string): void {
+    this.send({ t: "chat", text });
   }
 
   /** Uses the held item on a mob (shears). */

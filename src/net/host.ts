@@ -70,6 +70,8 @@ export interface HostOptions {
   onGuests?: () => void;
   /** Called with what everyone is told (a guest died), for the host's own screen. */
   onNotice?: (text: string) => void;
+  /** Called when a guest's action changed a block (with what was there before): its pieces and sound here. */
+  onAct?: (guest: string, a: Action, before: number) => void;
 }
 
 /** A position that came from a guest, if it is one. */
@@ -158,6 +160,27 @@ export class HostSession extends SimObject {
     return true;
   }
 
+  /** A sound for the guests near it (but `except`, who made it and heard it already). */
+  sound(event: string, x: number, y: number, z: number, category: string, except: string | null = null): void {
+    for (const v of this.visitors.values()) {
+      const p = v.state.position;
+      if (v.id !== except && Math.hypot(p.x - x, p.y - y, p.z - z) < 24) this.send(v, { t: "sound", event, x, y, z, category });
+    }
+  }
+
+  /** A block broken, placed or used, for the guests near it (but `except`, who did it). */
+  effect(kind: "break" | "place" | "use", x: number, y: number, z: number, state: number, except: string | null = null): void {
+    for (const v of this.visitors.values()) {
+      const p = v.state.position;
+      if (v.id !== except && Math.hypot(p.x - x, p.y - y, p.z - z) < 32) this.send(v, { t: "effect", kind, x, y, z, state });
+    }
+  }
+
+  /** Tells the guests the time now (it was set). */
+  syncTime(): void {
+    for (const v of this.visitors.values()) this.send(v, { t: "time", time: this.options.ticks.time });
+  }
+
   /** Tells the guests the difficulty changed. */
   rulesChanged(): void {
     for (const v of this.visitors.values()) this.send(v, { t: "rules", difficulty: this.options.difficulty() });
@@ -230,6 +253,8 @@ export class HostSession extends SimObject {
       bed: null,
       spectating: false,
       flying: false,
+      mode: null,
+      spawn: null,
     };
     const view = Math.max(2, Math.min(MAX_VIEW, Math.floor(Number(hello.view) || 6)));
     const visitor: Visitor = { id: hello.id, name, state, conn, view, sent: new Set(), outbox: Promise.resolve(), open: null, asleep: false };
@@ -293,6 +318,11 @@ export class HostSession extends SimObject {
       case "shoot": {
         if (!finite(msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz) || this.distance(v, msg) > 3 || Math.hypot(msg.vx, msg.vy, msg.vz) > 61) return;
         this.options.mobs?.shoot({ x: msg.x, y: msg.y, z: msg.z }, { x: msg.vx, y: msg.vy, z: msg.vz }, { player: v.id }, msg.crit === true, this.options.mode === "survival");
+        return;
+      }
+      case "chat": {
+        const text = String(msg.text ?? "").trim().slice(0, 256);
+        if (text) this.announce(`<${v.name}> ${text}`);
         return;
       }
       case "useMob": {
@@ -385,6 +415,9 @@ export class HostSession extends SimObject {
     const standing = [this.options.host(), ...this.standing()];
     const before = this.options.world.get(a.x, a.y, a.z);
     if (reach && known && unit && perform(this.options.world, a, standing)) {
+      this.options.onAct?.(v.id, a, before);
+      const placed = a.act === "place" ? this.options.world.get(a.x + a.nx, a.y + a.ny, a.z + a.nz) : 0;
+      this.effect(a.act, a.act === "place" ? a.x + a.nx : a.x, a.act === "place" ? a.y + a.ny : a.y, a.act === "place" ? a.z + a.nz : a.z, a.act === "break" ? before : a.act === "place" ? placed : this.options.world.get(a.x, a.y, a.z), v.id);
       if (a.act === "break" && this.options.mode === "survival") {
         const held = loadStack(msg.held);
         this.options.drops.spill(a.x, a.y, a.z, dropsOf(before, held, Math.random));

@@ -62,6 +62,11 @@ export function supported(world: VoxelWorld, x: number, y: number, z: number, st
       return n !== Block.Air && FLUID[n] === 0;
     case "lilypad":
       return (FLUID[n] === 1 && isSource(n)) || nb === Block.Ice;
+    case "vine": {
+      // On a solid wall, or hanging from the vine above
+      const above = world.get(x, y + 1, z);
+      return sturdy(n, d ^ 1) || (STATE_BLOCK[above] === Block.Vine && propertyOf(above, "facing") === propertyOf(state, "facing"));
+    }
     case "bed":
       return nb === STATE_BLOCK[state] && propertyOf(n, "part") !== propertyOf(state, "part") && propertyOf(n, "facing") === propertyOf(state, "facing");
     case "door":

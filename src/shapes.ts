@@ -236,6 +236,12 @@ function partsOf(state: number): Parts | null {
       const turned = turn(box, TURNS[prop("facing")]);
       return { quads: boxQuads(turned, () => t[Face.Side]), collision: [turned], selection: [turned] };
     }
+    case "vine": {
+      // A sheet on the wall behind, as a ladder's, but nothing to bump into
+      const plate = turn([0, 0, px(15.2), 1, 1, 1], TURNS[prop("facing")]);
+      const front = FACING_DIR[prop("facing")];
+      return { quads: boxQuads(plate, () => t[Face.Side], [front, front ^ 1]), collision: [], selection: [plate] };
+    }
     case "ladder": {
       // On the wall behind it (built facing north: the wall to the south), seen from both sides
       const plate = turn([0, 0, px(15.2), 1, 1, 1], TURNS[prop("facing")]);
@@ -388,7 +394,7 @@ export const SUPPORT: Int8Array = Int8Array.from({ length: STATE_COUNT }, (_, s)
     const facing = propertyOf(s, "facing");
     return facing === "up" ? Dir.Down : FACING_DIR[facing] ^ 1;
   }
-  if (shape === "ladder") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
+  if (shape === "ladder" || shape === "vine") return FACING_DIR[propertyOf(s, "facing")] ^ 1;
   // A bed's halves hold each other: the head lies the way it faces from the foot
   if (shape === "bed") return FACING_DIR[propertyOf(s, "facing")] ^ (propertyOf(s, "part") === "foot" ? 0 : 1);
   if (shape === "cross" || shape === "carpet" || shape === "snow" || shape === "cactus" || shape === "door" || shape === "tall" || shape === "lilypad") return Dir.Down;

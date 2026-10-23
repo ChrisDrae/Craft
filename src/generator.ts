@@ -17,8 +17,9 @@ export { SEA_LEVEL };
  * 1. A heightmap with oak forests.
  * 2. Biomes, 3D terrain, caves, ores by depth, structures.
  * 3. Melons in jungles, mushrooms in shady places, chests in dungeons.
+ * 4. Vines in jungles and swamps.
  */
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 /** Density is worked out at points this far apart across, STEP apart up, and interpolated between. */
 const CELL = 4;

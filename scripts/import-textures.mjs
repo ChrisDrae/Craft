@@ -130,6 +130,7 @@ const BLOCKS = [
   "melon_top",
   "brown_mushroom",
   "red_mushroom",
+  "vine",
 ];
 /** The item textures Craft draws (src/items.ts), saved as item_<name>. */
 const ITEMS = [
@@ -221,6 +222,10 @@ const WANTED = new Map([
   ["mob_sheep_wool", ["entity/sheep/sheep_wool.png", "entity/sheep/sheep_fur.png"]],
   ["mob_chicken", ["entity/chicken/chicken_temperate.png", "entity/chicken/temperate_chicken.png", "entity/chicken.png"]],
   ["mob_arrow", ["entity/projectiles/arrow.png"]],
+  // Players wear Minecraft's default skins
+  ...["steve", "alex", "ari", "efe", "kai", "makena", "noor", "sunny", "zuri"].map((n) => [`mob_player_${n}`, [`entity/player/wide/${n}.png`, ...(n === "steve" ? ["entity/steve.png"] : [])]]),
+  // Particles: smoke from large to small, splashes, a flame, a star, an explosion's puffs
+  ...[...Array.from({ length: 8 }, (_, i) => `generic_${i}`), ...Array.from({ length: 4 }, (_, i) => `splash_${i}`), "flame", "critical_hit", "lava", ...Array.from({ length: 16 }, (_, i) => `explosion_${i}`)].map((n) => [`particle_${n}`, [`particle/${n}.png`]]),
   // The status bar: hearts, food, armor, air and the experience bar (Minecraft 1.20.2 and later)
   ...HUD.map((n) => [`hud_${n.replaceAll("/", "_")}`, [`gui/sprites/hud/${n}.png`]]),
   ["sun", ["environment/celestial/sun.png", "environment/sun.png"]],
@@ -325,3 +330,103 @@ const missing = [...WANTED.keys()].filter((n) => !found.includes(n) && !(n === "
 writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify({ source: basename(source.jar), version: source.version, textures: found }, null, 2)}\n`);
 console.log(`Imported ${found.length} textures from ${source.jar} into ${OUT}.`);
 if (missing.length > 0) console.log(`Not in it (Craft draws its own instead): ${missing.join(", ")}`);
+
+// Sounds: from the asset index of the version (an installation's .minecraft/assets), not the jar. The events
+// Craft plays, by Minecraft's names (sounds.json), with the files they pick from.
+const SOUND_GROUPS = ["stone", "wood", "gravel", "grass", "sand", "snow", "wool", "glass", "ladder", "metal"];
+const SOUND_EVENTS = [
+  ...SOUND_GROUPS.flatMap((g) => ["break", "place", "step", "hit", "fall"].map((a) => `block.${g}.${a}`)),
+  ...["hurt", "death", "attack.strong", "attack.weak", "attack.crit", "attack.nodamage", "levelup", "burp", "splash", "small_fall", "big_fall"].map((e) => `entity.player.${e}`),
+  "entity.generic.eat",
+  "entity.generic.explode",
+  "entity.generic.extinguish_fire",
+  "entity.item.pickup",
+  "entity.experience_orb.pickup",
+  "entity.arrow.shoot",
+  "entity.arrow.hit",
+  "entity.arrow.hit_player",
+  "block.chest.open",
+  "block.chest.close",
+  "block.wooden_door.open",
+  "block.wooden_door.close",
+  "block.wooden_trapdoor.open",
+  "block.wooden_trapdoor.close",
+  "block.furnace.fire_crackle",
+  "block.lava.pop",
+  "block.lava.ambient",
+  "block.water.ambient",
+  "ui.button.click",
+  ...["zombie", "skeleton", "spider", "pig", "cow", "sheep", "chicken"].flatMap((m) => ["ambient", "hurt", "death", "step"].map((e) => `entity.${m}.${e}`)),
+  "entity.skeleton.shoot",
+  "entity.creeper.primed",
+  "entity.creeper.hurt",
+  "entity.creeper.death",
+  "entity.sheep.shear",
+  "entity.chicken.egg",
+  "ambient.cave",
+  "music.game",
+  "music.creative",
+];
+/** Music tracks are large: this many per music event. */
+const MUSIC_TRACKS = 8;
+
+/** The asset index of a version installed in .minecraft, as { objects }, or null. */
+function assetIndex(version) {
+  const json = join(minecraftDir(), "versions", version, `${version}.json`);
+  if (!existsSync(json)) return null;
+  const id = JSON.parse(readFileSync(json, "utf8")).assetIndex?.id;
+  const file = id && join(minecraftDir(), "assets", "indexes", `${id}.json`);
+  return file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+}
+
+function importSounds() {
+  const index = assetIndex(source.version);
+  if (!index) {
+    console.log(`No sounds: ${source.version} isn't installed in ${minecraftDir()} (Craft makes its own).`);
+    return;
+  }
+  const object = (name) => {
+    const o = index.objects[`minecraft/${name}`];
+    return o ? join(minecraftDir(), "assets", "objects", o.hash.slice(0, 2), o.hash) : null;
+  };
+  const soundsFile = object("sounds.json");
+  if (!soundsFile || !existsSync(soundsFile)) return;
+  const all = JSON.parse(readFileSync(soundsFile, "utf8"));
+  // An event's sounds, events it refers to followed
+  const resolve = (event, depth = 0) => {
+    const entry = all[event];
+    if (!entry || depth > 4) return [];
+    return entry.sounds.flatMap((s) => {
+      const o = typeof s === "string" ? { name: s } : s;
+      if (o.type === "event") return resolve(o.name.replace(/^minecraft:/, ""), depth + 1);
+      return [{ file: o.name.replace(/^minecraft:/, ""), volume: o.volume ?? 1, pitch: o.pitch ?? 1, weight: o.weight ?? 1, stream: o.stream ?? false }];
+    });
+  };
+  const events = {};
+  let files = 0;
+  let bytes = 0;
+  for (const event of SOUND_EVENTS) {
+    let sounds = resolve(event);
+    if (event.startsWith("music.")) sounds = sounds.slice(0, MUSIC_TRACKS);
+    const kept = [];
+    for (const s of sounds) {
+      const from = object(`sounds/${s.file}.ogg`);
+      if (!from || !existsSync(from)) continue;
+      const to = join(OUT, "sounds", `${s.file}.ogg`);
+      if (!existsSync(to)) {
+        mkdirSync(dirname(to), { recursive: true });
+        const data = readFileSync(from);
+        writeFileSync(to, data);
+        files++;
+        bytes += data.length;
+      }
+      kept.push(s);
+    }
+    if (kept.length > 0) events[event] = kept;
+  }
+  writeFileSync(join(OUT, "sounds.json"), `${JSON.stringify({ version: source.version, events }, null, 1)}
+`);
+  console.log(`Imported ${files} sounds (${Math.round(bytes / 1048576)} MB) for ${Object.keys(events).length} events.`);
+}
+
+importSounds();

@@ -59,6 +59,8 @@ export interface MobsOptions {
   onExplosion?: (x: number, y: number, z: number, power: number) => void;
   /** An arrow stuck where a player can take it: give it to them if they can (returns whether they did). */
   onArrowPickup?: (playerId: string) => boolean;
+  /** A sound at a point (Minecraft's event names): mobs calling, hurt, dying, arrows striking. */
+  onSound?: (event: string, x: number, y: number, z: number, category: "hostile" | "friendly" | "players") => void;
   random?: () => number;
 }
 
@@ -403,6 +405,8 @@ export class Mobs {
       return;
     }
     this.think(mob, players, difficulty);
+    // Now and then a call (creepers keep quiet)
+    if (mob.kind !== "creeper" && this.random() < 1 / 160) this.sound(mob, "ambient");
     const wasOnGround = mob.onGround;
     const fall = mob.fallDistance;
     mob.step(DT);
@@ -481,6 +485,7 @@ export class Mobs {
     if (mob.kind === "chicken" && --mob.eggTime <= 0) {
       mob.eggTime = 6000 + Math.floor(this.random() * 6000);
       this.options.drops.spawn(mob.position.x, mob.position.y + 0.3, mob.position.z, { item: itemByName("egg")!, count: 1, damage: 0 });
+      this.sound(mob, "egg");
     }
     const near = players.find((pl) => this.distance(mob, pl.position) < 6);
     if (near && this.random() < 0.02) mob.lookAt(near.position);
@@ -514,6 +519,7 @@ export class Mobs {
         mob.yaw = mob.headYaw;
         if (sees && flat < 15 && mob.cooldown === 0) {
           this.shootAt(mob, t, difficulty);
+          this.sound(mob, "shoot");
           mob.cooldown = (difficulty === "hard" ? 20 : 40) + Math.floor(this.random() * 20);
         }
         return;
@@ -523,7 +529,8 @@ export class Mobs {
           // Lit: it stands and swells; too far and it calms down
           this.stop(mob);
           if (d > 7 || !this.sees(mob, t)) mob.fuse = Math.max(0, mob.fuse - 1);
-          else if (++mob.fuse >= FUSE) {
+          else if (mob.fuse++ === 0) this.sound(mob, "primed");
+          if (mob.fuse >= FUSE) {
             this.remove(mob);
             this.explode(mob.position.x, mob.position.y + 0.5, mob.position.z, CREEPER_POWER, mob.info.label);
           }
@@ -619,8 +626,10 @@ export class Mobs {
       const t = segmentHitsBox(flight.from, flight.to, { x: q.x - 0.4, y: q.y, z: q.z - 0.4 }, { x: q.x + 0.4, y: q.y + 1.8, z: q.z + 0.4 });
       if (t !== null && (!hit || t < hit.t)) hit = { t, player: p };
     }
+    if (arrow.stuck && !hit) this.options.onSound?.("entity.arrow.hit", arrow.position.x, arrow.position.y, arrow.position.z, "players");
     if (!hit) return;
     const damage = arrow.damage(this.random);
+    this.options.onSound?.(hit.player ? "entity.arrow.hit_player" : "entity.arrow.hit", arrow.position.x, arrow.position.y, arrow.position.z, "players");
     const v = arrow.velocity;
     const flat = Math.hypot(v.x, v.z) || 1;
     const push = { x: (v.x / flat) * KNOCKBACK * 0.6, y: 4, z: (v.z / flat) * KNOCKBACK * 0.6 };
@@ -649,6 +658,7 @@ export class Mobs {
     }
     mob.health -= dealt;
     mob.hurt = 10;
+    if (mob.health > 0) this.sound(mob, "hurt");
     if (push) {
       const v = mob.velocity;
       v.x = v.x / 2 + push.x;
@@ -681,6 +691,7 @@ export class Mobs {
   private die(mob: Mob, _source: string, byPlayer: boolean): void {
     mob.dying = 1;
     mob.health = 0;
+    this.sound(mob, "death");
     const stacks: ItemStack[] = [];
     for (const [name, lo, hi] of mob.info.drops) {
       const n = lo + Math.floor(this.random() * (hi - lo + 1));
@@ -697,6 +708,12 @@ export class Mobs {
     }
   }
 
+  /** A mob's sound (its kind's event: "entity.zombie.hurt"), from where it is. */
+  private sound(mob: Mob, what: string): void {
+    const p = mob.position;
+    this.options.onSound?.(`entity.${mob.kind}.${what}`, p.x, p.y + mob.height / 2, p.z, mob.info.hostile ? "hostile" : "friendly");
+  }
+
   private remove(mob: Mob): void {
     this.mobs.delete(mob.id);
     const key = this.chunkOf.get(mob.id);
@@ -708,6 +725,7 @@ export class Mobs {
   shear(mob: Mob): boolean {
     if (mob.kind !== "sheep" || mob.sheared || !mob.alive) return false;
     mob.sheared = true;
+    this.sound(mob, "shear");
     const p = mob.position;
     this.options.drops.spill(p.x - 0.5, p.y + 0.5, p.z - 0.5, [{ item: Block.WhiteWool + mob.color, count: 1 + Math.floor(this.random() * 3), damage: 0 }]);
     return true;

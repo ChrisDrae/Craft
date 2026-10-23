@@ -26,6 +26,9 @@ const CORNER_UVS: Float32Array = Float32Array.from(
   Array.from({ length: 24 }, (_, i) => cornerUV(Math.floor(i / 4), CORNERS[i * 3], CORNERS[i * 3 + 1], CORNERS[i * 3 + 2])).flat(),
 );
 
+/** How chunks are meshed: smooth light with shaded corners (Minecraft's smooth lighting), or a light per face (Options). */
+export const MESHING = { smooth: true };
+
 /** How dark each face direction is drawn, as in Minecraft: tops full, bottoms half, the sides between. */
 export const SHADE = [0.6, 0.6, 1, 0.5, 0.8, 0.8];
 /** Brightness at a corner with 0-3 of its neighbors blocking (ambient occlusion). */
@@ -326,6 +329,11 @@ function cubeCorners(x: number, y: number, z: number, d: number, occlude: boolea
   const fy = Math.min(y + DIR[d][1], WORLD_HEIGHT - 1);
   const fz = z + DIR[d][2];
   const front = at(fx, fy, fz);
+  if (!MESHING.smooth) {
+    flatLight(front);
+    occlusion.fill(0);
+    return;
+  }
   for (let k = 0; k < 4; k++) {
     const c = d * 12 + k * 3;
     const su = CORNERS[c + ua] > 0 ? 1 : -1;
