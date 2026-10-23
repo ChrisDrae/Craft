@@ -2,7 +2,7 @@ import { SimObject, type Vec3 } from "projector";
 import { REACH, perform, type Action } from "./actions.js";
 import { Block, blockOf, isBed } from "./blocks.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, Inventory } from "./inventory.js";
-import { ITEMS, itemByName, type Food, type Item, type ItemStack } from "./items.js";
+import { ITEMS, Items, itemByName, type Food, type Item, type ItemStack } from "./items.js";
 import { breakTime } from "./mining.js";
 import type { Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
@@ -17,6 +17,18 @@ const REPEAT = 0.25;
 const BREAK_PAUSE = 0.25;
 /** Seconds of holding the right button it takes to eat. */
 export const EAT_TIME = 1.6;
+/** How far mobs can be hit, in survival and creative. */
+const ATTACK_REACH = 3;
+const CREATIVE_ATTACK_REACH = 5;
+/** Knockback of a hit (blocks a second), and more for one struck while sprinting. */
+const KNOCKBACK = 8;
+const SPRINT_KNOCKBACK = 8;
+
+/** How far a bow is drawn (0-1) after `seconds` of holding it, as Minecraft's. */
+export function bowPower(seconds: number): number {
+  const t = seconds;
+  return Math.min(1, (t * t + 2 * t) / 3);
+}
 
 /** What the crosshair can hit in a block: fluids have no boxes, so the ray goes through them. */
 const selectionOf = (state: number): Float64Array => SELECTION[state];
@@ -48,6 +60,22 @@ export class BlockInteraction extends SimObject {
   get eating(): number | null {
     return this.held === "eat" ? Math.min(1, this.eatTime / EAT_TIME) : null;
   }
+  /** How far the bow is drawn (0-1), or null. */
+  get drawing(): number | null {
+    return this.held === "draw" ? bowPower(this.eatTime) : null;
+  }
+  /** The nearest mob along the crosshair within a reach: its id and distance, or null (the world gives it). */
+  mobAt: (x: number, y: number, z: number, dx: number, dy: number, dz: number, reach: number) => { id: number; distance: number } | null = () => null;
+  /** The mob under the crosshair (nearer than any block), or null. */
+  targetMob: { id: number; distance: number } | null = null;
+  /** Called when the player hits a mob: the damage, whether it was critical, the knockback. */
+  onAttack: ((id: number, damage: number, crit: boolean, knockback: number) => void) | null = null;
+  /** Called when the player uses what they hold on a mob (shears on a sheep); returns whether it did anything. */
+  onUseMob: ((id: number, held: ItemStack | null) => boolean) | null = null;
+  /** Called when the player looses an arrow, with how far the bow was drawn (0-1). */
+  onShoot: ((power: number) => void) | null = null;
+  /** Seconds since the last swing, for the strength of the next hit. */
+  private sinceSwing: number = 10;
   /** Called with the selected slot when the selection or the hotbar's items change. */
   onSelect: ((slot: number) => void) | null = null;
   /** Called with every action that changed something, and what was held (a guest sends them to the host). */
@@ -65,7 +93,7 @@ export class BlockInteraction extends SimObject {
   private readonly terrain: Terrain;
   private readonly dir: Vec3 = { x: 0, y: 0, z: 1 };
   private readonly blockAt: (x: number, y: number, z: number) => number;
-  private held: "break" | "place" | "eat" | null = null;
+  private held: "break" | "place" | "eat" | "draw" | null = null;
   private timer: number = 0;
   private eatTime: number = 0;
   /** The block being broken (survival) and seconds spent on it. */
@@ -119,9 +147,68 @@ export class BlockInteraction extends SimObject {
     this.onSelect?.(this.selected);
   }
 
-  /** A mouse button went down: 0 breaks, 1 picks the block aimed at, 2 uses, places or eats. */
+  /**
+   * How strong a hit would be now (0-1): back to full as long after the last swing as the held item takes
+   * to swing (a sword 0.625 seconds, a hand 0.25), as Minecraft's attack cooldown.
+   */
+  get attackStrength(): number {
+    const held = this.inventory.held;
+    const speed = held ? ITEMS[held.item].attackSpeed : 4;
+    return Math.min(1, (this.sinceSwing + 0.025) * speed);
+  }
+
+  /**
+   * Hits the mob under the crosshair, as Minecraft's: the held item's damage (a hand's 1) by how far it has
+   * recovered from the last swing, half again when falling onto it (critical), knocked back more when
+   * sprinting. Weapons wear a use a hit, other tools two.
+   */
+  private attackTarget(): void {
+    const t = this.targetMob;
+    if (!t) return;
+    const held = this.inventory.held;
+    const info = held ? ITEMS[held.item] : null;
+    const strength = this.attackStrength;
+    let damage = (info?.attack ?? 1) * (0.2 + strength * strength * 0.8);
+    const p = this.player;
+    const crit = strength > 0.9 && p.velocity.y < 0 && !p.onGround && !p.inWater && !p.onLadder && !p.flying;
+    if (crit) damage *= 1.5;
+    const knockback = KNOCKBACK + (p.sprinting && strength > 0.9 ? SPRINT_KNOCKBACK : 0);
+    this.sinceSwing = 0;
+    this.onAttack?.(t.id, damage, crit, knockback);
+    if (this.mode === "survival" && info?.tool) this.inventory.wearHeld(info.tool.kind === "sword" ? 1 : 2);
+  }
+
+  /** Whether the player has arrows to shoot (any in creative). */
+  private hasArrows(): boolean {
+    return this.mode === "creative" || this.inventory.slots.some((s) => s?.item === Items.Arrow);
+  }
+
+  /** Looses an arrow from the drawn bow, if drawn far enough: one arrow used up and the bow worn in survival. */
+  private loose(): void {
+    const power = bowPower(this.eatTime);
+    this.held = null;
+    if (power < 0.1 || !this.hasArrows()) return;
+    if (this.mode === "survival") {
+      const i = this.inventory.slots.findIndex((s) => s?.item === Items.Arrow);
+      const s = this.inventory.slots[i]!;
+      this.inventory.put(i, s.count > 1 ? { ...s, count: s.count - 1 } : null);
+      this.inventory.wearHeld(1);
+    }
+    this.onShoot?.(power);
+  }
+
+  /** A mouse button went down: 0 breaks (or hits), 1 picks the block aimed at, 2 uses, places, eats or draws. */
   press(button: number): void {
     if (this.mode === "spectator") return;
+    if (button === 0 && this.targetMob) {
+      this.attackTarget();
+      return;
+    }
+    if (button === 2 && this.targetMob && this.onUseMob?.(this.targetMob.id, this.inventory.held)) {
+      if (this.mode === "survival") this.inventory.wearHeld(1);
+      return;
+    }
+    if (button === 0 && !this.target) this.sinceSwing = 0;
     if (button === 1) {
       if (this.target) this.choose(blockOf(this.target.block));
       return;
@@ -135,8 +222,18 @@ export class BlockInteraction extends SimObject {
   }
 
   release(button: number): void {
+    if (button === 2 && this.held === "draw") this.loose();
     if ((button === 0 && this.held === "break") || (button === 2 && (this.held === "place" || this.held === "eat"))) this.held = null;
     if (button === 0) this.stopBreaking();
+  }
+
+  /** Starts drawing the held bow, if there are arrows. */
+  private startDrawing(): boolean {
+    const held = this.inventory.held;
+    if (!held || held.item !== Items.Bow || !this.hasArrows()) return false;
+    this.held = "draw";
+    this.eatTime = 0;
+    return true;
   }
 
   /** Starts eating the held food, if it is food and the player is hungry. */
@@ -220,6 +317,12 @@ export class BlockInteraction extends SimObject {
   }
 
   override update(dt: number): void {
+    this.sinceSwing += dt;
+    if (this.held === "draw") {
+      if (this.inventory.held?.item !== Items.Bow) this.held = null;
+      else this.eatTime += dt;
+      return;
+    }
     if (this.held === "eat") {
       const held = this.inventory.held;
       if (!held || !ITEMS[held.item].food || !this.canEat()) {
@@ -288,11 +391,17 @@ export class BlockInteraction extends SimObject {
     if (!camera) return;
     if (this.mode === "spectator" || this.player.asleep) {
       this.target = this.hit = this.terrain.target = null;
+      this.targetMob = null;
       return;
     }
     const d = camera.getForward(this.dir);
     const e = camera.position;
     this.target = raycastVoxels(this.blockAt, selectionOf, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
+    // A mob nearer than the block is what the crosshair is on
+    const reach = this.mode === "creative" ? CREATIVE_ATTACK_REACH : ATTACK_REACH;
+    const mob = this.mobAt(e.x, e.y, e.z, d.x, d.y, d.z, Math.min(reach, this.target?.distance ?? reach));
+    this.targetMob = mob;
+    if (mob) this.target = null;
     const t = this.target;
     this.hit = t ? { x: e.x + d.x * t.distance, y: e.y + d.y * t.distance, z: e.z + d.z * t.distance } : null;
     this.terrain.target = t;
@@ -309,8 +418,8 @@ export class BlockInteraction extends SimObject {
         this.onOpen(t.x, t.y, t.z, t.block);
         return;
       }
-      if (!this.useTarget() && !this.startEating()) this.placeAtTarget();
-      if (this.held === "eat") return;
+      if (!this.useTarget() && !this.startDrawing() && !this.startEating()) this.placeAtTarget();
+      if (this.held === "eat" || this.held === "draw") return;
     }
     // Aim again right away, so a held button acts on what is there now
     this.sync();

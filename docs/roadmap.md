@@ -530,6 +530,39 @@ start rather than fitted to it later.
 
 ### Phase 7: Mobs and combat (L)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Models (`src/mobs/models.ts`): Minecraft's part and box definitions ported as they are (texture corners,
+  pivots, rest rotations), mapped into Craft's mirrored world by turning every axis over, so Minecraft's
+  entity textures fit unmirrored; imported from the player's installation (mob_*), Craft paints its own
+  skins on the same layouts otherwise. Each mob is one mesh posed on the CPU every frame (a draw call a
+  mob, shading and the red of a hit in the corner colors), so instancing (R19) wasn't needed.
+- AI (`src/mobs/mobs.ts`): goals in Minecraft's order per kind rather than a general goal system. A* paths
+  (`src/mobs/path.ts`): stepping up a block, dropping up to three, swimming, through open doors,
+  diagonally where both sides are clear, 600 nodes a search, the nearest point when the goal can't be
+  reached. Monsters notice a player within 16 blocks they can see and follow to 32; zombies strike,
+  skeletons keep their distance, strafe and shoot (aimed as Minecraft's), creepers stop, swell for 1.5
+  seconds and blow up (calming down when the player gets away), spiders climb walls, leap, and leave
+  players alone in the light unless hit. Zombies and skeletons burn under the open sky by day.
+- Animals wander, run when hit, follow wheat (cows, sheep, chickens; pigs follow apples until carrots come
+  with farming in Phase 9); sheep have Minecraft's natural colors, are sheared for 1 to 3 wool and grow it
+  back eating grass; chickens lay eggs every 5 to 10 minutes. No breeding yet; no dyeing sheep (no dyes).
+- Spawning: monsters where Minecraft's rule allows (no block light, sky light dimmed by night at most 0 to 7,
+  in groups, 24 to 64 blocks from players, 24 at most), going when far away; animals on grass in daylight
+  (12 at most) and staying; dungeon spawners (zombie, skeleton or spider by position, up to six around).
+- Combat: Minecraft's damage by weapon and its attack cooldown, critical hits falling, knockback (more when
+  sprinting), the hit window for mobs as for players; bows that draw over a second and fire arrows that
+  fall, do damage by speed, stick and can be picked up; explosions by Minecraft's ray method (blast
+  resistance per block, drops one in power, damage by distance and exposure). Monster damage scales with
+  difficulty; armor counts against mobs, arrows and explosions.
+- New items: raw and cooked pork, beef, chicken and mutton, rotten flesh, spider eyes (food without their
+  effects yet), bones, gunpowder, feathers, eggs, arrows, bows, shears. TNT and bone meal wait for Phase 9.
+- Ticking: 20 a second in the world's ticks, drawn between ticks; mobs beyond 96 blocks of every player
+  stand still. Animals are saved with their chunk (save format 7), monsters aren't.
+- Multiplayer (protocol 4): the host runs the mobs and sends each guest those near them ten times a second,
+  which the guest moves smoothly between updates; guests' hits, shots and shears go to the host, which
+  checks their reach; mobs and explosions hurt guests by a message; monsters go after guests too.
+
+
 - **Models:** mobs are boxes in a hierarchy (body, head, legs) shaped like Minecraft's, as Projector mesh
   nodes under one object, so imported entity textures fit them; drawn textures otherwise. Legs swing with the
   walking speed and heads turn.
@@ -641,4 +674,4 @@ Settled on 2026-10-22, all as recommended:
    block textures, with Craft's own fallbacks.
 6. **Redstone:** the basics in Phase 9, pistons right after, comparators and the rest later.
 
-Phases 0 to 6 and M are done; next is Phase 7, mobs and combat.
+Phases 0 to 7 and M are done; next is Phase 8, feel: sound, particles, the hand, camera and UI.

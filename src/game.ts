@@ -5,13 +5,17 @@ import { WORLD_HEIGHT, type ChunkGenerator } from "./chunk.js";
 import { Drops } from "./drops.js";
 import { Icons } from "./icons.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, PLAYER_SLOTS, arraySlot, type Slot } from "./inventory.js";
-import { ITEMS, loadStack, saveStack, type Item, type ItemStack } from "./items.js";
+import { ITEMS, Items, loadStack, saveStack, stack, type Item, type ItemStack } from "./items.js";
 import { ItemView } from "./itemView.js";
 import { dropsOf, xpOf } from "./mining.js";
 import { DirectSupply, WorkerSupply, type ChunkSupply } from "./chunkSupply.js";
 import { SEA_LEVEL, TerrainGenerator } from "./generator.js";
 import { BlockInteraction } from "./interaction.js";
 import { LightMap } from "./lightmap.js";
+import { MOBS, MOB_KINDS } from "./mobs/kinds.js";
+import { ARROW, Flag, Mobs, type MobPlayer } from "./mobs/mobs.js";
+import { segmentHitsBox } from "./mobs/arrow.js";
+import { MobRenderer, type ShownMob } from "./mobs/view.js";
 import { Player } from "./player.js";
 import { Avatars } from "./net/avatars.js";
 import type { Connection } from "./net/connection.js";
@@ -34,7 +38,7 @@ import { formatWhen, h } from "./ui/dom.js";
 import { Hud, hudSprites } from "./ui/hud.js";
 import { ItemScreen } from "./ui/items.js";
 import { optionsScreen } from "./ui/options.js";
-import { DEATH_MESSAGES, DIFFICULTIES, deathXp, type Difficulty, type PlayMode } from "./vitals.js";
+import { DIFFICULTIES, deathMessage, deathXp, type DamageSource, type Difficulty, type PlayMode } from "./vitals.js";
 import { VoxelWorld } from "./world.js";
 
 /** Times of day a player may sleep (Minecraft's: from dusk to just before dawn). */
@@ -42,6 +46,13 @@ const NIGHT_START = 12542;
 const NIGHT_END = 23459;
 /** Ticks everyone must lie in bed before the night passes. */
 const SLEEP_TICKS = 100;
+/** The id mobs know the player here by (the host's own player, to guests too). */
+const LOCAL = "host";
+/** Milliseconds between the host's mob updates, over which a guest moves them. */
+const MOB_UPDATES = 100;
+
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 /** The color of water seen from inside, in full light. */
 const UNDERWATER: [number, number, number] = [0x21 / 255, 0x46 / 255, 0x7f / 255];
@@ -253,6 +264,167 @@ export async function startGame(options: GameOptions): Promise<void> {
     const p = interaction.progress;
     return t && p !== null ? { x: t.x, y: t.y, z: t.z, state: t.block, progress: p } : null;
   };
+  // Mobs live where the world does (alone, or the host): monsters come after the players, animals wander.
+  // A guest draws what the host tells it, between its updates
+  const mobs = joined
+    ? null
+    : new Mobs({
+        world,
+        drops,
+        players: () => mobPlayers(),
+        difficulty: () => difficulty,
+        time: () => ticks.time,
+        onHurtPlayer: (id, amount, source, by, push) => (id === LOCAL ? hurtHere(amount, source, by, push) : host?.hurt(id, amount, source, by, push)),
+        onExplosion: (x, y, z, power) => host?.exploded(x, y, z, power),
+        onArrowPickup: (id) => (id === LOCAL ? inventory.add(stack(Items.Arrow)) === null : (host?.give(id, { item: "arrow", count: 1 }) ?? false)),
+      });
+  /** The players as mobs see them: the one here and the guests. */
+  function mobPlayers(): MobPlayer[] {
+    const here: MobPlayer = {
+      id: LOCAL,
+      position: player.position,
+      targetable: interaction.mode === "survival" && !survival.vitals.dead,
+      held: inventory.held ? ITEMS[inventory.held.item].name : null,
+    };
+    const guests = (host?.guests ?? []).map((g) => ({
+      id: g.id,
+      position: g.state.position,
+      targetable: mode === "survival" && !g.state.spectating && g.state.vitals.health > 0,
+      held: g.state.inventory[g.state.selected]?.item ?? null,
+    }));
+    return [here, ...guests];
+  }
+  /** The player here hurt by a mob, an arrow or an explosion: armor lessens it, and it pushes them. */
+  function hurtHere(amount: number, source: DamageSource, by: string, push: { x: number; y: number; z: number }): void {
+    if (!survival.hurt(amount, source, by || null)) return;
+    player.velocity.x += push.x;
+    player.velocity.z += push.z;
+    player.velocity.y = Math.max(player.velocity.y, push.y);
+  }
+  const mobView = sim.add(new MobRenderer(world, lightMap, imported?.mobs ?? null, textured));
+  mobView.mobs = () => (guest ? guestMobs() : localMobs());
+  /** The mobs here, between their last tick and this one. */
+  function* localMobs(): Iterable<ShownMob> {
+    const k = ticks.partial;
+    for (const m of mobs!.mobs.values()) {
+      yield {
+        id: m.id,
+        kind: m.kind,
+        x: lerp(m.prev.x, m.position.x, k),
+        y: lerp(m.prev.y, m.position.y, k),
+        z: lerp(m.prev.z, m.position.z, k),
+        yaw: lerpAngle(m.prevYaw, m.yaw, k),
+        headYaw: m.headYaw,
+        pitch: m.pitch,
+        limbSwing: m.limbSwing,
+        limbAmount: m.limbAmount,
+        hurt: m.hurt > 0 ? 1 : 0,
+        dying: m.dying > 0 ? m.dying + k : 0,
+        swell: m.fuse / 30,
+        color: m.color,
+        sheared: m.sheared,
+        age: m.age + k,
+      };
+    }
+    for (const a of mobs!.arrows.values()) {
+      yield { ...STILL, id: a.id, kind: "arrow", x: lerp(a.prev.x, a.position.x, k), y: lerp(a.prev.y, a.position.y, k), z: lerp(a.prev.z, a.position.z, k), yaw: a.yaw, pitch: a.pitch };
+    }
+  }
+  const STILL: Omit<ShownMob, "id" | "kind" | "x" | "y" | "z" | "yaw" | "pitch"> = { headYaw: 0, limbSwing: 0, limbAmount: 0, hurt: 0, dying: 0, swell: 0, color: 0, sheared: false, age: 0 };
+  /** A guest's mobs: moved from where they were shown toward where the host last said, over its update. */
+  interface GuestMob extends ShownMob {
+    from: [number, number, number, number];
+    to: [number, number, number, number];
+    at: number;
+  }
+  const shownMobs = new Map<number, GuestMob>();
+  let mobsSeen = 0;
+  function* guestMobs(): Iterable<ShownMob> {
+    const session = guest!;
+    const now = performance.now();
+    if (session.mobsAt !== mobsSeen) {
+      mobsSeen = session.mobsAt;
+      const fresh = new Set<number>();
+      for (const [id, kind, x, y, z, yaw, headYaw, pitch, flags, extra] of session.mobs) {
+        fresh.add(id);
+        const name = kind === ARROW ? "arrow" : MOB_KINDS[kind];
+        const m: GuestMob = shownMobs.get(id) ?? { ...STILL, id, kind: name, x, y, z, yaw, pitch, from: [x, y, z, yaw], to: [x, y, z, yaw], at: now };
+        m.from = [m.x, m.y, m.z, m.yaw];
+        m.to = [x, y, z, yaw];
+        m.at = now;
+        m.headYaw = headYaw;
+        m.pitch = pitch;
+        m.hurt = flags & Flag.Hurt ? 1 : 0;
+        m.dying = flags & Flag.Dying ? Math.max(m.dying, extra) : 0;
+        m.swell = name === "creeper" ? extra / 30 : 0;
+        m.color = name === "sheep" ? extra : 0;
+        m.sheared = (flags & Flag.Sheared) !== 0;
+        shownMobs.set(id, m);
+      }
+      for (const id of [...shownMobs.keys()]) if (!fresh.has(id)) shownMobs.delete(id);
+    }
+    for (const m of shownMobs.values()) {
+      const t = Math.min(1, (now - m.at) / MOB_UPDATES);
+      const x = lerp(m.from[0], m.to[0], t);
+      const z = lerp(m.from[2], m.to[2], t);
+      // The legs walk as far as it moved
+      const walked = Math.hypot(x - m.x, z - m.z);
+      m.limbSwing += walked * 2.5;
+      m.limbAmount += (Math.min(1, walked * 15) - m.limbAmount) * 0.2;
+      m.x = x;
+      m.y = lerp(m.from[1], m.to[1], t);
+      m.z = z;
+      m.yaw = lerpAngle(m.from[3], m.to[3], t);
+      m.age += 1 / 3;
+      if (m.dying > 0) m.dying += 1 / 3;
+      yield m;
+    }
+  }
+  // The crosshair finds mobs; hitting, shooting and shearing them
+  interaction.mobAt = (x, y, z, dx, dy, dz, reach) => {
+    if (mobs) {
+      const hit = mobs.raycast(x, y, z, dx, dy, dz, reach);
+      return hit ? { id: hit.mob.id, distance: hit.distance } : null;
+    }
+    let best: { id: number; distance: number } | null = null;
+    for (const m of shownMobs.values()) {
+      if (m.kind === "arrow" || m.dying > 0) continue;
+      const info = MOBS[m.kind];
+      const w = info.width / 2;
+      const t = segmentHitsBox({ x, y, z }, { x: x + dx * reach, y: y + dy * reach, z: z + dz * reach }, { x: m.x - w, y: m.y, z: m.z - w }, { x: m.x + w, y: m.y + info.height, z: m.z + w });
+      if (t !== null && (!best || t * reach < best.distance)) best = { id: m.id, distance: t * reach };
+    }
+    return best;
+  };
+  interaction.onAttack = (id, damage, crit, knockback) => {
+    if (guest) {
+      guest.attack(id, damage, crit, knockback);
+      return;
+    }
+    const mob = mobs!.mobs.get(id);
+    if (mob) mobs!.strike(mob, damage, mobPlayers()[0], knockback);
+  };
+  interaction.onUseMob = (id, held) => {
+    if (!held || held.item !== Items.Shears) return false;
+    if (guest) {
+      const m = shownMobs.get(id);
+      if (m?.kind !== "sheep" || m.sheared) return false;
+      guest.useMob(id, held);
+      return true;
+    }
+    const mob = mobs!.mobs.get(id);
+    return mob ? mobs!.shear(mob) : false;
+  };
+  interaction.onShoot = (power) => {
+    const d = sim.camera.getForward({ x: 0, y: 0, z: 0 });
+    const from = { x: player.position.x + d.x * 0.3, y: player.eyeY - 0.1 + d.y * 0.3, z: player.position.z + d.z * 0.3 };
+    const speed = power * 3 * 20;
+    const velocity = { x: d.x * speed, y: d.y * speed, z: d.z * speed };
+    const crit = power >= 1;
+    if (guest) guest.shoot(from, velocity, crit);
+    else mobs!.shoot(from, velocity, { player: LOCAL }, crit, mode === "survival");
+  };
+
   // What broken blocks drop in survival, with experience from ores (the host does a guest's), and what a
   // broken chest or furnace held; breaking makes a little hungry
   interaction.onBroken = (x, y, z, state, held) => {
@@ -267,6 +439,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   // Every game tick furnaces burn (where the world runs), the player's vitals change, and sleepers sleep
   ticks.onTick = () => {
     if (!joined) tickFurnaces(world);
+    mobs?.tick();
     survival.tick();
     sleepTick();
   };
@@ -323,6 +496,7 @@ export async function startGame(options: GameOptions): Promise<void> {
       applyMode();
     };
     session.onWake = () => wakeUp();
+    session.onHurt = (amount, source, by, push) => hurtHere(amount, source, by, push);
     // How the player is goes to the host now and then, for keeping
     let lifeSent = "";
     let lifeTimer = 0;
@@ -387,13 +561,17 @@ export async function startGame(options: GameOptions): Promise<void> {
         }),
         guests: guestRecords,
         drops,
+        mobs: mobs ?? undefined,
       }),
     );
     terrain.supply = save;
     terrain.onUnload = (chunk) => save!.unload(chunk);
   } else if (!joined) {
     terrain.supply = chunks;
-    terrain.onUnload = (chunk) => ticks.takeChunk(chunk.cx, chunk.cz);
+    terrain.onUnload = (chunk) => {
+      ticks.takeChunk(chunk.cx, chunk.cz);
+      mobs?.inChunk(chunk.cx, chunk.cz, true);
+    };
   } else {
     terrain.supply = chunks;
   }
@@ -470,9 +648,11 @@ export async function startGame(options: GameOptions): Promise<void> {
     hud.update({ shown, hardcore, health: v.health, food: v.food, defense: survival.armor().defense, air: v.air, underwater: player.eyeInWater, xp: v.xp, hurt: v.hurt });
     hurtEl.style.opacity = v.hurt > 10 && !v.dead ? String(((v.hurt - 10) / 10) * 0.9) : v.dead ? "0.6" : "0";
     burningEl.hidden = !(v.fire > 0 && !v.dead);
-    const eating = interaction.eating;
-    eatingEl.hidden = eating === null;
-    if (eating !== null) eatingEl.style.setProperty("--eat", eating.toFixed(3));
+    // Under the crosshair: eating's or a bow's progress, or a weapon coming back after a swing
+    const strength = interaction.attackStrength;
+    const progress = interaction.eating ?? interaction.drawing ?? (strength < 1 && survival.mode === "survival" ? strength : null);
+    eatingEl.hidden = progress === null;
+    if (progress !== null) eatingEl.style.setProperty("--eat", progress.toFixed(3));
     sleepEl.hidden = !player.asleep;
     if (player.asleep) sleepEl.style.setProperty("--dark", String(Math.min(0.9, (sleepTicks / SLEEP_TICKS) * 0.9)));
   });
@@ -618,8 +798,8 @@ export async function startGame(options: GameOptions): Promise<void> {
             ["WASD", "move"],
             ["Space", "jump, swim up"],
             ["Shift", "sprint"],
-            ["Left click", "break"],
-            ["Right click", mode === "survival" ? "place, use, eat (hold)" : "place, use"],
+            ["Left click", "break, hit"],
+            ["Right click", mode === "survival" ? "place, use, eat or draw a bow (hold)" : "place, use, draw a bow (hold)"],
             ...(mode === "creative" ? [["Space twice", "fly (Shift down)"]] : []),
             ["1–9, wheel", "choose from the hotbar"],
             ["E", mode === "creative" ? "all items" : "inventory"],
@@ -657,6 +837,7 @@ export async function startGame(options: GameOptions): Promise<void> {
           difficulty: () => difficulty,
           hardcore,
           drops,
+          mobs: mobs ?? undefined,
           host: () => ({ id: "host", name: settings.name || "Host", ...player.position, yaw: player.yaw, pitch: player.pitch }),
           spawn: () => spawnPoint,
           saved: async (id) => {
@@ -982,10 +1163,10 @@ export async function startGame(options: GameOptions): Promise<void> {
     const fling = (): { x: number; y: number; z: number } => ({ x: (Math.random() - 0.5) * 4, y: 2 + Math.random() * 2, z: (Math.random() - 0.5) * 4 });
     const from = { x: p.x, y: p.y + 1, z: p.z };
     const xp = deathXp(v.xp);
-    const text = `${settings.name || (guest ? "Guest" : "Player")} ${DEATH_MESSAGES[cause]}`;
+    const text = `${settings.name || (guest ? "Guest" : "Player")} ${deathMessage(cause, v.killer)}`;
     if (guest) {
       for (const s of stacks) guest.throwItem(s, from, fling());
-      guest.died(cause, xp);
+      guest.died(cause, v.killer, xp);
     } else {
       for (const s of stacks) drops.spawn(from.x, from.y, from.z, s, fling(), 2);
       if (xp > 0) drops.spawnXp(p.x, p.y + 0.5, p.z, xp);
@@ -1081,6 +1262,13 @@ export async function startGame(options: GameOptions): Promise<void> {
       notice("You can sleep only at night");
       return;
     }
+    const monsters = mobs
+      ? mobs.monsterNear(head.x, head.y, head.z)
+      : [...shownMobs.values()].some((m) => m.kind !== "arrow" && MOBS[m.kind].hostile && Math.abs(m.x - head.x) < 8 && Math.abs(m.z - head.z) < 8 && Math.abs(m.y - head.y) < 5);
+    if (monsters && mode === "survival") {
+      notice("You may not rest now; there are monsters nearby");
+      return;
+    }
     player.asleep = { ...head, facing };
     sleepTicks = 0;
     guest?.sleep(true);
@@ -1159,6 +1347,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   // For poking at the running game from the browser console
   Object.assign(globalThis, {
     craft: {
+      mobs,
       sim,
       backend,
       world,

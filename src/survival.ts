@@ -2,7 +2,7 @@ import { Block, FLUID, OPAQUE, STATE_BLOCK, isBed } from "./blocks.js";
 import { ARMOR_SLOTS, type Inventory } from "./inventory.js";
 import { ITEMS } from "./items.js";
 import { EYE_HEIGHT, type Player } from "./player.js";
-import { SPRINT_FOOD, VOID_DEPTH, Vitals, type Armor, type Difficulty, type PlayMode, type Rules, type Surroundings } from "./vitals.js";
+import { SPRINT_FOOD, VOID_DEPTH, Vitals, type Armor, type DamageSource, type Difficulty, type PlayMode, type Rules, type Surroundings } from "./vitals.js";
 import type { VoxelWorld } from "./world.js";
 
 /** Exhaustion per block sprinted and swum, per jump and per sprinting jump, and per block broken (Minecraft's). */
@@ -90,6 +90,13 @@ export class Survival {
     v.tick(this.surroundings(), this.rules, this.armor());
     this.player.maySprint = this.mode !== "survival" || v.food > SPRINT_FOOD;
     this.checkDeath();
+  }
+
+  /** A hurt from outside (a mob, an arrow, an explosion): armor lessens it. Returns whether it landed. */
+  hurt(amount: number, source: DamageSource, by: string | null): boolean {
+    const landed = this.vitals.damage(amount, source, this.rules, this.armor(), by);
+    this.checkDeath();
+    return landed;
   }
 
   /** Landing after a fall: a point of damage for every block beyond three, half on a bed. */

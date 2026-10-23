@@ -45,6 +45,9 @@ export interface ItemInfo {
   readonly defense: number;
   readonly toughness: number;
   readonly food: Food | null;
+  /** Damage a hit with it does (1 by hand), and hits a second at full strength (4 by hand). */
+  readonly attack: number;
+  readonly attackSpeed: number;
   /** Uses before it breaks (tools and armor), 0 for items that don't wear. */
   readonly durability: number;
   /** Ticks it keeps a furnace burning, 0 if it doesn't burn. */
@@ -62,6 +65,8 @@ interface ItemOptions {
   defense?: number;
   toughness?: number;
   food?: Food;
+  attack?: number;
+  attackSpeed?: number;
   durability?: number;
   fuel?: number;
 }
@@ -92,7 +97,7 @@ const WOODEN: ReadonlySet<number> = new Set([
 
 function blockItem(b: (typeof BLOCKS)[number]): ItemInfo {
   const fuel = WOODEN.has(b.id) ? WOOD_FUEL : b.id === Block.OakSlab ? 150 : b.id === Block.Ladder ? WOOD_FUEL : b.id === Block.OakSapling ? 100 : 0;
-  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, tool: null, armor: null, defense: 0, toughness: 0, food: null, durability: 0, fuel, texture: null, color: b.top };
+  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture: null, color: b.top };
 }
 
 const extra: ItemInfo[] = [];
@@ -109,6 +114,8 @@ function item(name: string, label: string, color: string, options: ItemOptions =
     defense: options.defense ?? 0,
     toughness: options.toughness ?? 0,
     food: options.food ?? null,
+    attack: options.attack ?? 1,
+    attackSpeed: options.attackSpeed ?? 4,
     durability: options.durability ?? 0,
     fuel: options.fuel ?? 0,
     texture: name,
@@ -147,15 +154,35 @@ export const Items = {
   MelonSlice: item("melon_slice", "melon slice", "#c8402a", { food: { hunger: 2, saturation: 1.2 } }),
   Bowl: item("bowl", "bowl", "#8a6a3a"),
   MushroomStew: item("mushroom_stew", "mushroom stew", "#b08a5a", { maxStack: 1, food: { hunger: 6, saturation: 7.2, leaves: "bowl" } }),
+  Porkchop: item("porkchop", "raw porkchop", "#f0a0a0", { food: { hunger: 3, saturation: 1.8 } }),
+  CookedPorkchop: item("cooked_porkchop", "cooked porkchop", "#c87850", { food: { hunger: 8, saturation: 12.8 } }),
+  Beef: item("beef", "raw beef", "#c83a3a", { food: { hunger: 3, saturation: 1.8 } }),
+  CookedBeef: item("cooked_beef", "steak", "#8a4a2a", { food: { hunger: 8, saturation: 12.8 } }),
+  Chicken: item("chicken", "raw chicken", "#f0c8b0", { food: { hunger: 2, saturation: 1.2 } }),
+  CookedChicken: item("cooked_chicken", "cooked chicken", "#c8884a", { food: { hunger: 6, saturation: 7.2 } }),
+  Mutton: item("mutton", "raw mutton", "#c8504a", { food: { hunger: 2, saturation: 1.2 } }),
+  CookedMutton: item("cooked_mutton", "cooked mutton", "#8a5030", { food: { hunger: 6, saturation: 9.6 } }),
+  RottenFlesh: item("rotten_flesh", "rotten flesh", "#8a6a3a", { food: { hunger: 4, saturation: 0.8 } }),
+  SpiderEye: item("spider_eye", "spider eye", "#a02a3a", { food: { hunger: 2, saturation: 3.2 } }),
+  Bone: item("bone", "bone", "#e8e4d0"),
+  Gunpowder: item("gunpowder", "gunpowder", "#5a5a5a"),
+  Feather: item("feather", "feather", "#f0f0f0"),
+  Egg: item("egg", "egg", "#e8d8b0", { maxStack: 16 }),
+  Arrow: item("arrow", "arrow", "#8a6a3a"),
+  Bow: item("bow", "bow", "#8a6a3a", { maxStack: 1, durability: 384, fuel: 300 }),
+  Shears: item("shears", "shears", "#d8d8d8", { maxStack: 1, durability: 238 }),
 };
 
-/** The five tool kinds in each of the five materials, and the four armor pieces in four. */
+/**
+ * The five tool kinds in each of the five materials, and the four armor pieces in four. As weapons, by
+ * Minecraft's numbers: damage per kind (pickaxe, axe, shovel, hoe, sword) and the axe's hits a second.
+ */
 const TOOL_MATERIALS = [
-  { prefix: "wooden", label: "wooden", tier: Tier.Wood, speed: 2, durability: 59, color: "#a8895a" },
-  { prefix: "stone", label: "stone", tier: Tier.Stone, speed: 4, durability: 131, color: "#7f7f7f" },
-  { prefix: "iron", label: "iron", tier: Tier.Iron, speed: 6, durability: 250, color: "#d8d8d8" },
-  { prefix: "golden", label: "golden", tier: Tier.Gold, speed: 12, durability: 32, color: "#f6d84a" },
-  { prefix: "diamond", label: "diamond", tier: Tier.Diamond, speed: 8, durability: 1561, color: "#5ae8e0" },
+  { prefix: "wooden", label: "wooden", tier: Tier.Wood, speed: 2, durability: 59, color: "#a8895a", attack: [2, 7, 2.5, 1, 4], axeSpeed: 0.8, hoeSpeed: 1 },
+  { prefix: "stone", label: "stone", tier: Tier.Stone, speed: 4, durability: 131, color: "#7f7f7f", attack: [3, 9, 3.5, 1, 5], axeSpeed: 0.8, hoeSpeed: 2 },
+  { prefix: "iron", label: "iron", tier: Tier.Iron, speed: 6, durability: 250, color: "#d8d8d8", attack: [4, 9, 4.5, 1, 6], axeSpeed: 0.9, hoeSpeed: 3 },
+  { prefix: "golden", label: "golden", tier: Tier.Gold, speed: 12, durability: 32, color: "#f6d84a", attack: [2, 7, 2.5, 1, 4], axeSpeed: 1, hoeSpeed: 1 },
+  { prefix: "diamond", label: "diamond", tier: Tier.Diamond, speed: 8, durability: 1561, color: "#5ae8e0", attack: [5, 9, 5.5, 1, 7], axeSpeed: 1, hoeSpeed: 4 },
 ] as const;
 const TOOL_KINDS: readonly ToolKind[] = ["pickaxe", "axe", "shovel", "hoe", "sword"];
 
@@ -164,12 +191,14 @@ export const TOOLS: Readonly<Record<string, Readonly<Record<ToolKind, Item>>>> =
   TOOL_MATERIALS.map((m) => [
     m.prefix,
     Object.fromEntries(
-      TOOL_KINDS.map((kind) => [
+      TOOL_KINDS.map((kind, k) => [
         kind,
         item(`${m.prefix}_${kind}`, `${m.label} ${kind}`, m.color, {
           tool: { kind, tier: m.tier, speed: kind === "sword" ? 1.5 : m.speed },
           durability: m.durability,
           fuel: m.prefix === "wooden" ? 200 : 0,
+          attack: m.attack[k],
+          attackSpeed: [1.2, m.axeSpeed, 1, m.hoeSpeed, 1.6][k],
         }),
       ]),
     ) as Record<ToolKind, Item>,

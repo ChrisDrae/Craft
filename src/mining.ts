@@ -84,6 +84,31 @@ export function miningOf(block: Block): Mining {
   return TABLE[block] ?? hand(1);
 }
 
+/** Blast resistance where it isn't the hardness (Minecraft's): stone things 6, obsidian 1200, fluids 100. */
+const RESISTANCE: Partial<Record<number, number>> = {
+  [Block.Stone]: 6,
+  [Block.Cobblestone]: 6,
+  [Block.MossyCobblestone]: 6,
+  [Block.StoneBricks]: 6,
+  [Block.MossyStoneBricks]: 6,
+  [Block.CrackedStoneBricks]: 6,
+  [Block.Bricks]: 6,
+  [Block.Obsidian]: 1200,
+  [Block.Bedrock]: 3600000,
+  [Block.Water]: 100,
+  [Block.Lava]: 100,
+  [Block.CobblestoneWall]: 6,
+};
+
+/** How well a block stands up to explosions. */
+export function resistanceOf(block: Block): number {
+  const r = RESISTANCE[block];
+  if (r !== undefined) return r;
+  const b = BLOCKS[block];
+  if (b.shape === "slab" || b.shape === "stairs") return b.name.startsWith("oak") ? 3 : 6;
+  return Math.max(0, miningOf(block).hardness);
+}
+
 /** Whether a held item (or none) gets drops from a block. */
 export function canHarvest(block: Block, held: ItemStack | null): boolean {
   const m = miningOf(block);
@@ -106,11 +131,12 @@ const one = (item: number, count: number = 1): ItemStack[] => [{ item, count, da
 
 /**
  * What a block in a state drops when broken by a player with a held item (`random` gives numbers in
- * [0, 1), for the drops that are a matter of luck). Nothing without the right tool.
+ * [0, 1), for the drops that are a matter of luck). Nothing without the right tool, unless `anyTool`
+ * (blown up: an explosion harvests anything).
  */
-export function dropsOf(state: number, held: ItemStack | null, random: () => number): ItemStack[] {
+export function dropsOf(state: number, held: ItemStack | null, random: () => number, anyTool: boolean = false): ItemStack[] {
   const block = STATE_BLOCK[state];
-  if (!canHarvest(block, held)) return [];
+  if (!anyTool && !canHarvest(block, held)) return [];
   const between = (lo: number, hi: number): number => lo + Math.floor(random() * (hi - lo + 1));
   switch (block) {
     case Block.Grass:

@@ -547,7 +547,7 @@ export interface SkyImages {
 
 /**
  * The textures imported from Minecraft by `npm run textures`: block tiles (with procedural ones for any it
- * didn't have), the sky's images, the status bar's (hud_*, by name), and the version they came from. Null
+ * didn't have), the sky's images, the status bar's (hud_*) and the mobs' (mob_*) by name, and the version they came from. Null
  * when nothing was imported (or in a build, which leaves them out).
  */
 export async function importedTextures(): Promise<{
@@ -555,6 +555,7 @@ export async function importedTextures(): Promise<{
   frames: Map<TileName, TilePixels[]>;
   sky: SkyImages;
   hud: Map<string, ImageBitmap>;
+  mobs: Map<string, ImageBitmap>;
   version: string;
 } | null> {
   let manifest: { version: string; textures: string[] };
@@ -573,7 +574,7 @@ export async function importedTextures(): Promise<{
     }),
   );
   const files = new Map<string, TilePixels>();
-  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity|experience_orb|hud_)/.test(name)) files.set(name, firstFrame(image));
+  for (const [name, image] of images) if (!/^(sun|clouds|moon|chest_entity|experience_orb|hud_|mob_)/.test(name)) files.set(name, firstFrame(image));
   const tiles = proceduralTiles();
   for (const [name, tile] of minecraftTiles(files)) tiles.set(name, tile);
   // The chest's faces come out of its model's texture, and the orbs out of their sheet, at their own size
@@ -606,6 +607,7 @@ export async function importedTextures(): Promise<{
       clouds: images.get("clouds") ?? null,
     },
     hud: new Map([...images].filter(([name]) => name.startsWith("hud_"))),
+    mobs: new Map([...images].filter(([name]) => name.startsWith("mob_"))),
     version: manifest.version,
   };
 }

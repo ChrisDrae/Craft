@@ -98,6 +98,9 @@ export const SHAPED: readonly Shaped[] = [
   ...COLORS.map((c) => shaped(["##"], { "#": `${c}_wool` }, `${c}_carpet`, 3)),
   ...COLORS.map((c) => shaped(["WWW", "PPP"], { W: `${c}_wool`, P: "#planks" }, `${c}_bed`)),
   shaped(["# #", " # "], { "#": "#planks" }, "bowl", 4),
+  shaped([" #S", "# S", " #S"], { "#": "stick", S: "string" }, "bow"),
+  shaped(["F", "S", "E"], { F: "flint", S: "stick", E: "feather" }, "arrow", 4),
+  shaped([" #", "# "], { "#": "iron_ingot" }, "shears"),
   shaped(["###", "###", "###"], { "#": "melon_slice" }, "melon"),
 ];
 
@@ -192,6 +195,10 @@ const SMELTING: Readonly<Record<string, string>> = {
   sand: "glass",
   cobblestone: "stone",
   clay_ball: "brick",
+  porkchop: "cooked_porkchop",
+  beef: "cooked_beef",
+  chicken: "cooked_chicken",
+  mutton: "cooked_mutton",
   ...Object.fromEntries(TAGS.logs.map((log) => [log, "charcoal"])),
 };
 
@@ -210,6 +217,10 @@ const SMELT_XP: Readonly<Record<string, number>> = {
   stone: 0.1,
   brick: 0.3,
   charcoal: 0.15,
+  cooked_porkchop: 0.35,
+  cooked_beef: 0.35,
+  cooked_chicken: 0.35,
+  cooked_mutton: 0.35,
 };
 
 /** The experience smelting gives per item made. */

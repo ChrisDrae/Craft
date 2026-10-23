@@ -26,6 +26,7 @@ the held block, opens and shuts doors and trapdoors, opens crafting tables, ches
 beds, and eats the food held (hold it). 1–9 or the wheel pick a hotbar slot, the middle button picks the
 block you aim at, E opens the inventory (every item in creative), Q throws the held item (Ctrl+Q the whole
 stack), Esc opens the game menu (options, difficulty, save and quit); a game played alone pauses there.
+The left button also hits the mob under the crosshair; the right one draws a held bow, or shears a sheep.
 
 <sub>The pictures here show Craft's own textures, painted in code. Minecraft's can be used instead on your
 own computer (see below).</sub>
@@ -67,7 +68,15 @@ half a heart, on hard to death; peaceful feeds and heals you). Food is apples fr
 from jungle melons, stew from mushrooms found in dark and damp places, and bread; a hungry player eats by
 holding the right button. Dungeons hold a chest or two: bread, apples, string to make wool, iron, gold,
 now and then diamonds. Ores of coal, gems and redstone give experience, as does smelting; the orbs fly to
-you and fill the bar over the hotbar. Sleeping in a bed makes it home, and when everyone is in bed the
+you and fill the bar over the hotbar.
+
+Nights are dangerous. In the dark (at night, in caves, near dungeon spawners) zombies, skeletons, creepers
+and spiders appear and find their way to you around walls and through open doors: zombies strike, skeletons
+shoot from a distance, creepers swell and blow holes in the ground, spiders climb walls and leap. Zombies
+and skeletons burn at dawn. Fight back with swords (and axes) by Minecraft's rules, hits strongest once the
+weapon has swung back, critical when falling; or with a bow (hold the right button to draw, release to
+shoot). Pigs, cows, sheep and chickens roam the grass: they give meat to cook in a furnace, leather,
+feathers and eggs, sheep wool when shorn (it grows back as they graze), and follow you when you hold wheat. Sleeping in a bed makes it home, and when everyone is in bed the
 night passes. Dying drops what you carried and some of your experience where you fell, and you start again
 at your bed or the world's spawn; in hardcore you have one life, then look on.
 

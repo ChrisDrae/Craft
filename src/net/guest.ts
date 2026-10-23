@@ -4,6 +4,7 @@ import type { SavedEntity } from "../blockEntities.js";
 import { decodeBiomes } from "../biomes.js";
 import { loadStack, saveStack, type ItemStack, type SavedStack } from "../items.js";
 import type { GameMode, PlayerLife } from "../save/format.js";
+import type { MobView } from "../mobs/mobs.js";
 import type { DamageSource, Difficulty } from "../vitals.js";
 import type { Chunk } from "../chunk.js";
 import { lightChunk } from "../light.js";
@@ -67,6 +68,13 @@ export class GuestSession extends SimObject {
   onRules: ((difficulty: Difficulty) => void) | null = null;
   /** Called in the morning, when the night passed with everyone asleep. */
   onWake: (() => void) | null = null;
+  /** The mobs and arrows nearby as the host last said, and when it said so (performance.now()). */
+  mobs: MobView[] = [];
+  mobsAt: number = 0;
+  /** Called when a mob, arrow or explosion hurt the player (on the host). */
+  onHurt: ((amount: number, source: DamageSource, by: string, push: { x: number; y: number; z: number }) => void) | null = null;
+  /** Called when something blew up nearby. */
+  onExplosion: ((x: number, y: number, z: number, power: number) => void) | null = null;
   /** Called with the open chest's or furnace's contents as they change, null when it is gone. */
   onContainer: ((x: number, y: number, z: number, entity: SavedEntity | null) => void) | null = null;
   /** Called when the host says goodbye or the link breaks, after the welcome. */
@@ -164,6 +172,16 @@ export class GuestSession extends SimObject {
       case "wake":
         this.onWake?.();
         return;
+      case "mobs":
+        this.mobs = msg.mobs;
+        this.mobsAt = performance.now();
+        return;
+      case "hurt":
+        this.onHurt?.(Number(msg.amount) || 0, msg.source, String(msg.by ?? ""), msg.push);
+        return;
+      case "explosion":
+        this.onExplosion?.(msg.x, msg.y, msg.z, msg.power);
+        return;
       case "container":
         this.onContainer?.(msg.x, msg.y, msg.z, msg.entity);
         return;
@@ -190,9 +208,24 @@ export class GuestSession extends SimObject {
     this.send({ t: "life", ...life });
   }
 
-  /** Tells the host the player died, and how much experience they leave. */
-  died(cause: DamageSource, xp: number): void {
-    this.send({ t: "died", cause, xp });
+  /** Tells the host the player died (by what), and how much experience they leave. */
+  died(cause: DamageSource, killer: string | null, xp: number): void {
+    this.send({ t: "died", cause, killer, xp });
+  }
+
+  /** Hits a mob on the host's side. */
+  attack(id: number, damage: number, crit: boolean, knockback: number): void {
+    this.send({ t: "attack", id, damage, crit, knockback });
+  }
+
+  /** Looses an arrow on the host's side. */
+  shoot(from: { x: number; y: number; z: number }, velocity: { x: number; y: number; z: number }, crit: boolean): void {
+    this.send({ t: "shoot", x: from.x, y: from.y, z: from.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, crit });
+  }
+
+  /** Uses the held item on a mob (shears). */
+  useMob(id: number, held: ItemStack | null): void {
+    this.send({ t: "useMob", id, held: saveStack(held) });
   }
 
   /** Tells the host the player lay down in a bed, or got up. */

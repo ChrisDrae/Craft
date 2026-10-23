@@ -14,7 +14,7 @@ export const DIFFICULTIES: readonly Difficulty[] = ["peaceful", "easy", "normal"
 export type PlayMode = "survival" | "creative" | "spectator";
 
 /** What hurts. */
-export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus";
+export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion";
 
 export const MAX_HEALTH = 20;
 export const MAX_FOOD = 20;
@@ -37,12 +37,30 @@ export const DEATH_MESSAGES: Readonly<Record<DamageSource, string>> = {
   void: "fell out of the world",
   starve: "starved to death",
   cactus: "was pricked to death",
+  mob: "was slain by",
+  arrow: "was shot by",
+  explosion: "was blown up by",
 };
 
+/** How a player died: "drowned", "was slain by Zombie"; an explosion without a known cause "blew up". */
+export function deathMessage(cause: DamageSource, killer: string | null): string {
+  const byWhom = cause === "mob" || cause === "arrow" || cause === "explosion";
+  if (byWhom && killer) return `${DEATH_MESSAGES[cause]} ${killer}`;
+  if (cause === "explosion") return "blew up";
+  return byWhom ? "died" : DEATH_MESSAGES[cause];
+}
+
+/** Damage from monsters and explosions by difficulty, as Minecraft's: none on peaceful, less on easy, half again on hard. */
+export function byDifficulty(amount: number, difficulty: Difficulty): number {
+  if (difficulty === "peaceful") return 0;
+  if (difficulty === "easy") return Math.min(amount / 2 + 1, amount);
+  return difficulty === "hard" ? amount * 1.5 : amount;
+}
+
 /** Hurts that armor lessens: not falling, drowning, burning, starving, suffocating or the void. */
-const ARMORED: ReadonlySet<DamageSource> = new Set(["lava", "cactus"]);
+const ARMORED: ReadonlySet<DamageSource> = new Set(["lava", "cactus", "mob", "arrow", "explosion"]);
 /** Hurts that also make the player hungrier. */
-const EXHAUSTING: ReadonlySet<DamageSource> = new Set(["lava", "cactus"]);
+const EXHAUSTING: ReadonlySet<DamageSource> = new Set(["lava", "cactus", "mob", "arrow", "explosion"]);
 
 /** The armor a player wears: its points and toughness, and what wears it down. */
 export interface Armor {
@@ -141,8 +159,9 @@ export class Vitals {
   /** Ticks since the last hit landed, counting down from 20 (hits land again below 10); and that hit's damage. */
   hurt: number = 0;
   lastHurt: number = 0;
-  /** What killed the player, once health is gone. */
+  /** What killed the player, once health is gone, and who (a mob's name). */
   cause: DamageSource | null = null;
+  killer: string | null = null;
   /** Called with every hit that landed. */
   onHurt: ((amount: number, source: DamageSource) => void) | null = null;
   private foodTimer: number = 0;
@@ -156,7 +175,7 @@ export class Vitals {
    * Takes damage from a source by the rules (see the class), armor lessening what it can. Returns whether
    * the hit landed.
    */
-  damage(amount: number, source: DamageSource, rules: Rules, armor: Armor | null = null): boolean {
+  damage(amount: number, source: DamageSource, rules: Rules, armor: Armor | null = null, by: string | null = null): boolean {
     if (this.dead || amount <= 0) return false;
     if (rules.mode === "spectator" || (rules.mode === "creative" && source !== "void")) return false;
     let dealt = amount;
@@ -174,7 +193,10 @@ export class Vitals {
     }
     if (EXHAUSTING.has(source)) this.exert(0.1);
     this.health = Math.max(0, this.health - dealt);
-    if (this.health <= 0) this.cause = source;
+    if (this.health <= 0) {
+      this.cause = source;
+      this.killer = by;
+    }
     this.onHurt?.(dealt, source);
     return true;
   }
@@ -269,7 +291,7 @@ export class Vitals {
 
   /** Back to life, as after respawning: full health and food, no experience. */
   reset(): void {
-    Object.assign(this, { health: MAX_HEALTH, food: MAX_FOOD, saturation: 5, exhaustion: 0, air: MAX_AIR, fire: 0, xp: 0, hurt: 0, lastHurt: 0, cause: null, foodTimer: 0 });
+    Object.assign(this, { health: MAX_HEALTH, food: MAX_FOOD, saturation: 5, exhaustion: 0, air: MAX_AIR, fire: 0, xp: 0, hurt: 0, lastHurt: 0, cause: null, killer: null, foodTimer: 0 });
   }
 
   save(): SavedVitals {

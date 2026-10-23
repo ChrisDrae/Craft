@@ -92,8 +92,43 @@ function drawItem(info: ItemInfo): TilePixels {
       const gem = (x: number, y: number): boolean => Math.abs(x - 7.5) + Math.abs(y - 7.5) * 1.2 <= 6;
       return layered(name, [[gem, color], [edge(gem), dark, 0.05], [disc(6, 6, 1.2), [240, 255, 255]]]);
     }
+    case "porkchop":
+    case "cooked_porkchop":
+    case "beef":
+    case "cooked_beef":
+    case "mutton":
+    case "cooked_mutton":
+    case "rotten_flesh": {
+      // A cut of meat with a rim of fat (a bone in the chops)
+      const meat = (x: number, y: number): boolean => ((x - 7.5) / 6) ** 2 + ((y - 8.5) / 4.5) ** 2 <= 1;
+      const fat = (x: number, y: number): boolean => meat(x, y) && ((x - 7.5) / 6) ** 2 + ((y - 8.5) / 4.5) ** 2 > 0.6;
+      const cooked = name.startsWith("cooked");
+      return layered(name, [[meat, color, 0.25], [fat, cooked ? (scale(color, 1.3) as Rgb) : hex("#f0e0d0"), 0.1], [edge(meat), dark, 0.05]]);
+    }
+    case "chicken":
+    case "cooked_chicken": {
+      const leg = any(disc(6, 7, 4), disc(8, 9, 3.5));
+      return layered(name, [[leg, color, 0.2], [edge(leg), dark, 0.05], [line(10, 11, 13, 14, 1), hex("#f0ecd8")]]);
+    }
+    case "spider_eye":
+      return layered(name, [[disc(8, 8, 5), color, 0.15], [disc(9, 7, 2), [20, 10, 10]], [disc(10, 6, 0.7), [240, 200, 200], 0]]);
+    case "bone":
+      return layered(name, [[any(line(4, 12, 12, 4, 1.2), disc(3.5, 12.5, 1.6), disc(5, 13.5, 1.4), disc(12.5, 3.5, 1.6), disc(11, 2.5, 1.4)), color, 0.08]]);
+    case "feather":
+      return layered(name, [[(x, y) => Math.abs(x + y - 16) <= 2.5 && x > 3 && x < 14, color, 0.08], [line(3, 13, 13, 3, 0.6), hex("#a8a8a8")]]);
+    case "egg":
+      return layered(name, [[(x, y) => ((x - 7.5) / 4.5) ** 2 + ((y - 8.5) / 5.5) ** 2 <= 1, color, 0.08]]);
+    case "arrow":
+      return layered(name, [[line(4, 12, 12, 4, 0.8), HANDLE], [any(line(12, 4, 9, 4, 0.8), line(12, 4, 12, 7, 0.8)), hex("#9a9a9a")], [any(line(3, 10, 5, 13, 0.8), line(2, 11, 4, 13, 0.8)), hex("#f0f0f0")]]);
+    case "bow": {
+      const arc = (x: number, y: number): boolean => Math.abs(Math.hypot(x - 2, y - 14) - 11) < 0.9 && x >= 2 && y <= 14;
+      return layered(name, [[arc, color, 0.15], [line(3, 3.5, 12.5, 13, 0.4), hex("#e8e8e8")]]);
+    }
+    case "shears":
+      return layered(name, [[any(line(4, 12, 11, 5, 1), line(6, 13, 12, 7, 1)), color, 0.08], [any(disc(4, 12, 1.5), disc(6.5, 13, 1.5)), hex("#5a5a5a")]]);
     case "redstone":
     case "glowstone_dust":
+    case "gunpowder":
       return paint(name, (x, y, rnd) => (disc(8, 9, 5)(x, y) && rnd.next() < 0.55 ? scale(color, jitter(rnd, 0.4)) : CLEAR));
     case "string":
       return layered(name, [[any(line(3, 4, 8, 8, 0.8), line(8, 8, 5, 12, 0.8), line(5, 12, 12, 13, 0.8)), color]]);

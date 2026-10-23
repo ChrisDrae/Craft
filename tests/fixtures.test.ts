@@ -130,6 +130,23 @@ describe("saves from earlier versions, survival", () => {
   });
 });
 
+describe("saves from earlier versions, mobs", () => {
+  it("opens a world saved in format 7: the animals in a chunk, not its monsters", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-7.craftworld", import.meta.url))));
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const record = await store.getChunk("fixture-world-7", 0, 0);
+    expect(record!.mobs).toEqual([
+      { kind: "sheep", x: 4.5, y: 130, z: 4.5, yaw: 1, health: 8, color: 14, sheared: true },
+      { kind: "cow", x: 9.5, y: 130, z: 9.5, yaw: 2, health: 6 },
+    ]);
+    // Older chunks come without animals
+    const old = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-6.craftworld", import.meta.url))));
+    await store.writeWorld(old);
+    expect((await store.getChunk("fixture-world-6", 0, 0))!.mobs).toEqual([]);
+  });
+});
+
 describe("settings", () => {
   it("come back as saved, with defaults for anything missing, damaged or out of range", () => {
     const kept = new Map<string, string>();

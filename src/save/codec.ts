@@ -1,6 +1,7 @@
 import { loadEntity, saveEntity, type SavedEntity } from "../blockEntities.js";
 import { decodeBiomes, encodeBiomes } from "../biomes.js";
 import type { SavedDrop } from "../drops.js";
+import type { SavedMob } from "../mobs/mobs.js";
 import { BLOCKS, OPAQUE, STATE_COUNT, blockByName, stateByName, stateName } from "../blocks.js";
 import { Chunk, SECTIONS, SECTION_VOLUME } from "../chunk.js";
 import type { ScheduledTick } from "../ticks.js";
@@ -112,12 +113,13 @@ export interface ChunkSnapshot {
   ticks: ScheduledTick[];
   entities: SavedEntity[];
   drops: SavedDrop[];
+  mobs: SavedMob[];
 }
 
 /** A chunk taken apart for saving, with its scheduled ticks and the items lying in it. */
-export function snapshotChunk(chunk: Chunk, ticks: readonly ScheduledTick[], drops: readonly SavedDrop[] = []): ChunkSnapshot {
+export function snapshotChunk(chunk: Chunk, ticks: readonly ScheduledTick[], drops: readonly SavedDrop[] = [], mobs: readonly SavedMob[] = []): ChunkSnapshot {
   const entities = [...chunk.entities].map(([key, e]) => saveEntity(key & 15, key >> 8, (key >> 4) & 15, e));
-  const base = { cx: chunk.cx, cz: chunk.cz, generator: chunk.generator, biomes: encodeBiomes(chunk.biomes), ticks: [...ticks], entities, drops: [...drops] };
+  const base = { cx: chunk.cx, cz: chunk.cz, generator: chunk.generator, biomes: encodeBiomes(chunk.biomes), ticks: [...ticks], entities, drops: [...drops], mobs: [...mobs] };
   if (chunk.packed) return { ...base, palette: chunk.packed.palette, raw: null, compressed: chunk.packed.blocks };
   const { palette, raw } = encodeBlocks(chunk);
   return { ...base, palette, raw, compressed: null };
@@ -136,6 +138,7 @@ export async function chunkRecord(world: string, snap: ChunkSnapshot): Promise<C
     ticks: snap.ticks.map((t) => ({ x: t.x, y: t.y, z: t.z, block: BLOCKS[t.block].name, due: t.due })),
     entities: snap.entities,
     drops: snap.drops,
+    mobs: snap.mobs,
   };
 }
 
@@ -144,7 +147,7 @@ export async function chunkRecord(world: string, snap: ChunkSnapshot): Promise<C
  * with its chests' and furnaces' contents, its scheduled ticks (those of unknown blocks dropped) and the
  * items lying in it.
  */
-export async function readChunkRecord(record: ChunkRecord): Promise<{ chunk: Chunk; ticks: ScheduledTick[]; drops: SavedDrop[] }> {
+export async function readChunkRecord(record: ChunkRecord): Promise<{ chunk: Chunk; ticks: ScheduledTick[]; drops: SavedDrop[]; mobs: SavedMob[] }> {
   const r = upgrade("chunk", record);
   const { chunk, unknown } = decodeBlocks(r.cx, r.cz, r.palette, await decompress(r.blocks));
   if (unknown > 0) console.warn(`Craft: chunk ${r.cx}, ${r.cz} had ${unknown} blocks this version doesn't know; they are air now.`);
@@ -161,5 +164,5 @@ export async function readChunkRecord(record: ChunkRecord): Promise<{ chunk: Chu
     const block = blockByName(t.block);
     if (block !== null) ticks.push({ x: t.x, y: t.y, z: t.z, block, due: t.due });
   }
-  return { chunk, ticks, drops: r.drops };
+  return { chunk, ticks, drops: r.drops, mobs: r.mobs };
 }

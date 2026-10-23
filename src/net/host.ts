@@ -5,13 +5,14 @@ import { BLOCKS, HOTBAR, PLACEABLE } from "../blocks.js";
 import { CHUNK_SIZE } from "../chunk.js";
 import type { Collector, Drops } from "../drops.js";
 import { PLAYER_SLOTS } from "../inventory.js";
-import { loadStack, saveStack, type SavedStack } from "../items.js";
+import { ITEMS, loadStack, saveStack, type SavedStack } from "../items.js";
 import { dropsOf, xpOf } from "../mining.js";
 import { EYE_HEIGHT } from "../player.js";
 import type { GameMode, Position } from "../save/format.js";
 import { compress, snapshotChunk } from "../save/codec.js";
 import type { WorldTicks } from "../ticks.js";
-import { DEATH_MESSAGES, FRESH_VITALS, Vitals, type DamageSource, type Difficulty } from "../vitals.js";
+import type { Mobs } from "../mobs/mobs.js";
+import { DEATH_MESSAGES, FRESH_VITALS, Vitals, deathMessage, type DamageSource, type Difficulty } from "../vitals.js";
 import { VoxelWorld } from "../world.js";
 import type { Connection } from "./connection.js";
 import { ORB, PROTOCOL_VERSION, REGISTRY, decode, encode, type DropView, type GuestState, type PlayerView, type ToGuest, type ToHost } from "./protocol.js";
@@ -55,6 +56,8 @@ export interface HostOptions {
   hardcore: boolean;
   /** The items lying about, which guests see, pick up and throw. */
   drops: Drops;
+  /** The mobs, which guests see and fight. */
+  mobs?: Mobs;
   /** The host's own player, as the guests see them. */
   host: () => PlayerView;
   /** Where a newcomer starts. */
@@ -131,6 +134,28 @@ export class HostSession extends SimObject {
   announce(text: string): void {
     for (const v of this.visitors.values()) this.send(v, { t: "notice", text });
     this.options.onNotice?.(text);
+  }
+
+  /** Hurts a guest (a mob, an arrow, an explosion did): they take it on their side. */
+  hurt(id: string, amount: number, source: DamageSource, by: string, push: { x: number; y: number; z: number }): void {
+    const v = [...this.visitors.values()].find((g) => g.id === id);
+    if (v) this.send(v, { t: "hurt", amount, source, by, push });
+  }
+
+  /** Tells the guests near an explosion (for its sound and smoke). */
+  exploded(x: number, y: number, z: number, power: number): void {
+    for (const v of this.visitors.values()) {
+      const p = v.state.position;
+      if (Math.hypot(p.x - x, p.z - z) < 64) this.send(v, { t: "explosion", x, y, z, power });
+    }
+  }
+
+  /** Gives a guest an item (an arrow picked up). */
+  give(id: string, item: SavedStack): boolean {
+    const v = [...this.visitors.values()].find((g) => g.id === id);
+    if (!v) return false;
+    this.send(v, { t: "given", item });
+    return true;
   }
 
   /** Tells the guests the difficulty changed. */
@@ -246,7 +271,8 @@ export class HostSession extends SimObject {
       }
       case "died": {
         const cause = msg.cause in DEATH_MESSAGES ? (msg.cause as DamageSource) : null;
-        if (cause) this.announce(`${v.name} ${DEATH_MESSAGES[cause]}`);
+        const killer = typeof msg.killer === "string" ? msg.killer.slice(0, 24) : null;
+        if (cause) this.announce(`${v.name} ${deathMessage(cause, killer)}`);
         const xp = Math.max(0, Math.min(100, Math.floor(Number(msg.xp) || 0)));
         const p = v.state.position;
         if (xp > 0) this.options.drops.spawnXp(p.x, p.y + 0.5, p.z, xp);
@@ -255,6 +281,26 @@ export class HostSession extends SimObject {
       case "sleep":
         v.asleep = msg.asleep === true;
         return;
+      case "attack": {
+        // Only what they could reach, no harder than the best weapon with a critical hit
+        const mob = this.options.mobs?.mobs.get(Number(msg.id));
+        if (!mob || this.distance(v, { x: mob.position.x, y: mob.position.y + mob.height / 2 - 1, z: mob.position.z }) > 7) return;
+        const damage = Math.max(0, Math.min(15, Number(msg.damage) || 0));
+        const knockback = Math.max(0, Math.min(20, Number(msg.knockback) || 0));
+        this.options.mobs!.strike(mob, damage, { id: v.id, position: v.state.position, targetable: true, held: null }, knockback);
+        return;
+      }
+      case "shoot": {
+        if (!finite(msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz) || this.distance(v, msg) > 3 || Math.hypot(msg.vx, msg.vy, msg.vz) > 61) return;
+        this.options.mobs?.shoot({ x: msg.x, y: msg.y, z: msg.z }, { x: msg.vx, y: msg.vy, z: msg.vz }, { player: v.id }, msg.crit === true, this.options.mode === "survival");
+        return;
+      }
+      case "useMob": {
+        const mob = this.options.mobs?.mobs.get(Number(msg.id));
+        const held = loadStack(msg.held);
+        if (mob && held && ITEMS[held.item].name === "shears" && this.distance(v, mob.position) < 7) this.options.mobs!.shear(mob);
+        return;
+      }
       case "take": {
         // Only what lies within reach
         const item = this.options.drops.items.get(Number(msg.id));
@@ -369,6 +415,8 @@ export class HostSession extends SimObject {
         }
         this.send(v, { t: "players", players });
         this.send(v, { t: "drops", drops: this.dropsNear(v) });
+        const mobs = this.options.mobs;
+        if (mobs) this.send(v, { t: "mobs", mobs: mobs.views(v.state.position.x, v.state.position.z, v.view * CHUNK_SIZE) });
       }
     }
     for (const v of this.visitors.values()) if (v.open) this.sendContainer(v);

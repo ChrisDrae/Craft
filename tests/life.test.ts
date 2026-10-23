@@ -309,7 +309,7 @@ describe("staying alive with friends", () => {
     session.onXp = (n) => (xp += n);
     await session.welcome;
     await run(2);
-    session.died("lava", 21);
+    session.died("lava", null, 21);
     await run(2);
     expect(notices).toEqual(["Alex tried to swim in lava"]);
     expect(told).toEqual(["Alex tried to swim in lava"]);

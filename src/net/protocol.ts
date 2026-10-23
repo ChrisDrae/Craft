@@ -3,6 +3,7 @@ import type { SavedEntity } from "../blockEntities.js";
 import { STATE_COUNT, stateName } from "../blocks.js";
 import { ITEMS, type SavedStack } from "../items.js";
 import type { GameMode, PlayerLife } from "../save/format.js";
+import type { MobView } from "../mobs/mobs.js";
 import type { DamageSource, Difficulty } from "../vitals.js";
 
 /**
@@ -11,7 +12,7 @@ import type { DamageSource, Difficulty } from "../vitals.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and
@@ -58,8 +59,14 @@ export type ToHost =
   | { t: "inventory"; inventory: (SavedStack | null)[]; selected: number }
   /** How the guest is (health, hunger, experience, bed), for keeping. */
   | ({ t: "life" } & PlayerLife)
-  /** The guest died: everyone is told how, and the experience they leave lies where they died. */
-  | { t: "died"; cause: DamageSource; xp: number }
+  /** The guest died: everyone is told how (and by what), and the experience they leave lies where they died. */
+  | { t: "died"; cause: DamageSource; killer: string | null; xp: number }
+  /** Hitting a mob: its id, the damage (the guest worked out with its weapon and timing), crit, knockback. */
+  | { t: "attack"; id: number; damage: number; crit: boolean; knockback: number }
+  /** Loosing an arrow from (x, y, z) at that velocity. */
+  | { t: "shoot"; x: number; y: number; z: number; vx: number; vy: number; vz: number; crit: boolean }
+  /** Using the held item on a mob (shears on a sheep). */
+  | { t: "useMob"; id: number; held: SavedStack | null }
   /** Lying in a bed, or up again. The night passes when every player sleeps. */
   | { t: "sleep"; asleep: boolean }
   /** Picking up an item lying about: as much as fits, at most `max`. */
@@ -92,6 +99,12 @@ export type ToGuest =
   | { t: "rules"; difficulty: Difficulty }
   /** Morning: the night passed while everyone slept. */
   | { t: "wake" }
+  /** The mobs and arrows near the guest. */
+  | { t: "mobs"; mobs: MobView[] }
+  /** The guest was hurt (by difficulty already): how much, by what, pushed how. */
+  | { t: "hurt"; amount: number; source: DamageSource; by: string; push: { x: number; y: number; z: number } }
+  /** Something blew up there. */
+  | { t: "explosion"; x: number; y: number; z: number; power: number }
   /** A chest's or furnace's contents, when opened and whenever they change; null when it is gone. */
   | { t: "container"; x: number; y: number; z: number; entity: SavedEntity | null }
   | { t: "bye"; reason: string };
