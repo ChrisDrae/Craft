@@ -12,7 +12,7 @@ import type { DamageSource, Difficulty } from "../vitals.js";
  */
 
 /** Bumped whenever the messages change; host and guest must speak the same version. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * A fingerprint of the block states and items: they travel as ids, which only mean the same to a host and

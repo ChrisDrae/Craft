@@ -94,6 +94,9 @@ function drawItem(info: ItemInfo): TilePixels {
     case "iron_ingot":
     case "gold_ingot":
     case "copper_ingot":
+    case "tin_ingot":
+    case "bronze_ingot":
+    case "refined_iron_ingot":
     case "brick": {
       const bar = (x: number, y: number): boolean => y >= 6 && y <= 11 && x >= 2 + (11 - y) && x <= 13 - (y - 6) / 2;
       return layered(name, [[bar, color], [edge(bar), dark, 0.05]]);
@@ -178,6 +181,38 @@ function drawItem(info: ItemInfo): TilePixels {
       const layers: Array<readonly [Mask, Rgb, number?]> = [[bowl, hex("#8a6a3a")], [edge(bowl), hex("#5a4426"), 0.05]];
       if (name === "mushroom_stew") layers.push([(x, y) => y === 8 && Math.abs(x - 7.5) <= 5.5, color], [(x, y) => y === 7 && Math.abs(x - 7.5) <= 4, scale(color, 1.15) as Rgb]);
       return layered(name, layers);
+    }
+    case "iron_dust":
+    case "gold_dust":
+    case "copper_dust":
+    case "tin_dust":
+    case "bronze_dust":
+    case "coal_dust": {
+      // A little heap of powder
+      const heap = (x: number, y: number): boolean => y >= 7 && y <= 13 && Math.abs(x - 7.5) <= (y - 6) * 1.1;
+      return layered(name, [[heap, color, 0.25], [edge(heap), dark, 0.1]]);
+    }
+    case "sticky_resin":
+      return layered(name, [[any(disc(7, 9, 4), disc(9, 6, 2.5)), color, 0.1], [disc(6, 7, 1.2), [250, 220, 140], 0.05]]);
+    case "rubber":
+      return layered(name, [[rect(3, 5, 12, 10), color, 0.1], [edge(rect(3, 5, 12, 10)), [10, 10, 10]]]);
+    case "electronic_circuit": {
+      // A green board with copper traces and a chip
+      const board = rect(2, 3, 13, 12);
+      return layered(name, [[board, color, 0.08], [any(line(3, 6, 12, 6, 0.6), line(3, 9, 12, 9, 0.6), line(5, 4, 5, 11, 0.6)), [210, 150, 60]], [rect(7, 5, 10, 10), [30, 30, 30]], [edge(board), scale(color, 0.6) as Rgb]]);
+    }
+    case "battery": {
+      // A cell standing up: red jacket, a contact on top
+      const body = rect(5, 3, 10, 13);
+      return layered(name, [[body, color, 0.08], [rect(6, 1, 9, 2), [200, 200, 200]], [rect(5, 6, 10, 7), [240, 240, 240]], [edge(body), dark]]);
+    }
+    case "tree_tap":
+      return layered(name, [[any(rect(3, 4, 12, 7), rect(10, 7, 12, 12)), color, 0.15], [line(11, 12, 11, 14, 0.5), [224, 160, 48]]]);
+    case "wrench":
+      return layered(name, [[any(line(4, 12, 10, 6, 1.3), disc(11, 4.5, 2.6)), color, 0.1], [disc(11.5, 4, 1), scale(color, 0.4) as Rgb]]);
+    case "eu_meter": {
+      const box = rect(3, 2, 12, 13);
+      return layered(name, [[box, hex("#3a3a3a")], [rect(4, 3, 11, 7), [220, 230, 160]], [line(5, 7, 9, 4, 0.5), [200, 40, 30]], [any(disc(5.5, 11, 1.2), disc(9.5, 11, 1.2)), color], [edge(box), [20, 20, 20]]]);
     }
     case "slime_ball": {
       const ball = disc(8, 8, 4.5);
@@ -268,6 +303,119 @@ export function pistonTiles(): Map<string, TilePixels> {
     });
   out.set("comparator", comparator(false));
   out.set("comparator_on", comparator(true));
+  return out;
+}
+
+/** Block textures only Craft has (the industry's: IndustrialCraft's own aren't Minecraft's, and aren't imported). */
+export const INDUSTRY_TILES: readonly string[] = [
+  "tin_ore",
+  "uranium_ore",
+  "rubber_log",
+  "rubber_log_top",
+  "rubber_log_wet",
+  "rubber_log_dry",
+  "rubber_leaves",
+  "rubber_sapling",
+  "machine_top",
+  "machine_side",
+  "machine_bottom",
+  ...["generator", "electric_furnace", "macerator", "extractor", "compressor"].flatMap((m) => [`${m}_front`, `${m}_front_on`]),
+  "battery_box_front",
+  "battery_box_side",
+  "battery_box_top",
+  "tin_cable",
+  "copper_cable",
+  "insulated_copper_cable",
+];
+
+/** Item textures only Craft has: the industry's materials, tools and bronze. */
+export const INDUSTRY_ITEM_TILES: ReadonlySet<string> = new Set(
+  [
+    "raw_tin",
+    "tin_ingot",
+    "bronze_ingot",
+    "refined_iron_ingot",
+    "raw_uranium",
+    "sticky_resin",
+    "rubber",
+    ...["iron", "gold", "copper", "tin", "bronze", "coal"].map((m) => `${m}_dust`),
+    "electronic_circuit",
+    "battery",
+    "tree_tap",
+    "wrench",
+    "eu_meter",
+    ...["pickaxe", "axe", "shovel", "hoe", "sword", "helmet", "chestplate", "leggings", "boots"].map((t) => `bronze_${t}`),
+  ].map((n) => `item_${n}`),
+);
+
+/** The industry's blocks, as Craft draws them, in Minecraft's style. */
+export function industryTiles(): Map<string, TilePixels> {
+  const out = new Map<string, TilePixels>();
+  const rim = (x: number, y: number): boolean => x === 0 || y === 0 || x === 15 || y === 15;
+  type Rnd = Parameters<Parameters<typeof paint>[1]>[2];
+  const stone = hex("#7f7f7f");
+  const rock = (rnd: Rnd): [number, number, number] => scale(stone, jitter(rnd, 0.14) * (rnd.next() < 0.12 ? 0.82 : 1));
+  // Ores: speckles of their mineral in stone
+  const ore = (name: string, color: string, glow: boolean) =>
+    paint(name, (x, y, rnd) => {
+      const fleck = (Math.sin(x * 2.1 + y * 0.7) + Math.cos(y * 1.9 - x * 0.4)) * 0.5 + rnd.next() * 0.6 > 1.05;
+      return fleck ? scale(hex(color), (glow ? 1.1 : 1) * jitter(rnd, 0.12)) : rock(rnd);
+    });
+  out.set("tin_ore", ore("tin ore", "#d8d8e4", false));
+  out.set("uranium_ore", ore("uranium ore", "#7ac83a", true));
+  // Rubber wood: gray-brown bark with dark seams, pale rings, a resin spot amber (wet) or dark (dry)
+  const bark = hex("#6a5a42");
+  const barkAt = (x: number, rnd: Rnd): [number, number, number] => scale(bark, (x % 5 === 2 ? 0.7 : 1) * jitter(rnd, 0.1));
+  out.set("rubber_log", paint("rubber log", (x, _y, rnd) => barkAt(x, rnd)));
+  out.set("rubber_log_top", paint("rubber log top", (x, y, rnd) => (rim(x, y) ? barkAt(x, rnd) : scale(hex("#b8a070"), (Math.round(Math.hypot(x - 7.5, y - 7.5)) % 3 === 0 ? 0.85 : 1) * jitter(rnd, 0.06)))));
+  const spot = (wet: boolean) =>
+    paint(wet ? "rubber log wet" : "rubber log dry", (x, y, rnd) => {
+      const inSpot = Math.hypot((x - 7.5) / 2.2, (y - 8) / 3.5) < 1;
+      return inSpot ? scale(wet ? [224, 160, 48] : [80, 60, 40], jitter(rnd, 0.1)) : barkAt(x, rnd);
+    });
+  out.set("rubber_log_wet", spot(true));
+  out.set("rubber_log_dry", spot(false));
+  out.set("rubber_leaves", paint("rubber leaves", (_x, _y, rnd) => (rnd.next() < 0.18 ? [0, 0, 0, 0] : scale(hex("#4a8a3a"), jitter(rnd, 0.25)))));
+  out.set(
+    "rubber_sapling",
+    paint("rubber sapling", (x, y, rnd) => {
+      if (Math.abs(x - 7.5) < 1 && y >= 7) return scale(bark, jitter(rnd, 0.1));
+      return Math.hypot((x - 7.5) / 5, (y - 5) / 4) < 1 && rnd.next() < 0.85 ? scale(hex("#4a8a3a"), jitter(rnd, 0.2)) : [0, 0, 0, 0];
+    }),
+  );
+  // Machines: steel plates with rivets, each front its own
+  const steel = hex("#a4a8ae");
+  const plate = (x: number, y: number, rnd: Rnd): [number, number, number] =>
+    scale(steel, (rim(x, y) ? 0.72 : (x === 1 || y === 1) ? 1.12 : (x === 14 || y === 14) ? 0.85 : 1) * ((x === 2 || x === 13) && (y === 2 || y === 13) ? 0.7 : 1) * jitter(rnd, 0.05));
+  out.set("machine_side", paint("machine side", (x, y, rnd) => plate(x, y, rnd)));
+  out.set("machine_top", paint("machine top", (x, y, rnd) => (x >= 5 && x <= 10 && y >= 5 && y <= 10 && (x + y) % 2 === 0 ? scale(steel, 0.6) : plate(x, y, rnd))));
+  out.set("machine_bottom", paint("machine bottom", (x, y, rnd) => scale(plate(x, y, rnd), 0.85)));
+  const window = (x: number, y: number): boolean => x >= 4 && x <= 11 && y >= 5 && y <= 11;
+  const front = (name: string, on: boolean, inside: (x: number, y: number, rnd: Rnd) => [number, number, number]) =>
+    paint(`${name}${on ? " on" : ""}`, (x, y, rnd) => (window(x, y) ? inside(x, y, rnd) : plate(x, y, rnd)));
+  for (const on of [false, true]) {
+    const suffix = on ? "_on" : "";
+    // The generator: a firebox, glowing while it burns
+    out.set(`generator_front${suffix}`, front("generator", on, (x, y, rnd) => (on && y >= 8 ? scale([250, 140 + (y - 8) * 20, 40], jitter(rnd, 0.2)) : y % 2 === 0 ? scale(steel, 0.35) : [30, 30, 32])));
+    // The electric furnace: a heating coil, red while it works
+    out.set(`electric_furnace_front${suffix}`, front("electric furnace", on, (x, y, rnd) => ((x - 4) % 3 === 0 ? scale(on ? [240, 70, 40] : [90, 50, 45], jitter(rnd, 0.1)) : [32, 30, 30])));
+    // The macerator: grinding teeth, turning while it works
+    out.set(`macerator_front${suffix}`, front("macerator", on, (x, y, rnd) => (((x + y + (on ? 1 : 0)) % 3 === 0) ? scale(hex("#d8d8d8"), jitter(rnd, 0.1)) : [40, 40, 44])));
+    // The extractor: a press over a drip of resin
+    out.set(`extractor_front${suffix}`, front("extractor", on, (x, y, rnd) => (y <= 6 ? scale(steel, 0.55) : Math.abs(x - 7.5) < 1 && on ? scale([224, 160, 48], jitter(rnd, 0.1)) : [36, 34, 32])));
+    // The compressor: a ram over a plate
+    out.set(`compressor_front${suffix}`, front("compressor", on, (x, y, rnd) => (y === (on ? 9 : 6) || (y < (on ? 9 : 6) && Math.abs(x - 7.5) < 1.5) ? scale(steel, 0.75) : y >= 10 ? scale(steel, 0.5 * jitter(rnd, 0.1)) : [30, 30, 34])));
+  }
+  // The battery box: planks round a block of batteries, its output a socket on the front
+  const wood = hex("#a8895a");
+  const planks = (x: number, y: number, rnd: Rnd): [number, number, number] => scale(wood, (y % 4 === 3 ? 0.75 : 1) * (rim(x, y) ? 0.8 : 1) * jitter(rnd, 0.1));
+  out.set("battery_box_side", paint("battery box side", (x, y, rnd) => (x >= 3 && x <= 12 && y >= 4 && y <= 11 ? scale((x - 3) % 3 === 2 ? [40, 40, 40] : [200, 50, 50], jitter(rnd, 0.08)) : planks(x, y, rnd))));
+  out.set("battery_box_top", paint("battery box top", (x, y, rnd) => planks(x, y, rnd)));
+  out.set("battery_box_front", paint("battery box front", (x, y, rnd) => (Math.hypot(x - 7.5, y - 7.5) < 3 ? (Math.hypot(x - 7.5, y - 7.5) < 1.6 ? [20, 20, 20] : scale(hex("#c8883a"), jitter(rnd, 0.08))) : planks(x, y, rnd))));
+  // Cables: tin bare and bright, copper bare and orange, insulated black with a copper core showing at the ends
+  out.set("tin_cable", paint("tin cable", (_x, y, rnd) => scale(hex("#c8c8cc"), (y % 4 === 0 ? 0.85 : 1) * jitter(rnd, 0.06))));
+  out.set("copper_cable", paint("copper cable", (_x, y, rnd) => scale(hex("#d07a4a"), (y % 4 === 0 ? 0.85 : 1) * jitter(rnd, 0.06))));
+  out.set("insulated_copper_cable", paint("insulated cable", (x, y, rnd) => (Math.hypot(x - 7.5, y - 7.5) < 1.5 ? scale(hex("#d07a4a"), jitter(rnd, 0.06)) : scale(hex("#2a2a2c"), jitter(rnd, 0.1)))));
   return out;
 }
 

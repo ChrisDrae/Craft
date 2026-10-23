@@ -13,7 +13,8 @@ thunderstorms. In survival you gather: blocks take time to break and drop as ite
 break them faster, and you craft, smelt in furnaces and keep things in chests; you get hungry, falls and
 lava hurt, and a bed brings you back. Fields grow wheat, carrots, potatoes, pumpkins and melons, animals
 breed, and redstone carries power from levers, buttons and plates to lamps, doors and pistons, while
-hoppers move items between chests and furnaces. In creative every block is at hand and you fly. Friends can join any world.
+hoppers move items between chests and furnaces. Beyond Minecraft, generators, cables and machines turn
+tin, copper and rubber into an industry. In creative every block is at hand and you fly. Friends can join any world.
 
 ```sh
 npm install
@@ -121,6 +122,22 @@ they watch changes, which makes farms that harvest themselves. Hoppers pass item
 furnaces above, or from the ground over them, into whatever they point at; comparators read how full a
 chest is, and compare or subtract signals.
 
+## Industry
+
+Beyond Minecraft, after the IndustrialCraft mods: machines run on energy (EU) that moves through cables.
+New worlds have tin ore, a little uranium deep down, and rubber trees in forests, jungles and swamps; a
+tree tap takes sticky resin from the amber spots on their trunks, and resin smelts into rubber. Smelt
+iron ingots again into refined iron, make a machine casing of it, insulate copper cable with rubber, and
+build electronic circuits and batteries from those.
+
+A generator burns coal (or anything a furnace burns) into energy; cables carry it (tin for low voltage,
+copper for medium, losing a little every block, bare copper shocking whoever touches it) to the machines:
+the macerator grinds an ore into two dusts that smelt into two ingots, the electric furnace smelts without
+fuel, the extractor makes rubber, the compressor packs snow, sand and clay. A battery box stores what
+they don't use and sends it out of its front; batteries carry energy to a machine's battery slot. A
+wrench turns machines, or takes them up whole when sneaking (broken, they leave only their casing), and
+an EU meter shows what a cable carries. Energy of a higher voltage than a machine takes blows it up.
+
 ## Worlds and saves
 
 Worlds are kept in the browser (IndexedDB): every chunk you've been near with what its chests, furnaces and
@@ -183,7 +200,7 @@ flowchart LR
     subgraph Sim["Projector Simulation"]
       Player["Player<br/>(physics)"]
       Hands["BlockInteraction<br/>(break, place, use)"]
-      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays,<br/>pistons, hoppers"]
+      Ticks["WorldTicks, 20 per second<br/>fluids, furnaces, growth,<br/>weather, redstone delays,<br/>pistons, hoppers,<br/>machines, energy"]
       Updates["BlockUpdates<br/>neighbors react,<br/>redstone"]
       Drops["Dropped items"]
       Terrain["Terrain<br/>(chunk meshes)"]
@@ -272,7 +289,7 @@ sequenceDiagram
   H->>G: welcome: world, mode, your place and inventory
   loop while playing
     H->>G: chunks nearby, block changes, players, items lying about, the time
-    G->>H: moves, actions (break, place, use), inventory, chests and furnaces
+    G->>H: moves, actions (break, place, use), inventory, chests, furnaces and machines
   end
 ```
 

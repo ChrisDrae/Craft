@@ -433,14 +433,15 @@ export class HostSession extends SimObject {
    */
   private act(v: Visitor, msg: Action & { held?: SavedStack | null }): void {
     const a: Action = { act: msg.act, x: msg.x | 0, y: msg.y | 0, z: msg.z | 0, nx: msg.nx | 0, ny: msg.ny | 0, nz: msg.nz | 0, hy: Number(msg.hy) || 0, block: msg.block | 0, yaw: Number(msg.yaw) || 0, pitch: Number(msg.pitch) || 0 };
-    if (msg.use === "till" || msg.use === "fertilize" || msg.use === "trample") a.use = msg.use;
+    if (msg.use === "till" || msg.use === "fertilize" || msg.use === "trample" || msg.use === "tap" || msg.use === "wrench") a.use = msg.use;
+    a.sneak = msg.sneak === true;
     const p = v.state.position;
     const reach = Math.hypot(a.x + 0.5 - p.x, a.y + 0.5 - (p.y + EYE_HEIGHT), a.z + 0.5 - p.z) <= REACH + 1.5;
     const known = a.act !== "place" || PLACEABLE.includes(a.block);
     const unit = Math.abs(a.nx) + Math.abs(a.ny) + Math.abs(a.nz) === 1;
     const standing = [this.options.host(), ...this.standing()];
     const before = this.options.world.get(a.x, a.y, a.z);
-    if (reach && known && unit && perform(this.options.world, a, standing)) {
+    if (reach && known && unit && perform(this.options.world, a, standing, (x, y, z, stacks) => this.options.drops.spill(x, y, z, stacks))) {
       this.options.onAct?.(v.id, a, before);
       const placed = a.act === "place" ? this.options.world.get(a.x + a.nx, a.y + a.ny, a.z + a.nz) : 0;
       this.effect(a.use === "fertilize" ? "grow" : a.act, a.act === "place" ? a.x + a.nx : a.x, a.act === "place" ? a.y + a.ny : a.y, a.act === "place" ? a.z + a.nz : a.z, a.act === "break" ? before : a.act === "place" ? placed : this.options.world.get(a.x, a.y, a.z), v.id);

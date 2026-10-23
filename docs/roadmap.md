@@ -886,6 +886,51 @@ How every industry phase works, besides the principles above:
 
 ### Phase 11: Industry I: energy and the first machines (L)
 
+**Done on 2026-10-23.** What changed against the plan below:
+- Resources (generator 5):
+  - Ores: tin ore about as common as copper, a little lower (y 0–80); uranium ore rare and deep (y 0–30).
+  - Rubber trees grow in forests, jungles and swamps, with resin spots here and there. A tree tap takes one
+    to three sticky resin from a wet spot, which dries and fills again on random ticks.
+- Materials:
+  - Raw tin, tin ingots, bronze (dust from three copper dust and one tin dust).
+  - Refined iron (iron ingots smelted again).
+  - Rubber: from resin smelted, or three from the extractor.
+  - Bronze tools and armor: iron's tier, lasting longer.
+- Energy (`src/energy.ts`) moves in EU packets of four tiers, through three cables:
+  - Tin: low voltage, losing 0.025 EU a block.
+  - Bare copper: medium voltage, losing 0.3 a block, and shocking a player touching it while it carries.
+  - Insulated copper: medium voltage, losing 0.2 a block.
+
+  Cables are drawn thin and join cables and machines any of six ways. Every tick each generator and store
+  sends up to its output to the machines it reaches, the nearest first (by loss). The ways are found again
+  only when a cable or machine changes, or chunks come or go. Energy above a machine's tier blows it up;
+  above a cable's, it burns the weakest cable.
+- Machines (`src/machines.ts`), their fronts lit while they work:
+  - Generator: burns furnace fuel at a quarter of a furnace's burning time, 10 EU a tick, holds 4,000 EU.
+  - Electric furnace: 3 EU a tick, 6.5 seconds an item.
+  - Macerator: ores into two dusts, cobblestone into sand, gravel into flint, a bone into five bone meal.
+  - Extractor (rubber) and compressor (snowballs, snow, sand, clay): 2 EU a tick, 15 seconds an item.
+  - Battery box: 40,000 EU, low voltage out of its front, which faces any of six ways.
+
+  Their screens show a slot over a gauge over a slot, an arrow to the output and the energy held; the
+  furnace's screen is now the same kind.
+- Items:
+  - The battery holds 10,000 EU. A stack keeps the charge it is missing as its damage, so its bar shows the
+    charge; crafted, it is empty.
+  - The electronic circuit and the machine casing.
+  - The wrench turns a machine, or takes it up whole when sneaking. Broken any other way, a machine leaves
+    only its casing.
+  - The EU meter reads a cable's flow or a machine's energy.
+- Craft paints all of it: IndustrialCraft's textures aren't in Minecraft, and nothing is imported.
+- Save format 11 (machines, batteries' charge) with a fixture; protocol 8.
+- Against the plan:
+  - The compressor packs snow, sand and clay. Plates come with Phase 13's advanced materials.
+  - Copper cable already carries medium voltage, as IndustrialCraft's does.
+  - Machines don't take items from hoppers yet (Phase 13).
+- Not done:
+  - Only the host's player is shocked by bare cable, and the EU meter reads only where the world runs.
+  - Not yet checked in a browser: the dev server was stopped by the system for low memory.
+
 - **Resources** (generator 5): tin ore, uranium ore (deep and rare, used from Phase 15, generated now so
   worlds explored in between have it), rubber trees with resin spots in forests, swamps and jungles. Copper
   and tin ingots; bronze (copper and tin), with bronze tools and armor between iron and diamond in
@@ -1051,5 +1096,5 @@ Settled on 2026-10-22, all as recommended:
    16 before the "Later" list. Mechanics follow IndustrialCraft 2 where they fit Craft, with numbers
    tuned when each phase starts; plain names where the mod's are its own; Craft's own textures.
 
-Phases 0 to 10 and M are done; next is Phase 11, the first of the industry phases: energy, cables and
-the first machines.
+Phases 0 to 11 and M are done; next is Phase 12: solar, wind, water and geothermal power, transformers and
+bigger stores.

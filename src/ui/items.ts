@@ -43,6 +43,25 @@ class ResultSlot implements Slot {
 type Section = { slots: Slot[]; columns: number; label?: string; kind?: "result" | "armor" };
 
 /**
+ * A screen for something that works items or energy (a furnace, a generator, the industry's machines, a
+ * battery box): a slot over a gauge over a slot, an arrow to an output if it has one, and a line of text.
+ */
+export interface ProcessView {
+  title: string;
+  /** The slot over the gauge (an input, fuel, a battery to charge), the one under it, the output. */
+  top: Slot | null;
+  bottom: Slot | null;
+  output: Slot | null;
+  /** What shift sends into the top or bottom slot from the inventory. */
+  acceptsTop: (s: ItemStack) => boolean;
+  acceptsBottom: (s: ItemStack) => boolean;
+  /** The gauge: a flame (burning) or a bar of energy. */
+  bar: "flame" | "energy";
+  /** Every frame: how far along the arrow is (0-1), how full the gauge, what the text says. */
+  gauges: () => { arrow: number; bar: number; text: string };
+}
+
+/**
  * The screens over the game that hold items: the inventory (with its 2 x 2 crafting grid and armor), a
  * crafting table (3 x 3), a chest (or double chest), a furnace, and the creative list of every item. Items
  * move as in Minecraft: the left button picks up and puts down stacks, the right one halves a stack or
@@ -59,11 +78,11 @@ export class ItemScreen {
   private gridWidth = 0;
   private sections: Section[] = [];
   private title = "";
-  private furnace: FurnaceEntity | null = null;
+  private process: ProcessView | null = null;
   private search = "";
   private creative = false;
   private body: HTMLElement | null = null;
-  private progress: { arrow: HTMLElement; flame: HTMLElement } | null = null;
+  private progress: { arrow: HTMLElement | null; bar: HTMLElement; text: HTMLElement } | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -118,9 +137,29 @@ export class ItemScreen {
 
   /** A furnace: its input, fuel and output slots (given), with how far it is along. */
   showFurnace(slots: Slot[], furnace: FurnaceEntity): void {
-    this.start("Furnace", 0);
-    this.furnace = furnace;
-    this.sections = [{ slots: [slots[FURNACE_INPUT]], columns: 1, label: "furnace-input" }, { slots: [slots[FURNACE_FUEL]], columns: 1, label: "furnace-fuel" }, { slots: [slots[FURNACE_OUTPUT]], columns: 1, kind: "result" }, { slots: this.main, columns: 9 }, { slots: this.hotbar, columns: 9 }];
+    this.showProcess({
+      title: "Furnace",
+      top: slots[FURNACE_INPUT],
+      bottom: slots[FURNACE_FUEL],
+      output: slots[FURNACE_OUTPUT],
+      acceptsTop: (s) => smelt(s.item) !== null,
+      acceptsBottom: (s) => fuelOf(s.item) > 0,
+      bar: "flame",
+      gauges: () => ({ arrow: furnace.cook / SMELT_TIME, bar: furnace.burnTotal > 0 ? furnace.burn / furnace.burnTotal : 0, text: "" }),
+    });
+  }
+
+  /** Something that works items or energy (see ProcessView); its gauges are read every frame. */
+  showProcess(view: ProcessView): void {
+    this.start(view.title, 0);
+    this.process = view;
+    this.sections = [
+      { slots: view.top ? [view.top] : [], columns: 1 },
+      { slots: view.bottom ? [view.bottom] : [], columns: 1 },
+      { slots: view.output ? [view.output] : [], columns: 1, kind: "result" },
+      { slots: this.main, columns: 9 },
+      { slots: this.hotbar, columns: 9 },
+    ];
     this.render();
   }
 
@@ -132,17 +171,12 @@ export class ItemScreen {
     this.render();
   }
 
-  /** The furnace being shown changed from elsewhere (it burned on, or a guest saw the host's): show it again. */
-  setFurnace(furnace: FurnaceEntity): void {
-    this.furnace = furnace;
-  }
-
   private start(title: string, gridWidth: number): void {
     this.open = true;
     this.title = title;
     this.gridWidth = gridWidth;
     this.grid = new Array(gridWidth * gridWidth).fill(null);
-    this.furnace = null;
+    this.process = null;
     this.creative = false;
     this.search = "";
     this.progress = null;
@@ -172,12 +206,13 @@ export class ItemScreen {
     this.onClose?.();
   }
 
-  /** Every frame while up: the furnace's gauges, and its slots now and then. */
+  /** Every frame while up: a furnace's or machine's gauges, and its slots. */
   tick(): void {
-    if (!this.open || !this.furnace || !this.progress) return;
-    const f = this.furnace;
-    this.progress.arrow.style.width = `${(f.cook / SMELT_TIME) * 100}%`;
-    this.progress.flame.style.height = `${f.burnTotal > 0 ? (f.burn / f.burnTotal) * 100 : 0}%`;
+    if (!this.open || !this.process || !this.progress) return;
+    const g = this.process.gauges();
+    if (this.progress.arrow) this.progress.arrow.style.width = `${Math.min(1, g.arrow) * 100}%`;
+    this.progress.bar.style.height = `${Math.min(1, g.bar) * 100}%`;
+    this.progress.text.textContent = g.text;
     this.refreshSlots();
   }
 
@@ -195,7 +230,9 @@ export class ItemScreen {
   private paint(el: HTMLElement, s: ItemStack | null): void {
     const bg = s ? this.host.icons.background(s.item) : null;
     el.style.setProperty("--icon", bg ?? (s ? `linear-gradient(${ITEMS[s.item].color} 0 38%, ${ITEMS[s.item].color} 38% 100%)` : "none"));
-    el.title = s ? ITEMS[s.item].label : "";
+    // What holds energy says how much
+    const charge = s ? ITEMS[s.item].charge : null;
+    el.title = s ? (charge ? `${ITEMS[s.item].label} (${Math.floor(charge.capacity - s.damage).toLocaleString("en")} / ${charge.capacity.toLocaleString("en")} EU)` : ITEMS[s.item].label) : "";
     const count = s && s.count > 1 ? String(s.count) : "";
     const durability = s ? ITEMS[s.item].durability : 0;
     el.replaceChildren(h("b", {}, count), s && s.damage > 0 && durability > 0 ? h("i", { style: `--wear: ${1 - s.damage / durability}` }) : "");
@@ -239,11 +276,13 @@ export class ItemScreen {
       });
       fill();
       parts.push(input, list, h("p", { class: "muted" }, "Click an item to put a stack of it in the selected hotbar slot. E or Esc goes back."), grid(0));
-    } else if (this.furnace) {
-      const arrow = h("div", { class: "gauge arrow" }, h("span"));
-      const flame = h("div", { class: "gauge flame" }, h("span"));
-      this.progress = { arrow: arrow.firstElementChild as HTMLElement, flame: flame.firstElementChild as HTMLElement };
-      parts.push(h("div", { class: "furnace" }, h("div", { class: "column" }, grid(0), flame, grid(1)), arrow, grid(2)), grid(3), grid(4));
+    } else if (this.process) {
+      const p = this.process;
+      const arrow = p.output ? h("div", { class: "gauge arrow" }, h("span")) : null;
+      const bar = h("div", { class: `gauge ${p.bar}` }, h("span"));
+      const text = h("p", { class: "muted" });
+      this.progress = { arrow: arrow ? (arrow.firstElementChild as HTMLElement) : null, bar: bar.firstElementChild as HTMLElement, text };
+      parts.push(h("div", { class: "furnace" }, h("div", { class: "column" }, grid(0), bar, grid(1)), ...(arrow ? [arrow, grid(2)] : [])), text, grid(3), grid(4));
     } else if (this.gridWidth > 0) {
       // The inventory has its armor first, then the grid; a crafting table starts with the grid
       const g = this.gridWidth === 2 ? 1 : 0;
@@ -269,7 +308,7 @@ export class ItemScreen {
   private onSlot(a: number, b: number, right: boolean, shift: boolean): void {
     const sec = this.sections[a];
     const slot = sec.slots[b];
-    if (slot instanceof ResultSlot || (sec.kind === "result" && this.furnace)) {
+    if (slot instanceof ResultSlot || (sec.kind === "result" && this.process)) {
       this.takeResult(slot, shift);
     } else if (this.creative && sec.slots === this.sections[0].slots && !this.cursor) {
       // The creative hotbar: a click selects the slot, shift empties it
@@ -331,9 +370,9 @@ export class ItemScreen {
     // From the inventory: armor to its slot, into the open container, or between hotbar and the rest
     const armor = ITEMS[s.item].armor;
     if (armor && this.gridWidth === 2) return [this.inventorySlot(ARMOR_SLOTS[ARMOR_FOR.indexOf(armor)])];
-    if (this.furnace) {
-      if (smelt(s.item) !== null) return this.sections[0].slots;
-      if (fuelOf(s.item) > 0) return this.sections[1].slots;
+    if (this.process) {
+      if (this.process.top && this.process.acceptsTop(s)) return this.sections[0].slots;
+      if (this.process.bottom && this.process.acceptsBottom(s)) return this.sections[1].slots;
     } else if (this.gridWidth === 0 && !this.creative && this.sections.length === 3) {
       return this.sections[0].slots;
     }

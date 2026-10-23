@@ -80,6 +80,8 @@ export function placementState(block: Block, aim: Aim, yaw: number, pitch: numbe
       return stateOf(block, { facing: ny !== 0 ? "down" : OPPOSITE[normalFacing(nx, nz)] });
   }
   if (block === Block.Observer) return stateOf(block, { facing: lookFacing6(yaw, pitch) });
+  // A battery box turns its front (its output) to the player, any of six ways
+  if (block === Block.BatteryBox) return stateOf(block, { facing: OPPOSITE[lookFacing6(yaw, pitch)] });
   if (has("axis")) return stateOf(block, { axis: nx !== 0 ? "x" : nz !== 0 ? "z" : "y" });
   if (has("facing")) return stateOf(block, { facing: OPPOSITE[look] });
   return block;

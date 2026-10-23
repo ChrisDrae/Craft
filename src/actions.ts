@@ -1,6 +1,8 @@
-import { BLOCKS, Block, DIR_X, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
+import { BLOCKS, Block, DIR_FACING, DIR_X, DIR_Z, Dir, FACING_DIR, FLUID, SHAPE, SOLID, blockOf, propertyOf, withProperties } from "./blocks.js";
 import { boxOverlapsCell } from "./collision.js";
 import { canFertilize, fertilize } from "./growth.js";
+import { Items, type ItemStack } from "./items.js";
+import { isMachine } from "./machines.js";
 import { placementState } from "./placement.js";
 import { PLAYER_HALF_WIDTH, PLAYER_HEIGHT } from "./player.js";
 import { standsOn, sturdy, supported } from "./updates.js";
@@ -26,8 +28,13 @@ export interface Action {
   /** Where the player looked (stairs and doors face that way), and how far up or down (pistons, observers). */
   yaw: number;
   pitch?: number;
-  /** What the held item does to the block used (a hoe tills, bone meal makes things grow), or landing hard on farmland. */
-  use?: "till" | "fertilize" | "trample";
+  /**
+   * What the held item does to the block used (a hoe tills, bone meal makes things grow, a tree tap takes
+   * resin, a wrench turns a machine or, sneaking, takes it up), or landing hard on farmland.
+   */
+  use?: "till" | "fertilize" | "trample" | "tap" | "wrench";
+  /** Sneaking (a wrench takes a machine up rather than turning it). */
+  sneak?: boolean;
 }
 
 /** A block placing takes the place of: air, fluid, or a replaceable one (short grass). */
@@ -40,12 +47,15 @@ function makesRoom(state: number): boolean {
  * them). `standing` holds the feet of every player, whom solid blocks can't be placed into. Returns whether
  * anything changed; the block updates deal with what that does around it.
  */
-export function perform(world: VoxelWorld, a: Action, standing: readonly { x: number; y: number; z: number }[]): boolean {
+/** Where what an action gives drops: resin tapped, a machine taken up. */
+export type DropSink = (x: number, y: number, z: number, stacks: ItemStack[]) => void;
+
+export function perform(world: VoxelWorld, a: Action, standing: readonly { x: number; y: number; z: number }[], drop: DropSink | null = null): boolean {
   switch (a.act) {
     case "break":
       return breakBlock(world, a);
     case "use":
-      return useBlock(world, a);
+      return useBlock(world, a, drop);
     case "place":
       return placeBlock(world, a, standing);
   }
@@ -65,10 +75,29 @@ export function breakBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z">):
  * halves) or a trapdoor opens or shuts. Farmland landed on hard is trampled back to dirt. Returns whether
  * anything happened.
  */
-export function useBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z"> & { use?: Action["use"]; ny?: number }): boolean {
+export function useBlock(world: VoxelWorld, a: Pick<Action, "x" | "y" | "z"> & Partial<Pick<Action, "use" | "nx" | "ny" | "nz" | "sneak">>, drop: DropSink | null = null): boolean {
   const state = world.get(a.x, a.y, a.z);
   const shape = SHAPE[state];
   const block = blockOf(state);
+  // The face used, as a direction
+  const face = a.nx ? (a.nx > 0 ? Dir.PosX : Dir.NegX) : a.nz ? (a.nz > 0 ? Dir.PosZ : Dir.NegZ) : (a.ny ?? 1) > 0 ? Dir.Up : Dir.Down;
+  if (a.use === "tap") {
+    // A wet resin spot, on the side tapped: one to three sticky resin, and the spot dries
+    if (block !== Block.RubberLog || propertyOf(state, "resin") !== "wet" || FACING_DIR[propertyOf(state, "facing")] !== face) return false;
+    drop?.(a.x, a.y, a.z, [{ item: Items.StickyResin, count: 1 + Math.floor(Math.random() * 3), damage: 0 }]);
+    return world.set(a.x, a.y, a.z, withProperties(state, { resin: "dry" }));
+  }
+  if (a.use === "wrench" && isMachine(state)) {
+    if (a.sneak) {
+      // Taken up whole (what it holds spills, see VoxelWorld.onEntityRemoved)
+      drop?.(a.x, a.y, a.z, [{ item: block, count: 1, damage: 0 }]);
+      return world.set(a.x, a.y, a.z, Block.Air);
+    }
+    // Turned to face the side used (a battery box any of six ways, the rest four)
+    const facing = DIR_FACING[face];
+    if (block !== Block.BatteryBox && (face === Dir.Up || face === Dir.Down)) return false;
+    return propertyOf(state, "facing") !== facing && world.set(a.x, a.y, a.z, withProperties(state, { facing }));
+  }
   if (a.use === "till" && (block === Block.Grass || block === Block.Dirt) && world.get(a.x, a.y + 1, a.z) === Block.Air && (a.ny ?? 1) >= 0) return world.set(a.x, a.y, a.z, Block.Farmland);
   if (a.use === "trample") return block === Block.Farmland && world.set(a.x, a.y, a.z, Block.Dirt);
   if (a.use === "fertilize" && canFertilize(state)) {

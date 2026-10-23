@@ -1,10 +1,11 @@
 import { SimObject, type Vec3 } from "projector";
-import { REACH, perform, type Action } from "./actions.js";
+import { REACH, perform, type Action, type DropSink } from "./actions.js";
 import { Block, STATE_BLOCK, blockOf, isBed } from "./blocks.js";
 import { canFertilize } from "./growth.js";
 import { HOTBAR_SLOTS, INVENTORY_SLOTS, Inventory } from "./inventory.js";
 import { ITEMS, Items, itemByName, type Food, type Item, type ItemStack } from "./items.js";
 import { breakTime } from "./mining.js";
+import { isMachine } from "./machines.js";
 import type { Player } from "./player.js";
 import { raycastVoxels, type VoxelHit } from "./raycast.js";
 import { SELECTION } from "./shapes.js";
@@ -81,6 +82,10 @@ export class BlockInteraction extends SimObject {
   onSelect: ((slot: number) => void) | null = null;
   /** Called with every action that changed something, and what was held (a guest sends them to the host). */
   onAction: ((a: Action, held: ItemStack | null) => void) | null = null;
+  /** Where what using a block gives drops (resin, a machine taken up); unset where the world isn't run (a guest). */
+  onDrops: DropSink | null = null;
+  /** An EU meter used on a block: what it reads is the game's to say. */
+  onMeter: ((x: number, y: number, z: number) => void) | null = null;
   /** Called with a block this player broke, as it was, and what they held: for its drops. */
   onBroken: ((x: number, y: number, z: number, state: number, held: ItemStack | null) => void) | null = null;
   /** Called when the player uses a crafting table, chest or furnace. */
@@ -280,6 +285,11 @@ export class BlockInteraction extends SimObject {
       const b = STATE_BLOCK[t.block];
       if (ITEMS[held.item].tool?.kind === "hoe" && (b === Block.Grass || b === Block.Dirt)) a.use = "till";
       else if (held.item === Items.BoneMeal && canFertilize(t.block)) a.use = "fertilize";
+      else if (held.item === Items.TreeTap && b === Block.RubberLog) a.use = "tap";
+      else if (held.item === Items.Wrench && isMachine(t.block)) {
+        a.use = "wrench";
+        a.sneak = this.player.sneaking;
+      }
     }
     return a;
   }
@@ -287,7 +297,7 @@ export class BlockInteraction extends SimObject {
   /** Does an action (see actions.ts), and tells onAction if it did anything. */
   private apply(a: Action | null): boolean {
     const held = this.inventory.held;
-    if (!a || !perform(this.world, a, [this.player.position, ...this.others()])) return false;
+    if (!a || !perform(this.world, a, [this.player.position, ...this.others()], this.onDrops)) return false;
     this.onAction?.(a, held);
     return true;
   }
@@ -312,8 +322,15 @@ export class BlockInteraction extends SimObject {
     const t = this.target;
     if (!t) return false;
     const before = this.world.get(t.x, t.y, t.z);
+    // An EU meter reads rather than uses
+    if (this.inventory.held?.item === Items.EuMeter && this.onMeter) {
+      this.onMeter(t.x, t.y, t.z);
+      return true;
+    }
     const a = this.action("use");
     if (!this.apply(a)) return false;
+    // A tree tap and a wrench wear with use
+    if (this.mode === "survival" && (a?.use === "tap" || a?.use === "wrench")) this.inventory.wearHeld(1);
     if (this.mode === "survival" && a?.use === "till" && STATE_BLOCK[this.world.get(t.x, t.y, t.z)] === Block.Farmland && before !== this.world.get(t.x, t.y, t.z)) this.inventory.wearHeld(1);
     if (this.mode === "survival" && a?.use === "fertilize" && canFertilize(before)) this.inventory.useHeld(1);
     return true;

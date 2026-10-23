@@ -47,6 +47,10 @@ import { Precipitation } from "./rain.js";
 import { tickHoppers } from "./hoppers.js";
 import { MovingBlocks, type ShownMove } from "./moving.js";
 import { MOVE_TICKS, type Move } from "./pistons.js";
+import { CABLES, posKey } from "./energy.js";
+import { BATTERY, CHARGE, FUEL, INPUT, MACHINES, OUTPUT, PACKET, STORE_CHARGE, STORE_DRAIN, TIER_NAMES, fuelEnergy, machineAccepts, tickMachines, type MachineSpec } from "./machines.js";
+import type { ProcessView } from "./ui/items.js";
+import type { MachineEntity } from "./blockEntities.js";
 import { Weather, lightningStrikes, rainTop, rainsOn } from "./weather.js";
 import { formatWhen, h } from "./ui/dom.js";
 import { debugLines } from "./ui/debug.js";
@@ -520,6 +524,9 @@ export async function startGame(options: GameOptions): Promise<void> {
     if (joined) weather.fade();
     else {
       updates!.redstone.pistons.tick();
+      tickMachines(world);
+      updates!.energy.tick();
+      shockTick();
       tickHoppers(world, drops);
       tickFurnaces(world);
       weather.tick();
@@ -652,6 +659,29 @@ export async function startGame(options: GameOptions): Promise<void> {
       host?.moving(moves);
     };
     pistons.onCarry = (box, dx, dy, dz) => carry(box, dx, dy, dz);
+  }
+  if (updates) {
+    // A machine fed above its tier blows up; a cable carrying too much burns through
+    updates.energy.onExplode = (x, y, z) => mobs?.explode(x + 0.5, y + 0.5, z + 0.5, 2, null);
+    updates.energy.onBurn = (x, y, z) => {
+      for (let i = 0; i < 4; i++) particles?.smoke(x + Math.random(), y + Math.random(), z + Math.random(), true, 0.6);
+      sounds.play("entity.generic.extinguish_fire", "blocks", at(x, y, z), 0.5, 2.6);
+    };
+  }
+  /** Bare cable carrying energy shocks the player touching it, a point of damage a second. */
+  let shockTimer = 0;
+  function shockTick(): void {
+    if (--shockTimer > 0 || !updates) return;
+    const p = player.position;
+    for (let x = Math.floor(p.x - 0.3); x <= Math.floor(p.x + 0.3); x++) {
+      for (let y = Math.floor(p.y); y <= Math.floor(p.y + 1.8); y++) {
+        for (let z = Math.floor(p.z - 0.3); z <= Math.floor(p.z + 0.3); z++) {
+          if (!CABLES.get(STATE_BLOCK[world.get(x, y, z)])?.bare || !(updates.energy.flow.get(posKey(x, y, z)) ?? 0)) continue;
+          if (survival.hurt(1, "shock", null)) shockTimer = 20;
+          return;
+        }
+      }
+    }
   }
   /** A piston's sound as it pushes out or comes back in: once for each piston that moved. */
   function pistonSound(moves: readonly Move[]): void {
@@ -1690,7 +1720,7 @@ export async function startGame(options: GameOptions): Promise<void> {
   /** Slots over a chest's or furnace's items: changes are saved, and a guest's go to the host. */
   function entitySlots(x: number, y: number, z: number, e: BlockEntity): Slot[] {
     return e.items.map((_, i) =>
-      arraySlot(e.items, i, e.kind === "furnace" ? (s) => furnaceAccepts(i, s) : () => true, 64, () => {
+      arraySlot(e.items, i, e.kind === "furnace" ? (s) => furnaceAccepts(i, s) : e.kind === "machine" ? (s) => machineAccepts(MACHINES.get(e.block)!, i, s) : () => true, 64, () => {
         if (guest) {
           guest.setSlots(x, y, z, [[i, saveStack(e.items[i])]]);
         } else {
@@ -1727,6 +1757,9 @@ export async function startGame(options: GameOptions): Promise<void> {
       sounds.play("block.chest.open", "blocks", at(x, y, z), 0.5, Math.random() * 0.1 + 0.9);
       const slots = chestSlots(x, y, z, state, e);
       showItems(() => items.showChest(slots, slots.length > 27 ? "Large chest" : "Chest"));
+    } else if (e.kind === "machine") {
+      const slots = entitySlots(x, y, z, e);
+      showItems(() => items.showProcess(machineView(MACHINES.get(e.block)!, e, slots)));
     } else if (e.kind === "hopper") {
       const slots = entitySlots(x, y, z, e);
       showItems(() => items.showChest(slots, "Hopper"));
@@ -1735,6 +1768,52 @@ export async function startGame(options: GameOptions): Promise<void> {
       showItems(() => items.showFurnace([slots[FURNACE_INPUT], slots[FURNACE_FUEL], slots[FURNACE_OUTPUT]], e));
     }
   }
+
+  /** A machine's screen: its slots by what it does, its gauges, the energy it holds. */
+  function machineView(spec: MachineSpec, e: MachineEntity, slots: Slot[]): ProcessView {
+    const text = (): string => `${Math.floor(e.energy).toLocaleString("en")} / ${spec.capacity.toLocaleString("en")} EU · ${TIER_NAMES[spec.tier]}`;
+    const charged = (s: ItemStack): boolean => ITEMS[s.item].charge !== null;
+    switch (spec.role) {
+      case "generator":
+        return { title: spec.label, top: slots[FUEL], bottom: slots[CHARGE], output: null, acceptsTop: (s) => fuelEnergy(s.item) > 0, acceptsBottom: charged, bar: "flame", gauges: () => ({ arrow: 0, bar: e.burnTotal > 0 ? e.burn / e.burnTotal : 0, text: text() }) };
+      case "processor":
+        return {
+          title: spec.label,
+          top: slots[INPUT],
+          bottom: slots[BATTERY],
+          output: slots[OUTPUT],
+          acceptsTop: (s) => spec.recipe({ ...s, count: 64 }) !== null,
+          acceptsBottom: charged,
+          bar: "energy",
+          gauges: () => ({ arrow: e.progress / spec.time, bar: e.energy / spec.capacity, text: text() }),
+        };
+      case "storage":
+        return { title: spec.label, top: slots[STORE_CHARGE], bottom: slots[STORE_DRAIN], output: null, acceptsTop: charged, acceptsBottom: charged, bar: "energy", gauges: () => ({ arrow: 0, bar: e.energy / spec.capacity, text: text() }) };
+    }
+  }
+
+  // What using a block gives drops where the world runs; an EU meter reads cables and machines
+  if (!joined) interaction.onDrops = (x, y, z, stacks) => drops.spill(x, y, z, stacks);
+  interaction.onMeter = (x, y, z) => {
+    if (guest) {
+      notice("An EU meter reads only where the world runs (the host's)");
+      return;
+    }
+    const state = world.get(x, y, z);
+    const cable = CABLES.get(STATE_BLOCK[state]);
+    if (cable) {
+      const eu = updates!.energy.flow.get(posKey(x, y, z)) ?? 0;
+      notice(`${BLOCKS[STATE_BLOCK[state]].label}: ${eu.toFixed(1)} EU/t (carries up to ${PACKET[cable.tier]} EU, ${TIER_NAMES[cable.tier]})`);
+      return;
+    }
+    const e = world.blockEntity(x, y, z);
+    if (e?.kind === "machine") {
+      const spec = MACHINES.get(e.block)!;
+      notice(`${spec.label}: ${Math.floor(e.energy).toLocaleString("en")} / ${spec.capacity.toLocaleString("en")} EU (${TIER_NAMES[spec.tier]})`);
+      return;
+    }
+    notice("No energy here");
+  };
 
   interaction.onOpen = (x, y, z, state) => {
     const block = blockOf(state);
@@ -1765,7 +1844,6 @@ export async function startGame(options: GameOptions): Promise<void> {
       if (open) {
         // The same entity object stays (the slots read it): its contents change
         Object.assign(open.entity, fresh);
-        if (open.entity.kind === "furnace") items.setFurnace(open.entity);
         items.refreshSlots();
       } else if (pendingOpen && pendingOpen.x === x && pendingOpen.y === y && pendingOpen.z === z) {
         showContainer(x, y, z, pendingOpen.state, fresh);

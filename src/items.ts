@@ -54,6 +54,11 @@ export interface ItemInfo {
   readonly durability: number;
   /** Ticks it keeps a furnace burning, 0 if it doesn't burn. */
   readonly fuel: number;
+  /**
+   * What it holds of energy (batteries, electric tools): as much as `capacity` EU, charged and used up to
+   * its tier's packets. A stack keeps the energy it is missing as its damage, so its bar shows the charge.
+   */
+  readonly charge: { capacity: number; tier: number } | null;
   /** Its picture in Minecraft's textures (item/<texture>.png), for items that aren't blocks. */
   readonly texture: string | null;
   /** Its color without textures (Canvas 2D). */
@@ -72,6 +77,7 @@ interface ItemOptions {
   attackSpeed?: number;
   durability?: number;
   fuel?: number;
+  charge?: { capacity: number; tier: number };
 }
 
 /** Ticks a furnace burns: wood for one and a half items, coal for eight. */
@@ -96,6 +102,7 @@ const WOODEN: ReadonlySet<number> = new Set([
   Block.OakStairs,
   Block.OakTrapdoor,
   Block.OakDoor,
+  Block.RubberLog,
 ]);
 
 /** Block items drawn as a picture of their own rather than as the block. */
@@ -105,7 +112,7 @@ function blockItem(b: (typeof BLOCKS)[number]): ItemInfo {
   const fuel = WOODEN.has(b.id) ? WOOD_FUEL : b.id === Block.OakSlab ? 150 : b.id === Block.Ladder ? WOOD_FUEL : b.id === Block.OakSapling ? 100 : 0;
   // Hoppers and comparators show pictures of their own, as Minecraft's
   const texture = PICTURED.has(b.id) ? b.name : null;
-  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, places: null, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, texture, color: b.top };
+  return { id: b.id, name: b.name, label: b.label, maxStack: b.shape === "bed" ? 1 : 64, block: b.id, places: null, tool: null, armor: null, defense: 0, toughness: 0, food: null, attack: 1, attackSpeed: 4, durability: 0, fuel, charge: null, texture, color: b.top };
 }
 
 const extra: ItemInfo[] = [];
@@ -127,6 +134,7 @@ function item(name: string, label: string, color: string, options: ItemOptions =
     attackSpeed: options.attackSpeed ?? 4,
     durability: options.durability ?? 0,
     fuel: options.fuel ?? 0,
+    charge: options.charge ?? null,
     texture: name,
     color,
   });
@@ -188,6 +196,25 @@ export const Items = {
   MelonSeeds: item("melon_seeds", "melon seeds", "#3a2a1a", { places: Block.MelonStem }),
   BoneMeal: item("bone_meal", "bone meal", "#f0f0e8"),
   SlimeBall: item("slime_ball", "slimeball", "#7ac85a"),
+  // The industry's materials
+  RawTin: item("raw_tin", "raw tin", "#b8b8c0"),
+  TinIngot: item("tin_ingot", "tin ingot", "#d8d8e0"),
+  BronzeIngot: item("bronze_ingot", "bronze ingot", "#c8883a"),
+  RefinedIron: item("refined_iron_ingot", "refined iron", "#e8eaf0"),
+  RawUranium: item("raw_uranium", "raw uranium", "#5a7a4a"),
+  StickyResin: item("sticky_resin", "sticky resin", "#d8a03a"),
+  Rubber: item("rubber", "rubber", "#2a2a2a"),
+  IronDust: item("iron_dust", "iron dust", "#c8c0b8"),
+  GoldDust: item("gold_dust", "gold dust", "#f0d040"),
+  CopperDust: item("copper_dust", "copper dust", "#d88a5a"),
+  TinDust: item("tin_dust", "tin dust", "#d0d0d8"),
+  BronzeDust: item("bronze_dust", "bronze dust", "#c8883a"),
+  CoalDust: item("coal_dust", "coal dust", "#2a2a2a"),
+  ElectronicCircuit: item("electronic_circuit", "electronic circuit", "#3a8a3a"),
+  Battery: item("battery", "battery", "#c83a3a", { maxStack: 1, durability: 10000, charge: { capacity: 10000, tier: 1 } }),
+  TreeTap: item("tree_tap", "tree tap", "#a8895a", { maxStack: 1, durability: 16 }),
+  Wrench: item("wrench", "wrench", "#c8883a", { maxStack: 1, durability: 120 }),
+  EuMeter: item("eu_meter", "EU meter", "#e8c83a", { maxStack: 1 }),
 };
 
 /**
@@ -200,6 +227,8 @@ const TOOL_MATERIALS = [
   { prefix: "iron", label: "iron", tier: Tier.Iron, speed: 6, durability: 250, color: "#d8d8d8", attack: [4, 9, 4.5, 1, 6], axeSpeed: 0.9, hoeSpeed: 3 },
   { prefix: "golden", label: "golden", tier: Tier.Gold, speed: 12, durability: 32, color: "#f6d84a", attack: [2, 7, 2.5, 1, 4], axeSpeed: 1, hoeSpeed: 1 },
   { prefix: "diamond", label: "diamond", tier: Tier.Diamond, speed: 8, durability: 1561, color: "#5ae8e0", attack: [5, 9, 5.5, 1, 7], axeSpeed: 1, hoeSpeed: 4 },
+  // Bronze (the industry's): iron's tier and hits, lasting longer
+  { prefix: "bronze", label: "bronze", tier: Tier.Iron, speed: 6, durability: 350, color: "#c8883a", attack: [4, 9, 4.5, 1, 6], axeSpeed: 0.9, hoeSpeed: 3 },
 ] as const;
 const TOOL_KINDS: readonly ToolKind[] = ["pickaxe", "axe", "shovel", "hoe", "sword"];
 
@@ -228,6 +257,7 @@ const ARMOR_MATERIALS = [
   { prefix: "iron", factor: 15, defense: [2, 6, 5, 2], toughness: 0, color: "#d8d8d8" },
   { prefix: "golden", factor: 7, defense: [2, 5, 3, 1], toughness: 0, color: "#f6d84a" },
   { prefix: "diamond", factor: 33, defense: [3, 8, 6, 3], toughness: 2, color: "#5ae8e0" },
+  { prefix: "bronze", factor: 18, defense: [2, 6, 5, 2], toughness: 0, color: "#c8883a" },
 ] as const;
 const ARMOR_PIECES: ReadonlyArray<readonly [string, ArmorSlot, number]> = [
   ["helmet", "head", 11],

@@ -501,6 +501,22 @@ function partsOf(state: number): Parts | null {
       );
       return { quads, collision: [slab], selection: [slab] };
     }
+    case "cable": {
+      // A rod through the middle, and arms to the sides it connects to; insulated cable is thicker
+      const half = px(STATE_BLOCK[state] === Block.InsulatedCopperCable ? 3 : 2);
+      const [lo, hi] = [0.5 - half, 0.5 + half];
+      const list: Box[] = [[lo, lo, lo, hi, hi, hi]];
+      const arms: Record<string, Box> = {
+        north: [lo, lo, 0, hi, hi, lo],
+        south: [lo, lo, hi, hi, hi, 1],
+        west: [0, lo, lo, lo, hi, hi],
+        east: [hi, lo, lo, 1, hi, hi],
+        down: [lo, 0, lo, hi, lo, hi],
+        up: [lo, hi, lo, hi, 1, hi],
+      };
+      for (const [side, box] of Object.entries(arms)) if (prop(side) === "true") list.push(box);
+      return { quads: list.flatMap((b) => boxQuads(b, () => t[Face.Side])), collision: list, selection: list };
+    }
     case "bed": {
       // Built facing north (the head toward -z), then turned. A side shows Minecraft's texture of the
       // opposite side: Craft's world is Minecraft's mirrored, and so the pillow stays at the head end

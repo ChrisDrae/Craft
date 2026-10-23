@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TILE } from "../src/atlas.js";
 import { BLOCKS, Block } from "../src/blocks.js";
+import { INDUSTRY_ITEM_TILES, INDUSTRY_TILES } from "../src/itemTextures.js";
 import { TILES, iconPixels, minecraftTiles, overlay, proceduralTiles, tint } from "../src/textures.js";
 
 /** A tile of one color. */
@@ -84,6 +85,8 @@ describe("the texture importer", () => {
       if (name.endsWith("_wool") || name.startsWith("chest_") || /^[a-z_]+_bed_(head|foot)_[a-z]+$/.test(name) || name.startsWith("experience_orb_") || name.startsWith("particle_") || /_stage\d$/.test(name)) continue;
       const item = name.replace(/^item_/, "");
       if (/_(pickaxe|axe|shovel|hoe|sword|helmet|chestplate|leggings|boots)$/.test(item)) continue;
+      // The industry's are Craft's own: there is nothing of them to import
+      if (INDUSTRY_TILES.includes(name) || INDUSTRY_ITEM_TILES.has(name)) continue;
       expect(script, name).toContain(`"${item}"`);
     }
     expect(script).toContain("_wool`");

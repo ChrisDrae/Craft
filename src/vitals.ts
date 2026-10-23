@@ -14,7 +14,7 @@ export const DIFFICULTIES: readonly Difficulty[] = ["peaceful", "easy", "normal"
 export type PlayMode = "survival" | "creative" | "spectator";
 
 /** What hurts. */
-export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion" | "kill" | "lightning";
+export type DamageSource = "fall" | "drown" | "lava" | "fire" | "wall" | "void" | "starve" | "cactus" | "mob" | "arrow" | "explosion" | "kill" | "lightning" | "shock";
 
 export const MAX_HEALTH = 20;
 export const MAX_FOOD = 20;
@@ -41,6 +41,7 @@ export const DEATH_MESSAGES: Readonly<Record<DamageSource, string>> = {
   arrow: "was shot by",
   explosion: "was blown up by",
   kill: "was killed",
+  shock: "was electrocuted",
   lightning: "was struck by lightning",
 };
 

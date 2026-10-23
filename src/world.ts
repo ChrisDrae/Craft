@@ -1,4 +1,4 @@
-import { entityFor, keeps, type BlockEntity } from "./blockEntities.js";
+import { entityFor, keeps, madeAtOnce, type BlockEntity } from "./blockEntities.js";
 import { Block, CUBE_SHAPED, CULL_SAME, DIR_X, DIR_Y, DIR_Z, FLUID, LEAFY, SOLID, STATE_BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, MODEL_FACE, SECTIONS, SECTION_VOLUME, WORLD_HEIGHT, packFace, sectionIndex, type ChunkGenerator, type Section } from "./chunk.js";
 import { ownHeight } from "./fluids.js";
@@ -215,8 +215,8 @@ export class VoxelWorld implements LightWorld {
       chunk.entities.delete(entityKey);
       this.onEntityRemoved?.(x, y, z, entity);
     }
-    // A hopper works without anyone opening it: it has its entity from the start
-    if (STATE_BLOCK[state] === Block.Hopper && !chunk.entities.has(entityKey)) chunk.entities.set(entityKey, entityFor(Block.Hopper)!);
+    // Hoppers and machines work without anyone opening them: they have their entity from the start
+    if (madeAtOnce(STATE_BLOCK[state]) && !chunk.entities.has(entityKey)) chunk.entities.set(entityKey, entityFor(STATE_BLOCK[state])!);
     chunk.packed = null;
     chunk.sections[s].dirty = true;
     if (ly === 0 && s > 0) chunk.sections[s - 1].dirty = true;

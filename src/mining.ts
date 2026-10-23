@@ -75,6 +75,21 @@ const TABLE: Partial<Record<number, Mining>> = {
   [Block.Observer]: by("pickaxe", 3, Tier.Wood),
   [Block.Hopper]: by("pickaxe", 3, Tier.Wood),
   [Block.Comparator]: hand(0),
+  [Block.TinOre]: by("pickaxe", 3, Tier.Stone),
+  [Block.UraniumOre]: by("pickaxe", 3, Tier.Iron),
+  [Block.RubberLog]: WOOD_LIKE,
+  [Block.RubberLeaves]: by("hoe", 0.2),
+  [Block.RubberSapling]: hand(0),
+  [Block.MachineCasing]: by("pickaxe", 3, Tier.Wood),
+  [Block.Generator]: by("pickaxe", 3, Tier.Wood),
+  [Block.ElectricFurnace]: by("pickaxe", 3, Tier.Wood),
+  [Block.Macerator]: by("pickaxe", 3, Tier.Wood),
+  [Block.Extractor]: by("pickaxe", 3, Tier.Wood),
+  [Block.Compressor]: by("pickaxe", 3, Tier.Wood),
+  [Block.BatteryBox]: WOOD_LIKE,
+  [Block.TinCable]: hand(0.2),
+  [Block.CopperCable]: hand(0.2),
+  [Block.InsulatedCopperCable]: hand(0.2),
   [Block.RedstoneWire]: hand(0),
   [Block.Glass]: hand(0.3),
   [Block.GlassPane]: hand(0.3),
@@ -192,6 +207,21 @@ export function dropsOf(state: number, held: ItemStack | null, random: () => num
       return held?.item === Items.Shears ? one(Block.Vine) : [];
     case Block.Farmland:
       return one(Block.Dirt);
+    case Block.TinOre:
+      return one(Items.RawTin);
+    case Block.UraniumOre:
+      return one(Items.RawUranium);
+    case Block.RubberLog:
+      return one(Block.RubberLog);
+    case Block.RubberLeaves:
+      return random() < 0.05 ? one(Block.RubberSapling) : [];
+    case Block.Generator:
+    case Block.ElectricFurnace:
+    case Block.Macerator:
+    case Block.Extractor:
+    case Block.Compressor:
+      // Broken (not taken up with a wrench), a machine leaves only its casing, as IndustrialCraft's
+      return one(Block.MachineCasing);
     case Block.PistonHead:
       // Its piston, which goes with it
       return one(propertyOf(state, "type") === "sticky" ? Block.StickyPiston : Block.Piston);

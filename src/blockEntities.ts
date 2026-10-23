@@ -1,4 +1,5 @@
-import { Block, STATE_BLOCK, propertyOf, stateByName, stateName, withProperties } from "./blocks.js";
+import { BLOCKS, Block, STATE_BLOCK, blockByName, propertyOf, stateByName, stateName, withProperties } from "./blocks.js";
+import { MACHINES } from "./machines.js";
 import { CHUNK_SIZE, type Chunk } from "./chunk.js";
 import { SMELT_TIME, fuelOf, smelt, smeltXp } from "./crafting.js";
 import { ITEMS, loadStack, saveStack, type ItemStack, type SavedStack } from "./items.js";
@@ -50,7 +51,21 @@ export interface MovingEntity {
   since?: number;
 }
 
-export type BlockEntity = ChestEntity | FurnaceEntity | HopperEntity | MovingEntity;
+/** A machine of the industry's (machines.ts): which, its slots, the energy (EU) it holds, how far its work is. */
+export interface MachineEntity {
+  kind: "machine";
+  /** Which machine: its block. */
+  block: number;
+  items: (ItemStack | null)[];
+  energy: number;
+  /** A processor's ticks into its work. */
+  progress: number;
+  /** A generator's ticks of burning left, and how many its fuel gave. */
+  burn: number;
+  burnTotal: number;
+}
+
+export type BlockEntity = ChestEntity | FurnaceEntity | HopperEntity | MovingEntity | MachineEntity;
 
 export const CHEST_SLOTS = 27;
 export const HOPPER_SLOTS = 5;
@@ -64,15 +79,20 @@ export function entityFor(block: number): BlockEntity | null {
   if (block === Block.Furnace) return { kind: "furnace", items: [null, null, null], burn: 0, burnTotal: 0, cook: 0, xp: 0 };
   if (block === Block.Hopper) return { kind: "hopper", items: new Array(HOPPER_SLOTS).fill(null), cooldown: 0 };
   if (block === Block.MovingPiston) return { kind: "moving", items: [], state: Block.Air, dir: 0, progress: 1, extending: true, head: false };
+  const machine = MACHINES.get(block);
+  if (machine) return { kind: "machine", block, items: new Array(machine.slots).fill(null), energy: 0, progress: 0, burn: 0, burnTotal: 0 };
   return null;
 }
 
-/** The block each kind of entity belongs to. */
-const BLOCK_OF: Readonly<Record<BlockEntity["kind"], number>> = { chest: Block.Chest, furnace: Block.Furnace, hopper: Block.Hopper, moving: Block.MovingPiston };
+/** Whether a block's entity is made as soon as it is there (it works without anyone opening it): hoppers, machines. */
+export const madeAtOnce = (block: number): boolean => block === Block.Hopper || MACHINES.has(block);
+
+/** The block each kind of entity belongs to (machines: their own). */
+const BLOCK_OF: Readonly<Record<Exclude<BlockEntity["kind"], "machine">, number>> = { chest: Block.Chest, furnace: Block.Furnace, hopper: Block.Hopper, moving: Block.MovingPiston };
 
 /** Whether a state's block keeps the entity (a lit furnace is still a furnace). */
 export function keeps(entity: BlockEntity, state: number): boolean {
-  return STATE_BLOCK[state] === BLOCK_OF[entity.kind];
+  return STATE_BLOCK[state] === (entity.kind === "machine" ? entity.block : BLOCK_OF[entity.kind]);
 }
 
 /** Whether the furnace's input smelts into what its output slot can take. */
@@ -177,6 +197,9 @@ export interface SavedEntity {
   xp?: number;
   /** A hopper's. */
   cooldown?: number;
+  /** A machine's: which (its block's name), its energy and its work (and burn and burnTotal above). */
+  block?: string;
+  energy?: number;
   /** A moving block's: what it will be (by name, as chunks keep blocks), the way and how far. */
   state?: string;
   dir?: number;
@@ -194,6 +217,8 @@ export function saveEntity(x: number, y: number, z: number, e: BlockEntity): Sav
       return { x, y, z, kind: e.kind, items, cooldown: e.cooldown };
     case "moving":
       return { x, y, z, kind: e.kind, items: [], state: stateName(e.state), dir: e.dir, progress: e.progress, extending: e.extending, head: e.head };
+    case "machine":
+      return { x, y, z, kind: e.kind, block: BLOCKS[e.block].name, items, energy: e.energy, progress: e.progress, burn: e.burn, burnTotal: e.burnTotal };
     default:
       return { x, y, z, kind: e.kind, items };
   }
@@ -201,7 +226,8 @@ export function saveEntity(x: number, y: number, z: number, e: BlockEntity): Sav
 
 /** A saved entity back, or null for a kind this Craft doesn't know. */
 export function loadEntity(s: SavedEntity): BlockEntity | null {
-  const fresh = s.kind in BLOCK_OF ? entityFor(BLOCK_OF[s.kind as BlockEntity["kind"]]) : null;
+  const block = s.kind === "machine" ? blockByName(String(s.block ?? "")) : s.kind in BLOCK_OF ? BLOCK_OF[s.kind as keyof typeof BLOCK_OF] : null;
+  const fresh = block !== null ? entityFor(block) : null;
   if (!fresh) return null;
   fresh.items = fresh.items.map((_, i) => loadStack(s.items?.[i]));
   if (fresh.kind === "furnace") {
@@ -211,6 +237,12 @@ export function loadEntity(s: SavedEntity): BlockEntity | null {
     fresh.xp = Math.max(0, Number(s.xp) || 0);
   } else if (fresh.kind === "hopper") {
     fresh.cooldown = Math.max(0, Math.min(8, Math.floor(Number(s.cooldown) || 0)));
+  } else if (fresh.kind === "machine") {
+    const spec = MACHINES.get(fresh.block)!;
+    fresh.energy = Math.max(0, Math.min(spec.capacity, Number(s.energy) || 0));
+    fresh.progress = Math.max(0, Math.min(spec.time, Math.floor(Number(s.progress) || 0)));
+    fresh.burn = Math.max(0, Number(s.burn) || 0);
+    fresh.burnTotal = Math.max(fresh.burn, Number(s.burnTotal) || 0);
   } else if (fresh.kind === "moving") {
     // A block this Craft doesn't know arrives as nothing
     fresh.state = stateByName(String(s.state ?? "air")) ?? Block.Air;

@@ -4,7 +4,7 @@ import { Rng } from "./noise.js";
 import type { BlockWriter } from "./writer.js";
 
 /** The kinds of trees, by the shape they grow in. */
-export type TreeKind = "oak" | "big_oak" | "swamp_oak" | "birch" | "spruce" | "jungle" | "mega_jungle" | "acacia" | "dark_oak";
+export type TreeKind = "oak" | "big_oak" | "swamp_oak" | "birch" | "spruce" | "jungle" | "mega_jungle" | "acacia" | "dark_oak" | "rubber";
 
 /** How far from its trunk a tree reaches at most: chunks look for trees this far outside themselves. */
 export const TREE_REACH = 5;
@@ -33,15 +33,15 @@ const VEGETATION: Readonly<Record<number, Vegetation>> = {
     kinds: [["oak", 9], ["big_oak", 1]],
     plants: [[Block.ShortGrass, 0.25], [Block.TallGrass, 0.02], ...FLOWERS, [Block.OxeyeDaisy, 0.004], [Block.AzureBluet, 0.004], [Block.Cornflower, 0.004], [Block.Pumpkin, 0.0005]],
   },
-  [Biome.Forest]: { trees: 0.05, kinds: [["oak", 7], ["birch", 2], ["big_oak", 1]], plants: [[Block.ShortGrass, 0.12], ...FLOWERS, [Block.LilyOfTheValley, 0.004]] },
+  [Biome.Forest]: { trees: 0.05, kinds: [["oak", 7], ["birch", 2], ["big_oak", 1], ["rubber", 1]], plants: [[Block.ShortGrass, 0.12], ...FLOWERS, [Block.LilyOfTheValley, 0.004]] },
   [Biome.BirchForest]: { trees: 0.05, kinds: [["birch", 1]], plants: [[Block.ShortGrass, 0.12], ...FLOWERS, [Block.Allium, 0.004], [Block.LilyOfTheValley, 0.003]] },
   [Biome.DarkForest]: { trees: 0.1, kinds: [["dark_oak", 6], ["oak", 1], ["big_oak", 1]], plants: [[Block.ShortGrass, 0.06], [Block.Fern, 0.02], ...MUSHROOMS] },
   [Biome.Taiga]: { trees: 0.06, kinds: [["spruce", 1]], plants: [[Block.Fern, 0.1], [Block.LargeFern, 0.015], [Block.ShortGrass, 0.06], [Block.Pumpkin, 0.0005], ...MUSHROOMS] },
   [Biome.SnowyPlains]: { trees: 0.0012, kinds: [["spruce", 1]], plants: [] },
   [Biome.Desert]: { trees: 0, kinds: [], plants: [[Block.DeadBush, 0.006], [Block.Cactus, 0.006]] },
   [Biome.Savanna]: { trees: 0.006, kinds: [["acacia", 4], ["oak", 1]], plants: [[Block.ShortGrass, 0.4], [Block.TallGrass, 0.06], [Block.Dandelion, 0.003]] },
-  [Biome.Jungle]: { trees: 0.12, kinds: [["jungle", 6], ["mega_jungle", 1]], plants: [[Block.Fern, 0.12], [Block.ShortGrass, 0.2], [Block.LargeFern, 0.03], [Block.Melon, 0.004]] },
-  [Biome.Swamp]: { trees: 0.012, kinds: [["swamp_oak", 1]], plants: [[Block.ShortGrass, 0.15], [Block.BlueOrchid, 0.008], ...MUSHROOMS] },
+  [Biome.Jungle]: { trees: 0.12, kinds: [["jungle", 6], ["mega_jungle", 1], ["rubber", 1]], plants: [[Block.Fern, 0.12], [Block.ShortGrass, 0.2], [Block.LargeFern, 0.03], [Block.Melon, 0.004]] },
+  [Biome.Swamp]: { trees: 0.012, kinds: [["swamp_oak", 2], ["rubber", 1]], plants: [[Block.ShortGrass, 0.15], [Block.BlueOrchid, 0.008], ...MUSHROOMS] },
   [Biome.StonyMountains]: { trees: 0.004, kinds: [["spruce", 2], ["oak", 1]], plants: [[Block.ShortGrass, 0.05]] },
   [Biome.River]: { trees: 0, kinds: [], plants: [[Block.ShortGrass, 0.1]] },
 };
@@ -177,6 +177,18 @@ export function growTree(w: BlockWriter, kind: TreeKind, x: number, y: number, z
       }
       w.fill(x, top, z, Block.SpruceLeaves);
       trunk(w, x, y, z, height, Block.SpruceLog);
+      return;
+    }
+    case "rubber": {
+      // A tall, thin trunk with resin spots here and there, leaves bunched at the top (IndustrialCraft's)
+      const height = rng.int(5, 8);
+      crown(w, rng, x, y + height, z, Block.RubberLeaves, 1);
+      w.fill(x, y + height + 2, z, Block.RubberLeaves);
+      for (let k = 0; k < height; k++) {
+        const spot = k > 0 && k < height - 2 && rng.next() < 0.3;
+        const facing = ["north", "south", "east", "west"][rng.int(0, 3)];
+        w.set(x, y + k, z, stateOf(Block.RubberLog, { axis: "y", resin: spot ? "wet" : "none", facing }));
+      }
       return;
     }
     case "jungle": {

@@ -506,6 +506,19 @@ button.danger {
   height: 0;
 }
 
+/* A machine's energy: red, as redstone */
+.gauge.energy {
+  width: 12px;
+  height: 18px;
+  margin: 4px 0;
+}
+
+.gauge.energy span {
+  right: 0;
+  height: 0;
+  background: #e8382a;
+}
+
 .cursor-stack {
   position: fixed;
   left: 0;

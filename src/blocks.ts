@@ -132,6 +132,24 @@ export const Block = {
   Observer: 163,
   Hopper: 164,
   Comparator: 165,
+  TinOre: 166,
+  UraniumOre: 167,
+  /** Rubber trees' wood, with a resin spot on one side now and then (wet, or dry once tapped). */
+  RubberLog: 168,
+  RubberLeaves: 169,
+  RubberSapling: 170,
+  /** The industry's machines: their casing, the generator, the machines that work items, the battery box. */
+  MachineCasing: 171,
+  Generator: 172,
+  ElectricFurnace: 173,
+  Macerator: 174,
+  Extractor: 175,
+  Compressor: 176,
+  BatteryBox: 177,
+  /** Cables carrying energy (EU) between them. */
+  TinCable: 178,
+  CopperCable: 179,
+  InsulatedCopperCable: 180,
 } as const;
 export type Block = number;
 
@@ -197,7 +215,9 @@ export type Shape =
   /** A hopper: a bowl with a spout down or to one side. */
   | "hopper"
   /** A comparator: a thin slab like a repeater's, with three torches. */
-  | "comparator";
+  | "comparator"
+  /** A cable: a thin rod through the middle and arms toward what it connects to, any of six ways. */
+  | "cable";
 
 /**
  * How a block's color depends on where it is, as Minecraft tints its gray grass, leaf and water textures:
@@ -378,6 +398,12 @@ const PISTON_TYPE: Property = { name: "type", values: ["normal", "sticky"] };
 const HOPPER_FACING: Property = { name: "facing", values: ["down", "north", "south", "west", "east"] };
 const ENABLED: Property = { name: "enabled", values: ["true", "false"] };
 const MODE: Property = { name: "mode", values: ["compare", "subtract"] };
+/** A rubber log's resin spot: none, full (wet), or tapped (dry). */
+const RESIN: Property = { name: "resin", values: ["none", "wet", "dry"] };
+/** A machine at work (its front lit). */
+const ACTIVE = bool("active");
+/** Which of six ways a cable connects (north, east, south, west, up, down). */
+const CONNECTIONS6: Property[] = ["north", "east", "south", "west", "up", "down"].map(bool);
 
 const AIR = { solid: false, opacity: "none", breakable: false } as const;
 const PLANT = { shape: "cross", opacity: "cutout", replaceable: false } as const;
@@ -518,6 +544,27 @@ export const BLOCKS: readonly BlockInfo[] = [
   block(Block.Observer, "observer", "observer", { top: "#5a5a5a", side: "#6a6a6a" }, { textures: { top: "observer_top", side: "observer_side", bottom: "observer_back", front: "observer_front" }, properties: [FACING6, POWERED] }),
   block(Block.Hopper, "hopper", "hopper", { top: "#4a4a4e" }, { shape: "hopper", textures: { top: "hopper_top", side: "hopper_outside", bottom: "hopper_outside" }, properties: [HOPPER_FACING, ENABLED] }),
   block(Block.Comparator, "comparator", "comparator", { top: "#a8a8a8" }, { shape: "comparator", textures: { top: "comparator", side: "smooth_stone", bottom: "smooth_stone" }, properties: [FACING, MODE, POWER] }),
+  block(Block.TinOre, "tin_ore", "tin ore", { top: "#9a9aa0" }),
+  block(Block.UraniumOre, "uranium_ore", "uranium ore", { top: "#6a8a5a" }),
+  block(Block.RubberLog, "rubber_log", "rubber log", { top: "#a08a5a", side: "#5a4a32" }, { textures: { top: "rubber_log_top", side: "rubber_log", front: "rubber_log" }, properties: [AXIS, RESIN, FACING] }),
+  block(Block.RubberLeaves, "rubber_leaves", "rubber leaves", { top: "#4a8a3a" }, { opacity: "cutout", lightFilter: 1, leafy: true, properties: [PERSISTENT] }),
+  block(Block.RubberSapling, "rubber_sapling", "rubber sapling", { top: "#4a8a3a" }, PLANT),
+  block(Block.MachineCasing, "machine_casing", "machine casing", { top: "#a0a4aa" }, { textures: { top: "machine_top", side: "machine_side", bottom: "machine_bottom" } }),
+  ...(
+    [
+      [Block.Generator, "generator", "generator"],
+      [Block.ElectricFurnace, "electric_furnace", "electric furnace"],
+      [Block.Macerator, "macerator", "macerator"],
+      [Block.Extractor, "extractor", "extractor"],
+      [Block.Compressor, "compressor", "compressor"],
+    ] as const
+  ).map(([id, name, label]) =>
+    block(id, name, label, { top: "#a0a4aa", side: "#8a8e94" }, { textures: { top: "machine_top", side: "machine_side", bottom: "machine_bottom", front: `${name}_front` }, properties: [FACING, ACTIVE] }),
+  ),
+  block(Block.BatteryBox, "battery_box", "battery box", { top: "#8a6a3a" }, { textures: { top: "battery_box_top", side: "battery_box_side", bottom: "battery_box_top", front: "battery_box_front" }, properties: [FACING6] }),
+  block(Block.TinCable, "tin_cable", "tin cable", { top: "#c8c8cc" }, { shape: "cable", textures: { all: "tin_cable" }, properties: CONNECTIONS6 }),
+  block(Block.CopperCable, "copper_cable", "copper cable", { top: "#d07a4a" }, { shape: "cable", textures: { all: "copper_cable" }, properties: CONNECTIONS6 }),
+  block(Block.InsulatedCopperCable, "insulated_copper_cable", "insulated copper cable", { top: "#2a2a2a" }, { shape: "cable", textures: { all: "insulated_copper_cable" }, properties: CONNECTIONS6 }),
 ];
 
 /** Whether a block is a crop (on farmland) or a stem. */
@@ -674,6 +721,10 @@ export const TILE_NAMES: readonly string[] = [
     "observer_back_on",
     "hopper_inside",
     "comparator_on",
+    // Rubber logs' resin spots, machines at work
+    "rubber_log_wet",
+    "rubber_log_dry",
+    ...["generator", "electric_furnace", "macerator", "extractor", "compressor"].map((m) => `${m}_front_on`),
   ]),
 ];
 const TILE_INDEX: ReadonlyMap<string, number> = new Map(TILE_NAMES.map((n, i) => [n, i]));
@@ -749,8 +800,14 @@ for (let state = 0; state < STATE_COUNT; state++) {
     }
     if (info.id === Block.Furnace && look === Face.Front && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("furnace_front_on");
     if (info.id === Block.RedstoneLamp && propertyOf(state, "lit") === "true") FACE_TILE[i] = tileIndex("redstone_lamp_on");
-    // Pistons and observers face six ways: a piston's sides point to its front, an observer's turn with it
-    if (info.properties.includes(FACING6) && isCube(state)) {
+    // Six-way facings: a piston's sides point to its front, an observer's turn with it; a battery box just
+    // shows its front (its output) that way
+    if (info.properties.includes(FACING6) && isCube(state) && info.id === Block.BatteryBox) {
+      if (d === FACING6_DIR[propertyOf(state, "facing")]) {
+        FACE_LOOK[i] = Face.Front;
+        FACE_TILE[i] = tileIndex(info.textures[Face.Front]);
+      }
+    } else if (info.properties.includes(FACING6) && isCube(state)) {
       const f = FACING6_DIR[propertyOf(state, "facing")];
       const up = f === Dir.Up ? Dir.PosZ : f === Dir.Down ? Dir.NegZ : Dir.Up;
       const observer = info.id === Block.Observer;
@@ -769,6 +826,18 @@ for (let state = 0; state < STATE_COUNT; state++) {
       FACE_LOOK[i] = d === f ? Face.Top : d === (f ^ 1) ? Face.Bottom : Face.Side;
       FACE_TILE[i] = tileIndex(tile);
       FACE_TURN[i] = d === f || d === (f ^ 1) ? (observer ? turnToward(d, toward) : 0) : turnToward(d, toward);
+    }
+    // A machine's front lights up while it works
+    if (look === Face.Front && info.properties.includes(ACTIVE) && propertyOf(state, "active") === "true") FACE_TILE[i] = tileIndex(`${info.textures[Face.Front]}_on`);
+    // A rubber log's resin spot, on the side it faces (upright logs only)
+    if (info.id === Block.RubberLog) {
+      if (d === front && axis !== "y") {
+        const along = d < 2 ? "x" : d < 4 ? "y" : "z";
+        FACE_LOOK[i] = along === axis ? Face.Top : Face.Side;
+        FACE_TILE[i] = tileIndex(info.textures[FACE_LOOK[i]]);
+      } else if (d === front && propertyOf(state, "resin") !== "none") {
+        FACE_TILE[i] = tileIndex(`rubber_log_${propertyOf(state, "resin")}`);
+      }
     }
     FACE_TINT[i] = info.id === Block.Grass ? (d === Dir.Up ? info.tint : Tint.None) : info.tint;
   }

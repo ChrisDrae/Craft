@@ -2,8 +2,19 @@ import { Block, DIR_X, DIR_Y, DIR_Z, Dir, FACING_DIR, FLUID, LEFT_OF, OPAQUE, RI
 import { canFallInto, delayOf, isSource } from "./fluids.js";
 import { STURDY, SUPPORT } from "./shapes.js";
 import { Redstone, isRedstone } from "./redstone.js";
+import { EnergyNet, isEnergyBlock } from "./energy.js";
 import type { WorldTicks } from "./ticks.js";
 import type { VoxelWorld } from "./world.js";
+
+/** A cable's connection properties and their directions. */
+const CABLE_SIDES: ReadonlyArray<readonly [string, number]> = [
+  ["north", Dir.NegZ],
+  ["east", Dir.PosX],
+  ["south", Dir.PosZ],
+  ["west", Dir.NegX],
+  ["up", Dir.Up],
+  ["down", Dir.Down],
+];
 
 /** Horizontal directions in the order of the connection properties: north, east, south, west. */
 const SIDES = [Dir.NegZ, Dir.PosX, Dir.PosZ, Dir.NegX];
@@ -157,6 +168,8 @@ function chestType(world: VoxelWorld, x: number, y: number, z: number, state: nu
 export class BlockUpdates {
   /** Redstone's reactions and delays (its pressure plates need to know who stands on them). */
   readonly redstone: Redstone;
+  /** Energy between machines: it finds its ways again when a cable or machine changes. */
+  readonly energy: EnergyNet;
   private readonly world: VoxelWorld;
   private readonly ticks: WorldTicks;
   private readonly queue: number[] = [];
@@ -166,6 +179,7 @@ export class BlockUpdates {
     this.world = world;
     this.ticks = ticks;
     this.redstone = new Redstone(world, ticks);
+    this.energy = new EnergyNet(world);
     for (const [block, behavior] of this.redstone.behaviors()) ticks.behave(block, behavior);
   }
 
@@ -180,7 +194,9 @@ export class BlockUpdates {
       // feel it, so they are updated too
       for (let i = 0; i < this.queue.length; i += 4) {
         const [cx, cy, cz, was] = [this.queue[i], this.queue[i + 1], this.queue[i + 2], this.queue[i + 3]];
-        if (was !== this.world.get(cx, cy, cz)) this.redstone.observe(cx, cy, cz);
+        const now = this.world.get(cx, cy, cz);
+        if (was !== now) this.redstone.observe(cx, cy, cz);
+        if ((was >= 0 && isEnergyBlock(was)) || isEnergyBlock(now)) this.energy.changed();
         this.update(cx, cy, cz, true);
         for (let d = 0; d < 6; d++) this.update(cx + DIR_X[d], cy + DIR_Y[d], cz + DIR_Z[d], false);
         if ((was >= 0 && isRedstone(was)) || isRedstone(this.world.get(cx, cy, cz))) {
@@ -222,6 +238,13 @@ export class BlockUpdates {
       const values: Record<string, string> = {};
       SIDES.forEach((d, i) => {
         values[SIDE_NAMES[i]] = String(connectsTo(block, w.get(x + DIR_X[d], y, z + DIR_Z[d]), d));
+      });
+      next = withProperties(state, values);
+    } else if (shape === "cable") {
+      // Joined to cables and machines around
+      const values: Record<string, string> = {};
+      CABLE_SIDES.forEach(([name, d]) => {
+        values[name] = String(isEnergyBlock(w.get(x + DIR_X[d], y + DIR_Y[d], z + DIR_Z[d])));
       });
       next = withProperties(state, values);
     } else if (shape === "stairs") {

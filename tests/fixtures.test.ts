@@ -206,6 +206,26 @@ describe("saves from earlier versions, pistons and hoppers", () => {
   });
 });
 
+describe("saves from earlier versions, the industry", () => {
+  it("opens a world saved in format 11: machines with their energy, slots and work, a battery's charge", async () => {
+    const data = readWorldFile(new Uint8Array(readFileSync(new URL("./fixtures/format-11.craftworld", import.meta.url))));
+    const store = await freshStore();
+    await store.writeWorld(data);
+    const { world, save } = await openWorld(store, (await store.getWorld("fixture-world-11"))!);
+    await save.loadNow(8, 8, 1);
+    expect([2, 4, 6, 8, 10].map((x) => stateName(world.get(x, 128, 2)))).toEqual([
+      "generator[facing=south,active=true]",
+      "tin_cable[north=false,east=true,south=false,west=true,up=false,down=false]",
+      "macerator[facing=north,active=true]",
+      "battery_box[facing=up]",
+      "rubber_log[axis=y,resin=wet,facing=east]",
+    ]);
+    expect(world.blockEntity(2, 128, 2)).toMatchObject({ kind: "machine", energy: 1234.5, burn: 150, burnTotal: 400, items: [{ item: itemByName("coal"), count: 7 }, null] });
+    expect(world.blockEntity(6, 128, 2)).toMatchObject({ energy: 300, progress: 120, items: [{ item: itemByName("raw_tin"), count: 5 }, null, { item: itemByName("tin_dust"), count: 4 }] });
+    expect(world.blockEntity(8, 128, 2)).toMatchObject({ energy: 20000, items: [{ item: itemByName("battery"), count: 1, damage: 5000 }, null] });
+  });
+});
+
 describe("settings", () => {
   it("come back as saved, with defaults for anything missing, damaged or out of range", () => {
     const kept = new Map<string, string>();

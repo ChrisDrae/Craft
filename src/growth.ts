@@ -90,12 +90,13 @@ const grows = (w: VoxelWorld, x: number, y: number, z: number, r: () => number):
 
 /** A sapling becomes a tree where there is room: an oak, now and then a big one. */
 export function growSapling(w: VoxelWorld, x: number, y: number, z: number, r: () => number): boolean {
+  const rubber = STATE_BLOCK[w.get(x, y, z)] === Block.RubberSapling;
   for (let k = 1; k <= 5; k++) {
     const s = w.get(x, y + k, z);
     if (s !== Block.Air && !BLOCKS[STATE_BLOCK[s]].leafy) return false;
   }
   w.set(x, y, z, Block.Air);
-  growTree(new WorldWriter(w), r() < 0.1 ? "big_oak" : "oak", x, y, z, Math.floor(r() * 4294967296));
+  growTree(new WorldWriter(w), rubber ? "rubber" : r() < 0.1 ? "big_oak" : "oak", x, y, z, Math.floor(r() * 4294967296));
   return true;
 }
 
@@ -145,6 +146,12 @@ export function growthBehaviors(options: GrowthOptions = {}): Map<number, TickBe
   const sapling: TickBehavior = {
     random(w, x, y, z) {
       if (lightAt(w, x, y + 1, z) >= 9 && r() < 1 / 7) growSapling(w, x, y, z, r);
+    },
+  };
+  // A tapped resin spot fills again, now and then
+  const resin: TickBehavior = {
+    random(w, x, y, z, state) {
+      if (propertyOf(state, "resin") === "dry" && r() < 1 / 7) w.set(x, y, z, withProperties(state, { resin: "wet" }));
     },
   };
   const tall: TickBehavior = {
@@ -208,6 +215,8 @@ export function growthBehaviors(options: GrowthOptions = {}): Map<number, TickBe
   const out = new Map<number, TickBehavior>([
     [Block.Grass, grass],
     [Block.OakSapling, sapling],
+    [Block.RubberSapling, sapling],
+    [Block.RubberLog, resin],
     [Block.Cactus, tall],
     [Block.SugarCane, tall],
     [Block.Wheat, crop],
@@ -228,7 +237,7 @@ const isCropBlock = (b: number): boolean => b === Block.Wheat || b === Block.Car
 /** Whether bone meal does something to a block: a crop or stem still growing, a sapling, grass. */
 export function canFertilize(state: number): boolean {
   const b = STATE_BLOCK[state];
-  if (b === Block.OakSapling || b === Block.Grass) return true;
+  if (b === Block.OakSapling || b === Block.RubberSapling || b === Block.Grass) return true;
   return isCropBlock(b) && b !== Block.AttachedPumpkinStem && b !== Block.AttachedMelonStem && Number(propertyOf(state, "age")) < 7;
 }
 
@@ -246,7 +255,7 @@ export function fertilize(w: VoxelWorld, x: number, y: number, z: number, r: () 
     w.set(x, y, z, withProperties(state, { age: String(Math.min(7, age + 2 + Math.floor(r() * 4))) }));
     return true;
   }
-  if (b === Block.OakSapling) {
+  if (b === Block.OakSapling || b === Block.RubberSapling) {
     if (r() < 0.45) growSapling(w, x, y, z, r);
     return true;
   }

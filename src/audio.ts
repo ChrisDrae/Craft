@@ -1,4 +1,5 @@
 import { BLOCKS, Block, FLUID, SHAPE, isBed, type Block as BlockId } from "./blocks.js";
+import { MACHINES } from "./machines.js";
 import type { SoundKind } from "./settings.js";
 
 /** The kinds of sound with a volume of their own (besides "master"). */
@@ -15,7 +16,9 @@ export function soundGroup(block: BlockId): SoundGroup | null {
   if (n.endsWith("_wool") || n.endsWith("_carpet") || isBed(block)) return "wool";
   if (n.startsWith("glass") || block === Block.Ice || block === Block.Glowstone || block === Block.RedstoneLamp) return "glass";
   if (block === Block.Ladder) return "ladder";
-  if (block === Block.Hopper) return "metal";
+  if (block === Block.Hopper || block === Block.MachineCasing || (MACHINES.has(block) && block !== Block.BatteryBox)) return "metal";
+  if (block === Block.TinCable || block === Block.CopperCable || block === Block.InsulatedCopperCable) return "wool";
+  if (block === Block.BatteryBox) return "wood";
   if (block === Block.Sand || block === Block.Sandstone) return "sand";
   if (block === Block.Snow || block === Block.SnowBlock) return "snow";
   if (block === Block.Dirt || block === Block.Gravel || block === Block.Clay || block === Block.Farmland) return "gravel";
